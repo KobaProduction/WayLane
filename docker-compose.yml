@@ -1,0 +1,9 @@
+services:
+  waylane:
+    build: .
+    image: waylane-backend:dev
+    restart: always
+    env_file: .env
+    network_mode: host
+    volumes:
+      - /var/lib/waylane:/var/lib/pasarguard
