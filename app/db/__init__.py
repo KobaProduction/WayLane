@@ -12,3 +12,6 @@ __all__ = [
     "User",
     "get_db",
 ]
+
+# Register TLS preset tables in the central SQLAlchemy metadata.
+from app.db import tls as _tls_tables  # noqa: F401, E402

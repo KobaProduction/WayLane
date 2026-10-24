@@ -376,8 +376,18 @@ class NodeOperation(BaseOperation):
             batch_wireguard_users = (
                 backend_type == service.BackendType.WIREGUARD and len(users) >= WIREGUARD_BATCHED_START_THRESHOLD
             )
+            core_payload = core.to_str()
+            if core.type == CoreType.xray:
+                from app.operation.tls_presets import hydrate_tls_config
+
+                # Resolve encrypted presets exclusively at the node-facing RPC
+                # boundary. Never save private key material in core_configs.
+                async with GetDB() as tls_db:
+                    core_payload = await hydrate_tls_config(
+                        tls_db, core_payload, db_node.id, db_node.core_config_id or 1
+                    )
             start_kwargs = {
-                "config": core.to_str(),
+                "config": core_payload,
                 "backend_type": backend_type,
                 # Starting WireGuard with thousands of peers makes the lifecycle RPC
                 # exceed its short timeout. Bring up the interface first, then apply

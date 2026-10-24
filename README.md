@@ -64,3 +64,24 @@ by Git. It refuses repeated
 bootstrap or overwriting existing credentials. Sign in through
 `POST /api/admin/token` with the locally stored username and password.
 For normal managed environments use the existing one-time setup-key flow.
+
+
+## TLS certificate presets (feature migration `waylane_0002`)
+
+The initial schema remains one `waylane_0001` baseline. New features have
+incremental forward migrations; `waylane_0002` adds TLS presets and per-node
+inbound bindings. Apply with `alembic upgrade head`.
+
+Configure a stable **Fernet encryption key** as `WAYLANE_TLS_SECRET_KEY`
+before adding presets. Protect and back up this secret separately from the DB:
+losing it makes stored TLS private keys undecryptable. Only the public
+certificate and metadata are returned by the admin APIs. A webhook token can
+be generated per preset (shown once); its SHA-256 digest is stored in DB, and
+the token is accepted solely for that preset's certificate rotation endpoint.
+
+API: `/api/tls-presets` and `/api/tls-presets/targets`. Presets bind to an
+existing TLS-enabled Xray inbound on an explicitly selected node. The private
+key is decrypted into the ephemeral node-facing `Start` request, never the
+persistent core JSON. Certificate rotation force-applies only to bound nodes;
+per-node outcomes are reported. External ACME/ACM provisioning is not yet part
+of this feature.
