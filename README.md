@@ -33,3 +33,18 @@ before attempting a push. CI runs the same repository-specific gate.
 deployment compatibility, or complete the eventual Vue/HA migration.
 
 Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft license applicable to derived code. See `LICENSING.md` and `LICENSE.UPSTREAM`.
+
+
+## Database baseline (fresh databases only)
+
+WayLane has a single initial Alembic migration,
+`app/db/migrations/versions/waylane_0001_waylane_initial_schema.py`,
+plus a frozen non-secret `bootstrap_seed.json` fixture. It creates the current
+schema and seeds the initial roles, settings, core configuration, subscription
+templates and a **new random** JWT signing key.
+
+Validated using PostgreSQL 15 (`upgrade → downgrade → upgrade`, plus
+`alembic check`) and a fresh SQLite database. **Breaking change:** existing
+databases stamped with historic PasarGuard revisions cannot use a normal
+`alembic upgrade head`; migrate or explicitly reset those databases under a
+separate reviewed plan. Never reset Intens production to adopt this baseline.

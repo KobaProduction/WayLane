@@ -1,0 +1,639 @@
+{
+  "admin_roles": [
+    {
+      "access": {
+        "allowed_group_ids": null,
+        "allowed_template_ids": null,
+        "require_template": false
+      },
+      "disabled_when_limited": false,
+      "disconnect_users_when_disabled": true,
+      "disconnect_users_when_limited": true,
+      "features": {
+        "can_use_next_plan": true,
+        "can_use_reset_strategy": true
+      },
+      "hwid": {
+        "enabled": true,
+        "fallback_limit": null,
+        "forced": false,
+        "max_limit": null,
+        "min_limit": null,
+        "mode": "use_global"
+      },
+      "id": 1,
+      "is_owner": true,
+      "limits": {
+        "data_limit_max": null,
+        "data_limit_min": null,
+        "expire_max": null,
+        "expire_min": null,
+        "max_hwid_per_user": null,
+        "max_users": null,
+        "min_hwid_per_user": null
+      },
+      "name": "owner",
+      "permissions": {
+        "admin_roles": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "admins": {
+          "create": true,
+          "delete": true,
+          "passkeys": true,
+          "read": true,
+          "read_simple": true,
+          "reset_usage": true,
+          "update": true
+        },
+        "api_keys": {
+          "create": true,
+          "delete": {
+            "scope": 2
+          },
+          "read": {
+            "scope": 2
+          },
+          "read_simple": {
+            "scope": 2
+          },
+          "update": {
+            "scope": 2
+          }
+        },
+        "client_templates": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "cores": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "groups": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "hosts": {
+          "create": true,
+          "read": true,
+          "update": true
+        },
+        "hwids": {
+          "delete": true,
+          "read": true
+        },
+        "nodes": {
+          "create": true,
+          "delete": true,
+          "logs": true,
+          "read": true,
+          "read_simple": true,
+          "reconnect": true,
+          "stats": true,
+          "update": true,
+          "update_core": true
+        },
+        "settings": {
+          "read": true,
+          "read_general": true,
+          "update": true
+        },
+        "system": {
+          "read": true
+        },
+        "templates": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "users": {
+          "activate_next_plan": {
+            "scope": 2
+          },
+          "create": true,
+          "delete": {
+            "scope": 2
+          },
+          "read": {
+            "scope": 2
+          },
+          "read_simple": {
+            "scope": 2
+          },
+          "reset_usage": {
+            "scope": 2
+          },
+          "revoke_sub": {
+            "scope": 2
+          },
+          "set_owner": true,
+          "update": {
+            "scope": 2
+          }
+        }
+      }
+    },
+    {
+      "access": {
+        "allowed_group_ids": null,
+        "allowed_template_ids": null,
+        "require_template": false
+      },
+      "disabled_when_limited": false,
+      "disconnect_users_when_disabled": true,
+      "disconnect_users_when_limited": true,
+      "features": {
+        "can_use_next_plan": true,
+        "can_use_reset_strategy": true
+      },
+      "hwid": {
+        "enabled": true,
+        "fallback_limit": null,
+        "forced": false,
+        "max_limit": null,
+        "min_limit": null,
+        "mode": "use_global"
+      },
+      "id": 2,
+      "is_owner": false,
+      "limits": {
+        "data_limit_max": null,
+        "data_limit_min": null,
+        "expire_max": null,
+        "expire_min": null,
+        "max_hwid_per_user": null,
+        "max_users": null,
+        "min_hwid_per_user": null
+      },
+      "name": "administrator",
+      "permissions": {
+        "admin_roles": {
+          "read": true,
+          "read_simple": true
+        },
+        "admins": {
+          "create": true,
+          "delete": true,
+          "passkeys": true,
+          "read": true,
+          "read_simple": true,
+          "reset_usage": true,
+          "update": true
+        },
+        "api_keys": {
+          "create": true,
+          "delete": {
+            "scope": 2
+          },
+          "read": {
+            "scope": 2
+          },
+          "read_simple": {
+            "scope": 2
+          },
+          "update": {
+            "scope": 2
+          }
+        },
+        "client_templates": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "cores": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "groups": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "hosts": {
+          "create": true,
+          "read": true,
+          "update": true
+        },
+        "hwids": {
+          "delete": true,
+          "read": true
+        },
+        "nodes": {
+          "create": true,
+          "delete": true,
+          "logs": true,
+          "read": true,
+          "read_simple": true,
+          "reconnect": true,
+          "stats": true,
+          "update": true,
+          "update_core": true
+        },
+        "settings": {
+          "read": true,
+          "read_general": true,
+          "update": true
+        },
+        "system": {
+          "read": true
+        },
+        "templates": {
+          "create": true,
+          "delete": true,
+          "read": true,
+          "read_simple": true,
+          "update": true
+        },
+        "users": {
+          "activate_next_plan": {
+            "scope": 2
+          },
+          "create": true,
+          "delete": {
+            "scope": 2
+          },
+          "read": {
+            "scope": 2
+          },
+          "read_simple": {
+            "scope": 2
+          },
+          "reset_usage": {
+            "scope": 2
+          },
+          "revoke_sub": {
+            "scope": 2
+          },
+          "set_owner": true,
+          "update": {
+            "scope": 2
+          }
+        }
+      }
+    },
+    {
+      "access": {
+        "allowed_group_ids": null,
+        "allowed_template_ids": null,
+        "require_template": false
+      },
+      "disabled_when_limited": false,
+      "disconnect_users_when_disabled": true,
+      "disconnect_users_when_limited": true,
+      "features": {
+        "can_use_next_plan": true,
+        "can_use_reset_strategy": true
+      },
+      "hwid": {
+        "enabled": true,
+        "fallback_limit": null,
+        "forced": false,
+        "max_limit": null,
+        "min_limit": null,
+        "mode": "use_global"
+      },
+      "id": 3,
+      "is_owner": false,
+      "limits": {
+        "data_limit_max": null,
+        "data_limit_min": null,
+        "expire_max": null,
+        "expire_min": null,
+        "max_hwid_per_user": null,
+        "max_users": null,
+        "min_hwid_per_user": null
+      },
+      "name": "operator",
+      "permissions": {
+        "api_keys": {
+          "delete": {
+            "scope": 1
+          },
+          "read": {
+            "scope": 1
+          },
+          "read_simple": {
+            "scope": 1
+          },
+          "update": {
+            "scope": 1
+          }
+        },
+        "groups": {
+          "create": false,
+          "delete": false,
+          "read": false,
+          "read_simple": true,
+          "update": false
+        },
+        "hwids": {
+          "delete": true,
+          "read": true
+        },
+        "settings": {
+          "read": false,
+          "read_general": true,
+          "update": false
+        },
+        "system": {
+          "read": true
+        },
+        "templates": {
+          "create": false,
+          "delete": false,
+          "read": true,
+          "read_simple": true,
+          "update": false
+        },
+        "users": {
+          "activate_next_plan": {
+            "scope": 1
+          },
+          "create": true,
+          "delete": {
+            "scope": 1
+          },
+          "read": {
+            "scope": 1
+          },
+          "read_simple": {
+            "scope": 1
+          },
+          "reset_usage": {
+            "scope": 1
+          },
+          "revoke_sub": {
+            "scope": 1
+          },
+          "set_owner": null,
+          "update": {
+            "scope": 1
+          }
+        }
+      }
+    }
+  ],
+  "client_templates": [
+    {
+      "content": "mode: rule\nmixed-port: 7890\nipv6: true\n\ntun:\n  enable: true\n  stack: mixed\n  dns-hijack:\n    - \"any:53\"\n  auto-route: true\n  auto-detect-interface: true\n  strict-route: true\n\ndns:\n  enable: true\n  listen: :1053\n  ipv6: true\n  nameserver:\n    - 'https://1.1.1.1/dns-query#PROXY'\n  proxy-server-nameserver:\n    - '8.8.8.8'\n    - '1.1.1.1'\n\nsniffer:\n  enable: true\n  override-destination: true\n  sniff:\n    HTTP:\n      ports: [80, 8080-8880]\n    TLS:\n      ports: [443, 8443]\n    QUIC:\n      ports: [443, 8443]\n\n{{ conf | except(\"proxy-groups\", \"port\", \"mode\", \"rules\") | yaml }}\n\nproxy-groups:\n- name: 'PROXY'\n  type: 'select'\n  proxies:\n  - 'Fastest'\n  {{ proxy_remarks | yaml | indent(2) }}\n\n- name: 'Fastest'\n  type: 'url-test'\n  proxies:\n  {{ proxy_remarks | yaml | indent(2) }}\n\nrules:\n  - MATCH,PROXY",
+      "id": 1,
+      "is_default": true,
+      "is_system": true,
+      "name": "Default Clash Subscription",
+      "template_type": "clash_subscription"
+    },
+    {
+      "content": "{\n  \"log\": {\n    \"access\": \"\",\n    \"error\": \"\",\n    \"loglevel\": \"warning\"\n  },\n \"policy\": {\n    \"system\": {\n        \"statsOutboundDownlink\": true,\n        \"statsOutboundUplink\": true\n    },\n\t\"levels\": {\n     \"8\": {\n       \"connIdle\": 300,\n       \"downlinkOnly\": 1,\n       \"handshake\": 4,\n       \"uplinkOnly\": 1\n     }\n   }\n   },\n  \"inbounds\": [\n    {\n      \"tag\": \"socks\",\n      \"port\": 10808,\n      \"listen\": \"127.0.0.1\",\n      \"protocol\": \"socks\",\n      \"sniffing\": {\n        \"enabled\": true,\n        \"destOverride\": [\n          \"http\",\n          \"tls\"\n        ],\n        \"routeOnly\": false\n      },\n      \"settings\": {\n        \"auth\": \"noauth\",\n        \"udp\": true,\n        \"allowTransparent\": false\n      }\n    },\n    {\n      \"tag\": \"http\",\n      \"port\": 10809,\n      \"listen\": \"127.0.0.1\",\n      \"protocol\": \"http\",\n      \"sniffing\": {\n        \"enabled\": true,\n        \"destOverride\": [\n          \"http\",\n          \"tls\"\n        ],\n        \"routeOnly\": false\n      },\n      \"settings\": {\n        \"auth\": \"noauth\",\n        \"udp\": true,\n        \"allowTransparent\": false\n      }\n    }\n  ],\n  \"outbounds\": [\n      {\n        \"protocol\": \"freedom\",\n        \"tag\": \"DIRECT\"\n      },\n      {\n        \"protocol\": \"blackhole\",\n        \"tag\": \"BLOCK\"\n      }\n    ],\n  \"dns\": {\n    \"servers\": [\n      \"1.1.1.1\",\n      \"8.8.8.8\"\n    ]\n  },\n  \"routing\": {\n    \"domainStrategy\": \"AsIs\",\n    \"rules\": []\n  }\n}",
+      "id": 2,
+      "is_default": true,
+      "is_system": true,
+      "name": "Default Xray Subscription",
+      "template_type": "xray_subscription"
+    },
+    {
+      "content": "{\n  \"log\": {\n    \"level\": \"warn\",\n    \"timestamp\": false\n  },\n  \"dns\": {\n    \"servers\": [\n      {\n        \"type\": \"udp\",\n        \"tag\": \"dns-remote\",\n        \"server\": \"1.1.1.2\",\n        \"detour\": \"proxy\"\n      },\n      {\n        \"type\": \"local\",\n        \"tag\": \"dns-local\"\n      }\n    ],\n    \"final\": \"dns-remote\"\n  },\n  \"inbounds\": [\n    {\n      \"type\": \"tun\",\n      \"tag\": \"tun-in\",\n      \"interface_name\": \"sing-tun\",\n      \"address\": [\n        \"172.19.0.1/30\",\n        \"fdfe:dcba:9876::1/126\"\n      ],\n      \"auto_route\": true,\n      \"route_exclude_address\": [\n        \"192.168.0.0/16\",\n        \"10.0.0.0/8\",\n        \"169.254.0.0/16\",\n        \"172.16.0.0/12\",\n        \"fe80::/10\",\n        \"fc00::/7\"\n      ]\n    }\n  ],\n  \"outbounds\": [\n    {\n      \"type\": \"selector\",\n      \"tag\": \"proxy\",\n      \"outbounds\": null,\n      \"interrupt_exist_connections\": true\n    },\n    {\n      \"type\": \"urltest\",\n      \"tag\": \"Best Latency\",\n      \"outbounds\": null\n    },\n    {\n      \"type\": \"direct\",\n      \"tag\": \"direct\"\n    }\n  ],\n  \"route\": {\n    \"rules\": [\n      {\n        \"inbound\": \"tun-in\",\n        \"action\": \"sniff\"\n      },\n      {\n        \"protocol\": \"dns\",\n        \"action\": \"hijack-dns\"\n      }\n    ],\n    \"final\": \"proxy\",\n    \"auto_detect_interface\": true,\n    \"override_android_vpn\": true\n  },\n  \"experimental\": {\n    \"cache_file\": {\n      \"enabled\": true,\n      \"store_dns\": true\n    }\n  }\n}",
+      "id": 3,
+      "is_default": true,
+      "is_system": true,
+      "name": "Default Singbox Subscription",
+      "template_type": "singbox_subscription"
+    },
+    {
+      "content": "{\n  \"list\":[\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36 PageSpeedPlus/1.0.0\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 11.6; rv:92.0) Gecko/20100101 Firefox/92.0\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.4.14 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:126.0) Gecko/20100101 Firefox/126.0\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.4.16 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.5.3 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.5.12 Chrome/120.0.6099.283 Electron/28.2.3 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.4.16 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.129 Safari/537.36\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.4.13 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15\",\n    \"Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 16_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.3 Safari/605.1.15\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.4.13 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6.1 Safari/605.1.15\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.1 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.5.12 Chrome/120.0.6099.283 Electron/28.2.3 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.2 Safari/605.1.15\",\n    \"Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.2 Mobile/15E148 Safari/604.1\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:124.0) Gecko/20100101 Firefox/124.0\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.5.3 Chrome/114.0.5735.289 Electron/25.8.1 Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.67 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Mobile Safari/537.36\",\n    \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\",\n    \"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/24.0 Chrome/117.0.0.0 Mobile Safari/537.36\"\n  ]\n}",
+      "id": 4,
+      "is_default": true,
+      "is_system": true,
+      "name": "Default User-Agent Template",
+      "template_type": "user_agent"
+    },
+    {
+      "content": "{\n    \"list\": [\n        \"grpc-dotnet/2.41.0 (.NET 6.0.1; CLR 6.0.1; net6.0; windows; x64)\",\n        \"grpc-dotnet/2.41.0 (.NET 6.0.0-preview.7.21377.19; CLR 6.0.0; net6.0; osx; x64)\",\n        \"grpc-dotnet/2.41.0 (Mono 6.12.0.140; CLR 4.0.30319; netstandard2.0; osx; x64)\",\n        \"grpc-dotnet/2.41.0 (.NET 6.0.0-rc.1.21380.1; CLR 6.0.0; net6.0; linux; arm64)\",\n        \"grpc-dotnet/2.41.0 (.NET 5.0.8; CLR 5.0.8; net5.0; linux; arm64)\",\n        \"grpc-dotnet/2.41.0 (.NET Core; CLR 3.1.4; netstandard2.1; linux; arm64)\",\n        \"grpc-dotnet/2.41.0 (.NET Framework; CLR 4.0.30319.42000; netstandard2.0; windows; x86)\",\n        \"grpc-dotnet/2.41.0 (.NET 6.0.0-rc.1.21380.1; CLR 6.0.0; net6.0; windows; x64)\",\n        \"grpc-python-asyncio/1.62.1 grpc-c/39.0.0 (linux; chttp2)\",\n        \"grpc-go/1.58.1\",\n        \"grpc-java-okhttp/1.55.1\",\n        \"grpc-node/1.7.1 grpc-c/1.7.1 (osx; chttp2)\",\n        \"grpc-node/1.24.2 grpc-c/8.0.0 (linux; chttp2; ganges)\",\n        \"grpc-c++/1.16.0 grpc-c/6.0.0 (linux; nghttp2; hw)\",\n        \"grpc-node/1.19.0 grpc-c/7.0.0 (linux; chttp2; gold)\",\n        \"grpc-ruby/1.62.0 grpc-c/39.0.0 (osx; chttp2)]\"\n    ]\n}",
+      "id": 5,
+      "is_default": true,
+      "is_system": true,
+      "name": "Default gRPC User-Agent Template",
+      "template_type": "grpc_user_agent"
+    }
+  ],
+  "core_configs": [
+    {
+      "config": {
+        "inbounds": [
+          {
+            "listen": "0.0.0.0",
+            "port": 1080,
+            "protocol": "shadowsocks",
+            "settings": {
+              "clients": [],
+              "network": "tcp,udp"
+            },
+            "tag": "Shadowsocks TCP"
+          }
+        ],
+        "log": {
+          "loglevel": "warning"
+        },
+        "outbounds": [
+          {
+            "protocol": "freedom",
+            "tag": "DIRECT"
+          },
+          {
+            "protocol": "blackhole",
+            "tag": "BLOCK"
+          }
+        ],
+        "policy": {
+          "levels": {
+            "0": {
+              "statsUserOnline": true
+            }
+          }
+        },
+        "routing": {
+          "rules": [
+            {
+              "ip": [
+                "geoip:private"
+              ],
+              "outboundTag": "BLOCK",
+              "type": "field"
+            }
+          ]
+        }
+      },
+      "exclude_inbound_tags": "",
+      "fallbacks_inbound_tags": "",
+      "id": 1,
+      "name": "Default Core Config",
+      "sort_order": 1,
+      "type": "xray"
+    }
+  ],
+  "inbounds": [
+    {
+      "id": 1,
+      "tag": "Shadowsocks TCP"
+    }
+  ],
+  "settings": [
+    {
+      "general": {
+        "default_flow": "",
+        "default_method": "chacha20-ietf-poly1305"
+      },
+      "hwid": {},
+      "id": 1,
+      "notification_enable": {
+        "admin": {
+          "create": true,
+          "delete": true,
+          "login": true,
+          "modify": true,
+          "reset_usage": true
+        },
+        "core": {
+          "create": true,
+          "delete": true,
+          "modify": true
+        },
+        "days_left": true,
+        "group": {
+          "create": true,
+          "delete": true,
+          "modify": true
+        },
+        "host": {
+          "create": true,
+          "delete": true,
+          "modify": true,
+          "modify_hosts": true
+        },
+        "node": {
+          "connect": true,
+          "create": true,
+          "delete": true,
+          "error": true,
+          "modify": true
+        },
+        "percentage_reached": true,
+        "user": {
+          "create": true,
+          "data_reset_by_next": true,
+          "delete": true,
+          "modify": true,
+          "reset_data_usage": true,
+          "status_change": true,
+          "subscription_revoked": true
+        },
+        "user_template": {
+          "create": true,
+          "delete": true,
+          "modify": true
+        }
+      },
+      "notification_settings": {
+        "discord_webhook_url": null,
+        "max_retries": 3,
+        "notify_discord": false,
+        "notify_telegram": false,
+        "proxy_url": null,
+        "telegram_api_token": null,
+        "telegram_chat_id": null,
+        "telegram_topic_id": null
+      },
+      "subscription": {
+        "host_status_filter": true,
+        "manual_sub_request": {
+          "clash": true,
+          "clash_meta": true,
+          "links": true,
+          "links_base64": true,
+          "outline": true,
+          "sing_box": true,
+          "xray": true
+        },
+        "profile_title": "Subscription",
+        "randomize_order": false,
+        "rules": [
+          {
+            "pattern": "^(?:FlClashX?|Flowvy|[Cc]lash(?:-(?:[Vv]erge|nyanpasu)|X [Mm]eta|-?[Mm]eta)|[Kk]oala-[Cc]lash|[Mm](?:urge|ihomo)|prizrak-box|clash\\.meta)",
+            "target": "clash_meta"
+          },
+          {
+            "pattern": "^([Cc]lash|[Ss]tash)",
+            "target": "clash"
+          },
+          {
+            "pattern": "^(SFA|SFI|SFM|SFT|[Kk]aring|[Hh]iddify[Nn]ext)|.*[Ss]ing[\\-b]?ox.*",
+            "target": "sing_box"
+          },
+          {
+            "pattern": "^(SS|SSR|SSD|SSS|Outline|Shadowsocks|SSconf)",
+            "target": "outline"
+          },
+          {
+            "pattern": "^[Ii]n[Hh]ive",
+            "target": "xray"
+          },
+          {
+            "pattern": "^.*",
+            "target": "links_base64"
+          }
+        ],
+        "support_url": "https://t.me/",
+        "update_interval": "12",
+        "url_prefix": ""
+      },
+      "telegram": {
+        "enable": false,
+        "proxy_url": null,
+        "token": null,
+        "webhook_secret": null,
+        "webhook_url": null
+      },
+      "webhook": {
+        "days_left": [
+          3
+        ],
+        "enable": false,
+        "proxy_url": null,
+        "recurrent": 3,
+        "timeout": 180,
+        "usage_percent": [
+          80
+        ],
+        "webhooks": []
+      }
+    }
+  ],
+  "system": [
+    {
+      "downlink": 0,
+      "id": 1,
+      "uplink": 0
+    }
+  ]
+}

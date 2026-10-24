@@ -7,4 +7,30 @@ uv run --no-project --python 3.14 python -m compileall -q app cli dashboard/__in
 test -f LICENSE
 test -f app/templates/subscription/index.html
 test -f dashboard/__init__.py
+# Fail closed when legacy migrations sneak back into a fresh WayLane checkout.
+python - <<'PYTHON'
+from pathlib import Path
+import ast
+import json
+
+directory = Path("app/db/migrations/versions")
+versions = sorted(directory.glob("*.py"))
+assert len(versions) == 1, f"WayLane requires exactly one initial migration, found {len(versions)}"
+tree = ast.parse(versions[0].read_text())
+revisions = {
+    node.targets[0].id: ast.literal_eval(node.value)
+    for node in tree.body
+    if isinstance(node, ast.Assign)
+    and len(node.targets) == 1
+    and isinstance(node.targets[0], ast.Name)
+    and node.targets[0].id in {"revision", "down_revision"}
+}
+assert revisions == {"revision": "waylane_0001", "down_revision": None}
+defaults = json.loads(Path("app/db/migrations/bootstrap_seed.json").read_text())
+assert len(defaults["admin_roles"]) == 3
+assert {role["id"] for role in defaults["admin_roles"]} == {1, 2, 3}
+assert len(defaults["client_templates"]) == 5
+assert isinstance(defaults["settings"][0]["notification_settings"], dict)
+assert "jwt" not in defaults and "admins" not in defaults
+PYTHON
 echo "WayLane backend bootstrap verification passed (syntax/lock/assets)."
