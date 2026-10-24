@@ -48,3 +48,19 @@ Validated using PostgreSQL 15 (`upgrade → downgrade → upgrade`, plus
 databases stamped with historic PasarGuard revisions cannot use a normal
 `alembic upgrade head`; migrate or explicitly reset those databases under a
 separate reviewed plan. Never reset Intens production to adopt this baseline.
+
+
+## First local development owner (CLI)
+
+After starting the isolated development PostgreSQL on `127.0.0.1:15432`
+and migrating `waylane_dev`, initialize the **first** administrator using
+`python waylane-cli.py init-owner` with the same local environment as the API.
+The command reuses the application's regular admin validation and password
+hashing, requires an empty admin table and the seeded owner role, and refuses
+non-local or non-development databases. It creates a high-entropy password
+and writes it to `.runtime/dev-owner-credentials.json` with mode 0600,
+without printing credentials. The entire `.runtime/` directory is ignored
+by Git. It refuses repeated
+bootstrap or overwriting existing credentials. Sign in through
+`POST /api/admin/token` with the locally stored username and password.
+For normal managed environments use the existing one-time setup-key flow.

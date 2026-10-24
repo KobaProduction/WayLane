@@ -12,3 +12,6 @@ data/
 node_modules/
 *.pem
 *.key
+
+# Private local development data and credentials
+.runtime/
