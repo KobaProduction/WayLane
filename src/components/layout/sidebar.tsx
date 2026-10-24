@@ -92,6 +92,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             matchPrefix: true,
           },
           {
+            title: 'TLS-сертификаты',
+            url: '/tls-presets',
+            icon: Lock,
+          },
+          {
             title: 'nodes.wireguard.title',
             url: '/nodes/wireguard',
             icon: Network,

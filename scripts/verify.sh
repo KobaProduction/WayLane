@@ -15,10 +15,25 @@ if [[ "${WAYLANE_LOW_MEMORY_TYPECHECK:-0}" == "1" ]]; then
   sed -i '/"skipLibCheck": true,/a\    "types": ["node", "bun"],' tsconfig.app.native.tmp.json
   command -v bun >/dev/null
   export GOMAXPROCS=1
-  for cfg in tsconfig.app.native.tmp.json tsconfig.node.native.tmp.json; do
-    bun x --package @typescript/native-preview@7.0.0-dev.20260707.2 \
-      tsgo --singleThreaded --checkers 1 -p "$cfg" --noEmit
-  done
+  # Prefer an existing pinned native tsgo executable where the container
+  # cannot afford the extra resident memory of the Bun package runner.
+  # This still executes the identical official compiler and all checks.
+  if [[ -n "${WAYLANE_TSGO_BINARY:-}" ]]; then
+    test -x "$WAYLANE_TSGO_BINARY"
+    version="$("$WAYLANE_TSGO_BINARY" --version)"
+    if [[ "$version" != "Version 7.0.0-dev.20260707.2" ]]; then
+      echo "Unexpected native TypeScript version: $version" >&2
+      exit 2
+    fi
+    for cfg in tsconfig.app.native.tmp.json tsconfig.node.native.tmp.json; do
+      "$WAYLANE_TSGO_BINARY" --singleThreaded --checkers 1 -p "$cfg" --noEmit
+    done
+  else
+    for cfg in tsconfig.app.native.tmp.json tsconfig.node.native.tmp.json; do
+      bun x --package @typescript/native-preview@7.0.0-dev.20260707.2 \
+        tsgo --singleThreaded --checkers 1 -p "$cfg" --noEmit
+    done
+  fi
 else
   bun run typecheck
 fi
