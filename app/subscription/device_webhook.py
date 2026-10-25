@@ -2,7 +2,8 @@
 
 Record events in the *same transaction* as HWID modifications. Request handling
 does not wait for arbitrary third-party callbacks. Undelivered events persist
-until an operator runs the bounded retry API/CLI; never poll automatically.
+until the configured scheduler role retries due events. One-shot manual
+recovery stays available to operators without running monitoring here.
 """
 import asyncio
 import hashlib
@@ -24,6 +25,36 @@ from app.db.subscription_firewall import subscription_device_events
 from app.subscription.firewall import load_config
 
 logger = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 10
+RETRY_BASE_SECONDS = 30
+RETRY_MAX_SECONDS = 3600
+RETRY_BATCH_LIMIT = 25
+RETRY_CONCURRENCY = 4
+
+
+def retry_delay_seconds(attempts: int) -> int:
+    """Deterministic exponential backoff; first failure waits 30 seconds."""
+    return min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * (2 ** max(0, attempts - 1)))
+
+
+def due_event_filter(now: datetime):
+    """Return unclaimed, retry-eligible events; crash leases can expire."""
+    return or_(
+        subscription_device_events.c.status == "pending",
+        and_(
+            subscription_device_events.c.status == "failed",
+            or_(
+                subscription_device_events.c.next_attempt_at.is_(None),
+                subscription_device_events.c.next_attempt_at <= now,
+            ),
+        ),
+        and_(
+            subscription_device_events.c.status == "sending",
+            subscription_device_events.c.lease_until < now,
+        ),
+    )
+
 
 
 def validate_webhook_url(url: str) -> str:
@@ -72,8 +103,13 @@ async def enqueue_device_event(db: AsyncSession, event_type: str, user_id: int,
     return event_id
 
 
-async def deliver_device_event(event_id: str) -> bool:
-    """A single bounded delivery attempt. Failures leave a retriable event."""
+async def deliver_device_event(event_id: str, *, force: bool = False) -> bool:
+    """One delivery attempt, or an explicit manual retry bypassing the delay.
+
+    Claiming and finalizing are fenced by an attempt-specific lease token, so
+    parallel schedulers do not duplicate active attempts. The receiver must
+    still deduplicate IDs after lost HTTP responses (at-least-once delivery).
+    """
     secret = os.getenv("WAYLANE_DEVICE_WEBHOOK_SECRET", "")
     async with GetDB() as db:
         settings = await load_config(db)
@@ -82,33 +118,42 @@ async def deliver_device_event(event_id: str) -> bool:
 
         now = datetime.now(UTC)
         claim_token = str(uuid4())
+        eligible = (
+            or_(
+                subscription_device_events.c.status.in_(("pending", "failed")),
+                and_(
+                    subscription_device_events.c.status == "sending",
+                    subscription_device_events.c.lease_until < now,
+                ),
+            )
+            if force else due_event_filter(now)
+        )
         stmt = (
             update(subscription_device_events)
             .where(
                 subscription_device_events.c.id == event_id,
-                subscription_device_events.c.attempts < 10,
-                or_(
-                    subscription_device_events.c.status.in_(("pending", "failed")),
-                    and_(
-                        subscription_device_events.c.status == "sending",
-                        subscription_device_events.c.lease_until < now,
-                    ),
-                ),
+                subscription_device_events.c.attempts < MAX_ATTEMPTS,
+                eligible,
             )
             .values(
                 status="sending",
                 delivery_token=claim_token,
                 lease_until=now + timedelta(seconds=15),
+                next_attempt_at=None,
                 attempts=subscription_device_events.c.attempts + 1,
             )
-            .returning(subscription_device_events.c.payload)
+            .returning(
+                subscription_device_events.c.payload,
+                subscription_device_events.c.attempts,
+            )
         )
-        payload = (await db.execute(stmt)).scalar_one_or_none()
-        if payload is None:
+        claimed = (await db.execute(stmt)).one_or_none()
+        if claimed is None:
             await db.rollback()
             return False
         await db.commit()
-        payload = dict(payload)
+        payload = dict(claimed.payload)
+        attempt = claimed.attempts
         url = settings["webhook_url"]
 
     try:
@@ -127,12 +172,22 @@ async def deliver_device_event(event_id: str) -> bool:
         response.raise_for_status()
         ok = True
         error = None
+    except httpx.HTTPStatusError as exc:
+        ok = False
+        # Log only a numeric response status, not headers or bodies that may
+        # contain secrets from the recipient.
+        error = f"HTTP_{exc.response.status_code}"
     except (httpx.HTTPError, ValueError) as exc:
         ok = False
         error = type(exc).__name__  # No secrets, payloads or arbitrary server responses in logs.
 
+    finished_at = datetime.now(UTC)
+    exhausted = not ok and attempt >= MAX_ATTEMPTS
+    next_attempt_at = None if ok or exhausted else (
+        finished_at + timedelta(seconds=retry_delay_seconds(attempt))
+    )
     async with GetDB() as db:
-        await db.execute(
+        finalized = await db.execute(
             update(subscription_device_events)
             .where(
                 subscription_device_events.c.id == event_id,
@@ -140,14 +195,28 @@ async def deliver_device_event(event_id: str) -> bool:
                 subscription_device_events.c.delivery_token == claim_token,
             )
             .values(
-                status="delivered" if ok else "failed",
+                status="delivered" if ok else ("exhausted" if exhausted else "failed"),
                 lease_until=None, delivery_token=None,
+                next_attempt_at=next_attempt_at,
                 last_error=error,
-                delivered_at=datetime.now(UTC) if ok else None,
+                delivered_at=finished_at if ok else None,
             )
         )
         await db.commit()
-    return ok
+    if finalized.rowcount:
+        if exhausted:
+            logger.error(
+                "Device webhook exhausted retries: event_id=%s attempts=%s reason=%s",
+                event_id, attempt, error,
+            )
+        elif not ok:
+            logger.warning(
+                "Device webhook delivery failed: event_id=%s attempt=%s reason=%s next_retry_at=%s",
+                event_id, attempt, error, next_attempt_at.isoformat(),
+            )
+        else:
+            logger.info("Device webhook delivered: event_id=%s attempt=%s", event_id, attempt)
+    return ok and bool(finalized.rowcount)
 
 
 def dispatch_after_commit(event_id: str) -> None:
@@ -160,25 +229,109 @@ def dispatch_after_commit(event_id: str) -> None:
     asyncio.create_task(attempt())
 
 
+async def retry_due_device_events(limit: int = RETRY_BATCH_LIMIT) -> dict:
+    """Bounded scheduler pass; no busy loop or unbounded flood after a restart."""
+    now = datetime.now(UTC)
+    async with GetDB() as db:
+        # A crashed 10th delivery must not remain in "sending" forever.
+        finished = await db.execute(
+            update(subscription_device_events)
+            .where(
+                subscription_device_events.c.attempts >= MAX_ATTEMPTS,
+                or_(
+                    subscription_device_events.c.status == "failed",
+                    and_(
+                        subscription_device_events.c.status == "sending",
+                        subscription_device_events.c.lease_until < now,
+                    ),
+                ),
+            )
+            .values(
+                status="exhausted", lease_until=None,
+                delivery_token=None, next_attempt_at=None,
+            )
+        )
+        if finished.rowcount:
+            await db.commit()
+            logger.error("Device webhooks exhausted after recovery: count=%s", finished.rowcount)
+        settings = await load_config(db)
+        if not settings["webhook_enabled"] or not settings["webhook_url"]:
+            return {"selected": 0, "delivered": 0, "failed": 0}
+        events = (await db.scalars(
+            select(subscription_device_events.c.id)
+            .where(
+                due_event_filter(now),
+                subscription_device_events.c.attempts < MAX_ATTEMPTS,
+            )
+            .order_by(
+                subscription_device_events.c.next_attempt_at,
+                subscription_device_events.c.created_at,
+                subscription_device_events.c.id,
+            )
+            .limit(max(1, min(limit, 100)))
+        )).all()
+    semaphore = asyncio.Semaphore(RETRY_CONCURRENCY)
+
+    async def attempt(event_id: str) -> bool:
+        async with semaphore:
+            try:
+                return bool(await deliver_device_event(event_id))
+            except Exception as exc:
+                # A failed row stays pending or leased until expiry; do not
+                # stop unrelated events because one delivery encounters an
+                # unexpected DB/transport error. Never log raw event payloads.
+                logger.error("Device webhook retry worker error: event_id=%s error_type=%s",
+                             event_id, type(exc).__name__)
+                return False
+
+    results = await asyncio.gather(*(attempt(event_id) for event_id in events))
+    delivered = sum(results)
+    if events:
+        logger.info(
+            "Device webhook retry batch: selected=%s delivered=%s deferred_or_failed=%s",
+            len(events), delivered, len(events) - delivered,
+        )
+    return {"selected": len(events), "delivered": delivered, "failed": len(events) - delivered}
+
+
+async def requeue_exhausted_event(event_id: str) -> bool:
+    """Explicit operator recovery resets a permanently exhausted event."""
+    async with GetDB() as db:
+        changed = await db.execute(
+            update(subscription_device_events)
+            .where(
+                subscription_device_events.c.id == event_id,
+                subscription_device_events.c.status == "exhausted",
+            )
+            .values(
+                status="pending", attempts=0, last_error=None,
+                next_attempt_at=None, lease_until=None, delivery_token=None,
+            )
+        )
+        await db.commit()
+    if changed.rowcount:
+        logger.warning("Device webhook manually requeued: event_id=%s", event_id)
+    return bool(changed.rowcount)
+
+
 async def retry_pending_events(limit: int = 50) -> dict:
-    """Explicit one-shot replay; no loop or automatically scheduled monitoring."""
+    """Explicit admin replay of pending/failed events without their backoff delay."""
     async with GetDB() as db:
         events = (await db.scalars(
             select(subscription_device_events.c.id)
             .where(
-                or_(
-                    subscription_device_events.c.status.in_(("pending", "failed")),
-                    and_(subscription_device_events.c.status == "sending",
-                         subscription_device_events.c.lease_until < datetime.now(UTC)),
-                ),
-                subscription_device_events.c.attempts < 10,
+                subscription_device_events.c.status.in_(("pending", "failed")),
+                subscription_device_events.c.attempts < MAX_ATTEMPTS,
             )
-            .order_by(subscription_device_events.c.created_at, subscription_device_events.c.id)
-            .limit(min(limit, 100))
+            .order_by(
+                subscription_device_events.c.created_at,
+                subscription_device_events.c.id,
+            )
+            .limit(max(1, min(limit, 100)))
         )).all()
     delivered = 0
     for event_id in events:
-        delivered += bool(await deliver_device_event(event_id))
+        delivered += bool(await deliver_device_event(event_id, force=True))
     return {"selected": len(events), "delivered": delivered, "failed": len(events) - delivered}
 
 

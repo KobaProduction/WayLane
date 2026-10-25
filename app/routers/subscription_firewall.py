@@ -2,16 +2,19 @@
 
 import os
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.subscription_firewall import subscription_firewall_config, subscription_device_events
 from app.models.admin import AdminDetails
-from app.subscription.device_webhook import retry_pending_events, validate_webhook_url
+from app.subscription.device_webhook import (
+    requeue_exhausted_event, retry_pending_events, validate_webhook_url,
+)
 from app.subscription.firewall import SCENARIOS, load_config, render_message
 
 from .authentication import require_permission
@@ -100,6 +103,7 @@ async def get_device_event_status(
             subscription_device_events.c.status, subscription_device_events.c.attempts,
             subscription_device_events.c.last_error, subscription_device_events.c.created_at,
             subscription_device_events.c.delivered_at,
+            subscription_device_events.c.next_attempt_at,
         ).order_by(subscription_device_events.c.created_at.desc()).limit(100)
     )).mappings().all()
     return [dict(row) for row in rows]
@@ -110,3 +114,25 @@ async def retry_device_events(
     _: AdminDetails = Depends(require_permission("settings", "update")),
 ):
     return await retry_pending_events()
+
+
+@router.get("/device-events/summary")
+async def get_device_event_summary(
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("settings", "read")),
+):
+    rows = (await db.execute(
+        select(subscription_device_events.c.status, func.count())
+        .group_by(subscription_device_events.c.status)
+    )).all()
+    return {status: count for status, count in rows}
+
+
+@router.post("/device-events/{event_id}/requeue")
+async def requeue_device_event(
+    event_id: UUID,
+    _: AdminDetails = Depends(require_permission("settings", "update")),
+):
+    if not await requeue_exhausted_event(str(event_id)):
+        raise HTTPException(409, "Only exhausted device events can be requeued")
+    return {"status": "pending", "event_id": str(event_id)}

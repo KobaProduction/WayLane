@@ -6,6 +6,7 @@ HTTP 503 without requiring a real Telegram bot or external services.
 """
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
 import json
@@ -20,7 +21,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
@@ -72,11 +73,20 @@ async def test_real_receiver_validates_signed_device_lifecycle_and_retries(tmp_p
     monkeypatch.setattr(device_webhook, "dispatch_after_commit", sent.append)
 
     try:
-        await asyncio.sleep(0.5)
-        assert process.poll() is None, "Receiver exited without starting"
         async with httpx.AsyncClient(timeout=4, trust_env=False) as http:
-            probe = await http.get(base_url + "/__local_test__/stats")
-            assert probe.status_code == 200
+            # Startup can be slower on the shared 2 GiB CI runner; bound the
+            # local-only readiness check to 5 seconds instead of a fixed sleep.
+            for _ in range(25):
+                assert process.poll() is None, "Receiver exited without starting"
+                try:
+                    probe = await http.get(base_url + "/__local_test__/stats")
+                except httpx.ConnectError:
+                    await asyncio.sleep(0.2)
+                    continue
+                assert probe.status_code == 200
+                break
+            else:
+                pytest.fail("Test receiver did not become ready within 5 seconds")
 
             # Deny requests with absent/incorrect signatures and old timestamps.
             forged_id = str(uuid4())
@@ -126,7 +136,17 @@ async def test_real_receiver_validates_signed_device_lifecycle_and_retries(tmp_p
                     subscription_device_events.c.id == first
                 ))).mappings().one()
                 assert row["status"] == "failed" and row["attempts"] == 1
-                assert await device_webhook.deliver_device_event(first) is True
+                # Simulate passage of the recorded delay. The scheduler pass
+                # must pick up the failed delivery without a manual retry.
+                assert (await device_webhook.retry_due_device_events())["selected"] == 0
+                await db.execute(
+                    update(subscription_device_events)
+                    .where(subscription_device_events.c.id == first)
+                    .values(next_attempt_at=datetime.now(UTC) - timedelta(seconds=1))
+                )
+                await db.commit()
+                result = await device_webhook.retry_due_device_events()
+                assert result == {"selected": 1, "delivered": 1, "failed": 0}
                 assert await device_webhook.deliver_device_event(first) is False
 
                 # Resubscribing with unchanged HWID must not generate new events.

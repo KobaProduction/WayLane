@@ -266,3 +266,47 @@ The forward-only Alembic revision is b9af0263d1e8, continuing the restored
 PasarGuard history. Do not remove the separate legacy firewall or redirect
 production subscribers until the actual receiver and external clients have
 been validated in an authorized staging cutover.
+
+### Automatic retry and visibility for device event webhooks
+
+Device events are persisted in subscription_device_events before delivery.
+The initial HTTP delivery is best-effort after the HWID transaction commits.
+WayLane's existing scheduler-role APScheduler job (retry_device_webhooks)
+runs every 30 seconds and processes at most 25 due events per pass,
+with up to four concurrent HTTP requests.
+API workers do not need another monitor or separate firewall service.
+
+Failed deliveries retain status=failed, exact attempt count, sanitized
+last_error and next_attempt_at with exponential backoff: 30, 60, 120,
+240 seconds and so on, capped at one hour. When the recipient recovers,
+the next due scheduler pass resends the original event ID. Receivers must
+durably deduplicate IDs, since an HTTP acknowledgment can be lost.
+
+A sending event carries an attempt-specific lease expiring in 15 seconds.
+After a process crash, another scheduler pass can reclaim that lease.
+Atomic DB fencing prevents the stale worker from overwriting the new
+result. Delivery is at-least-once, not exactly-once.
+
+After 10 attempts, an event receives status=exhausted and is not silently
+discarded. Admins can inspect event status, sanitized failure and next
+retry time under Settings > Subscriptions > Subscription Firewall, or
+GET /api/subscription-firewall/device-events.
+GET /api/subscription-firewall/device-events/summary provides counts.
+POST /api/subscription-firewall/retry-device-events is the manual
+one-shot replay for pending/failed events, bypassing the delay but never
+the 10-attempt limit. Only an explicit admin action
+POST /api/subscription-firewall/device-events/{event_id}/requeue
+can reset an exhausted event after investigating the recipient.
+Do not put webhook credentials or raw device payloads in logs.
+
+Automated retry is inactive when webhook_enabled is false. Previously
+queued events remain durable until delivery is enabled again.
+Events that were never recorded because the panel itself was offline
+cannot be recovered from the outbox; that requires device-state
+reconciliation with the authoritative database/source.
+
+The forward Alembic migration c7e90b84a126 adds next_attempt_at and
+the due-events index without rewriting the PasarGuard migration chain.
+Legacy failed rows with NULL timestamps become immediately due;
+previously exhausted 10-attempt failures remain available for manual
+requeue.

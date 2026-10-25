@@ -25,8 +25,10 @@ subscription_device_events = sa.Table(
     sa.Column("attempts", sa.Integer, nullable=False, server_default="0"),
     sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
     sa.Column("delivery_token", sa.String(36), nullable=True),
+    sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("last_error", sa.String(256), nullable=True),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
     sa.Index("ix_subscription_device_events_pending", "status", "created_at"),
+    sa.Index("ix_subscription_device_events_retry_due", "status", "next_attempt_at"),
 )

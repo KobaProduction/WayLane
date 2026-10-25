@@ -175,7 +175,9 @@ async def test_signed_webhook_really_delivers_and_retries_to_local_receiver(tmp_
         assert not await device_webhook.deliver_device_event(event_id)
         async with factory() as db:
             assert (await db.scalar(select(subscription_device_events.c.status))) == "failed"
-        assert await device_webhook.deliver_device_event(event_id)
+        # Automatic worker skips a failure until its backoff is due.
+        assert (await device_webhook.retry_due_device_events())["selected"] == 0
+        assert await device_webhook.deliver_device_event(event_id, force=True)
         assert not await device_webhook.deliver_device_event(event_id)
         assert len(accepted) == 2
         assert accepted[0]["id"] == accepted[1]["id"] == event_id
