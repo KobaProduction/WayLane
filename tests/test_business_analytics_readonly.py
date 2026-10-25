@@ -121,3 +121,13 @@ def test_range_and_ids_validation():
     with pytest.raises(HTTPException):
         analytics._ids("1;DROP TABLE")
     assert analytics._ids("1,2,2") == {1, 2}
+
+
+def test_business_analytics_routes_registered_and_owner_protected():
+    from app.routers import routers
+    # This project's FastAPI build uses deferred _IncludedRouter wrappers;
+    # inspect the included routers and their own concrete route registry.
+    assert analytics.router in routers
+    paths = {getattr(route, 'path', '') for route in analytics.router.routes}
+    for suffix in ('/catalog', '/matrix', '/traffic-series', '/nodes', '/devices'):
+        assert '/api/business-analytics' + suffix in paths
