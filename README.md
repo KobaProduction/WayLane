@@ -251,6 +251,17 @@ X-WayLane-Signature (HMAC-SHA256 over the UTF-8 bytes of
 X-WayLane-Timestamp + "." + request body); reject old timestamps and
 deduplicate X-WayLane-Event-ID. No redirects are followed.
 
+A repeatable integration test `tests/test_device_webhook_receiver_integration.py`
+starts an isolated real Python HTTP server implemented in
+`tests/support/device_webhook_receiver.py`, binds only to localhost and
+generates an ephemeral signing secret. It verifies the real add/update/remove/
+reset HWID path, HMAC-SHA256 signatures, 5-minute timestamp freshness, invalid
+and tampered requests (401/400), explicit HTTP 503 recovery and idempotent
+duplicate event IDs. The test server keeps deduplication IDs **only in memory**:
+production webhook receivers must persist them across restarts. This is a test
+receiver, never a production bot implementation. Its listener is shut down at
+the end of the test; it does not keep running or perform background monitoring.
+
 The forward-only Alembic revision is b9af0263d1e8, continuing the restored
 PasarGuard history. Do not remove the separate legacy firewall or redirect
 production subscribers until the actual receiver and external clients have
