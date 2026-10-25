@@ -1,3 +1,4 @@
+import { SubscriptionFirewallDesigner } from '@/features/subscriptions/components/subscription-firewall-designer'
 import { buildDefaultApplications } from '@/features/subscriptions/components/default-applications-catalog'
 import { SubscriptionApplicationSheet } from '@/features/subscriptions/components/subscription-application-sheet'
 import { SubscriptionApplicationsSection } from '@/features/subscriptions/components/subscription-applications-section'
@@ -409,6 +410,8 @@ export default function SubscriptionSettings() {
           <SubscriptionFormActions onCancel={handleCancel} isSaving={isSaving} />
         </form>
       </Form>
+
+      <SubscriptionFirewallDesigner />
 
       <SubscriptionApplicationSheet
         variant="create"
