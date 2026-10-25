@@ -1,3 +1,4 @@
+import { ACMEPanel } from '@/features/tls/acme-panel'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { $fetch } from '@/service/http'
@@ -272,6 +273,8 @@ export default function TlsPresetsPage() {
           {activeId ? 'Обновить и применить к нодам' : 'Сохранить пресет'}
         </Button>
       </section>
+
+      <ACMEPanel />
 
       {activeId && (
         <>
