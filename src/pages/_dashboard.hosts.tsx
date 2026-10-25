@@ -1,3 +1,4 @@
+import HostBalancerPanel from '@/features/hosts/components/host-balancer-panel'
 import MainSection from '@/features/hosts/components/hosts-list'
 import { mapHostTransportSettingsForApi, type HostFormValues } from '@/features/hosts/forms/host-form'
 import PageHeader from '@/components/layout/page-header'
@@ -249,6 +250,10 @@ export default function HostsPage() {
           onButtonClick={canCreateHosts ? handleCreateClick : undefined}
         />
         <Separator />
+      </div>
+
+      <div className="w-full px-4 pt-4">
+        <HostBalancerPanel hosts={data ?? []} canCreate={canCreateHosts} canUpdate={canUpdateHosts} />
       </div>
 
       <div className="w-full p-4">

@@ -7,3 +7,6 @@ dist/
 
 # Host-specific cached build toolchains (not Git content)
 .toolchains/
+
+# Local development logs, not repository content
+.runtime/
