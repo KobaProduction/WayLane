@@ -133,6 +133,27 @@ includes \`burstObservatory\`, probing a fixed public 204 endpoint. Regular
 hosts stay visible in non-Xray subscriptions, since those formats cannot
 carry this Xray-specific JSON structure.
 
+**Balancing versus failover:** `roundRobin` and `random` distribute new
+connections but do **not** probe or automatically exclude dead hosts. When one
+member fails, a portion of connections will fail until it comes back.
+For automatic failover use `leastPing` (background `observatory`), which
+switches on successful updated probe results rather than retrying a failed
+connection mid-stream. `leastLoad` uses burst sampling and may require one
+to two full probe cycles (each about `5 * probe_interval`) to detect a dead
+member; it favors stability over quick failover. Probes go to the fixed
+public 204 endpoint through each member, so client network restrictions on
+that endpoint may prevent healthy status observations. The actual failover
+rate and latency depend on the Xray client version and configured interval.
+
+Local integration verification with Xray 26.9.30, two disposable VLESS
+servers and real SOCKS/HTTP traffic confirmed healthy routing, that plain
+round-robin continues selecting an offline host, `leastPing` switching from
+its active offline member, and `leastLoad` switching after its probe cycle.
+The local test endpoint used an explicit, narrow `freedom.finalRules` allow
+because current Xray blocks access to loopback/private destinations from
+VLESS by default; this test-only exception is **not** installed in the
+WayLane server configuration.
+
 **Limits:** nested balancers and cross-format balancers are deliberately not
 supported. All group members must be real hosts, not other groups. Hosts with
 no authorized inbound or no active user protocol are skipped; a group with
