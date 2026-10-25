@@ -39,7 +39,7 @@ def _permission_level(value) -> PermissionScope:
     if isinstance(value, dict) and set(value) == {"scope"}:
         try:
             return PermissionScope(value["scope"])
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             pass
     return PermissionScope.NONE
 

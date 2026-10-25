@@ -332,7 +332,7 @@ class NatsNotificationQueue(NotificationQueue):
             try:
                 await self._js.publish(self.SUBJECT, data, headers={"Nats-Msg-Id": message_id})
                 return
-            except TimeoutError, nats_errors.TimeoutError:
+            except (TimeoutError, nats_errors.TimeoutError):
                 if attempt == PUBLISH_TIMEOUT_MAX_ATTEMPTS - 1:
                     raise
                 await asyncio.sleep(PUBLISH_TIMEOUT_BASE_DELAY * (2**attempt))
@@ -350,7 +350,7 @@ class NatsNotificationQueue(NotificationQueue):
             raise RuntimeError("Consumer not available")
         try:
             messages = await self._consumer.fetch(1, timeout=timeout if timeout is not None else 1)
-        except TimeoutError, nats_errors.TimeoutError:
+        except (TimeoutError, nats_errors.TimeoutError):
             return None
         if not messages:
             return None
@@ -360,7 +360,7 @@ class NatsNotificationQueue(NotificationQueue):
             data = json.loads(message.data)
             if not isinstance(data, dict):
                 raise TypeError("Notification must be an object")
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             logger.error("Discarding malformed notification in %s", self.STREAM_NAME)
             await NatsNotificationDelivery(self, message, {}).ack()
             return None

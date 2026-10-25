@@ -765,7 +765,7 @@ def validate_format_variables(value: str, allow_quoting: bool = True) -> str:
     try:
         fields = [(field, conversion) for _, field, _, conversion in Formatter().parse(value) if field is not None]
         value.format_map(FormatVariables())
-    except ValueError, AttributeError, IndexError, TypeError:
+    except (ValueError, AttributeError, IndexError, TypeError):
         raise ValueError(f'Invalid formatting variables in "{value}"')
     if any("." in field or "[" in field for field, _ in fields):
         raise ValueError(f'Invalid formatting variables in "{value}"')

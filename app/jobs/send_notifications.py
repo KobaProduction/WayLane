@@ -37,7 +37,7 @@ async def _send_webhook(client: aiohttp.ClientSession, webhook: WebhookInfo, pay
                 return True
             # Response bodies and URLs can contain credentials or unbounded data.
             logger.warning("Webhook delivery failed with HTTP %s", response.status)
-    except aiohttp.ClientError, TimeoutError:
+    except (aiohttp.ClientError, TimeoutError):
         logger.warning("Webhook delivery failed due to a connection error or timeout")
     return False
 

@@ -68,7 +68,7 @@ async def _post_notification(url: str, **kwargs) -> tuple[bool, float]:
                 delay = float(body.get("parameters", body).get("retry_after", 1))
                 if math.isfinite(delay):
                     raise RateLimitedError(max(1, min(delay, 3600)))
-            except ValueError, TypeError, AttributeError:
+            except (ValueError, TypeError, AttributeError):
                 pass
         logger.warning("Notification delivery failed with HTTP %s", response.status)
     return False, 1
@@ -214,7 +214,7 @@ async def process_notification(delivery: NotificationDelivery):
                 retry = notification.model_copy(update={"slot": slot, "send_at": slot + limit.offset})
                 await delivery.retry(retry.model_dump(), delay=retry.send_at - now)
                 return
-            except aiohttp.ClientError, TimeoutError:
+            except (aiohttp.ClientError, TimeoutError):
                 logger.warning("Notification delivery failed due to a connection error or timeout")
                 success, delay = False, 1
 
