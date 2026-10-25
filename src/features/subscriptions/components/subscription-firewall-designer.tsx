@@ -15,7 +15,16 @@ type Editor = {
   webhook_url: string | null
   device_check_url: string | null
 }
-type Event = { id: string; event_type: string; status: string; attempts: number; last_error: string | null }
+type Event = {
+  id: string
+  event_type: string
+  status: string
+  attempts: number
+  last_error: string | null
+  next_attempt_at: string | null
+  created_at: string
+  delivered_at: string | null
+}
 const scenarios: Record<string, string> = {
   invalid_link: 'Ссылка на подписку недействительна',
   device_limit: 'Превышен лимит устройств',
@@ -35,12 +44,18 @@ export function SubscriptionFirewallDesigner() {
   const [config, setConfig] = useState<Editor | null>(null)
   const [active, setActive] = useState('invalid_link')
   const [events, setEvents] = useState<Event[]>([])
+  const [eventSummary, setEventSummary] = useState<Record<string, number>>({})
   const [preview, setPreview] = useState<{ base64_payload: string; announce: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const refresh = useCallback(async () => {
-    const [settings, rows] = await Promise.all([$fetch<Editor>(base), $fetch<Event[]>(base + '/device-events')])
+    const [settings, rows, summary] = await Promise.all([
+      $fetch<Editor>(base),
+      $fetch<Event[]>(base + '/device-events'),
+      $fetch<Record<string, number>>(base + '/device-events/summary'),
+    ])
     setConfig(settings)
     setEvents(rows)
+    setEventSummary(summary)
   }, [])
   useEffect(() => { void refresh().catch(error => toast.error(message(error))) }, [refresh])
 
@@ -86,6 +101,15 @@ export function SubscriptionFirewallDesigner() {
         method: 'POST',
       })
       toast.success('Доставлено ' + data.delivered + ' из ' + data.selected)
+      await refresh()
+    })
+  }
+
+  function requeue(event: Event) {
+    if (!window.confirm('Заново запустить отправку события ' + event.id + '?')) return
+    void act(async () => {
+      await $fetch(base + '/device-events/' + event.id + '/requeue', { method: 'POST' })
+      toast.success('Событие возвращено в очередь; следующая отправка по расписанию')
       await refresh()
     })
   }
@@ -140,8 +164,10 @@ export function SubscriptionFirewallDesigner() {
       <CardHeader>
         <CardTitle>Контроль устройств и webhook</CardTitle>
         <p className="text-sm text-muted-foreground">
-          События создания, удаления и сброса HWID подписываются HMAC SHA-256. Секрет настраивается
-          только в backend: WAYLANE_DEVICE_WEBHOOK_SECRET. Недоставленные события хранятся в БД.
+          События создания, изменения, удаления и сброса HWID подписываются HMAC SHA-256.
+          Секрет задаётся только в backend: WAYLANE_DEVICE_WEBHOOK_SECRET.
+          Недоставленные события сохраняются в БД и автоматически повторяются каждые 30 секунд,
+          когда наступает время следующей попытки (exponential backoff, максимум 10 попыток).
           При необходимости можно подключить старый проверяющий Telegram-бота.
         </p>
       </CardHeader>
@@ -166,11 +192,34 @@ export function SubscriptionFirewallDesigner() {
           <Button variant="outline" disabled={busy} onClick={retry}>Повторить недоставленные</Button>
           <Button variant="outline" disabled={busy} onClick={() => void act(refresh)}>Обновить список</Button>
         </div>
-        <div className="max-h-52 space-y-1 overflow-auto text-xs">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          <span>Ожидают: {eventSummary.pending ?? 0}</span>
+          <span>В отправке: {eventSummary.sending ?? 0}</span>
+          <span>Повтор: {eventSummary.failed ?? 0}</span>
+          <span>Доставлены: {eventSummary.delivered ?? 0}</span>
+          <span className={(eventSummary.exhausted ?? 0) > 0 ? 'font-medium text-destructive' : ''}>
+            Исчерпали попытки: {eventSummary.exhausted ?? 0}
+          </span>
+        </div>
+        <div className="max-h-60 space-y-2 overflow-auto text-xs">
           {!events.length && <p className="text-muted-foreground">Событий пока нет</p>}
           {events.map(event => <div key={event.id} className="rounded-md border p-2">
-            {event.event_type} · {event.status} · попытки: {event.attempts}
-            {event.last_error && ' · ' + event.last_error}
+            <p>
+              {event.event_type} · <strong>{event.status}</strong> · попытки: {event.attempts}/10
+              {event.last_error && ' · причина: ' + event.last_error}
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {event.next_attempt_at
+                ? 'Следующая попытка: ' + new Date(event.next_attempt_at).toLocaleString()
+                : event.status === 'exhausted'
+                  ? 'Автоматические попытки остановлены — требуется вмешательство'
+                  : event.status === 'delivered' ? 'Доставлено' : 'Ожидает обработки'}
+            </p>
+            {event.status === 'exhausted' && (
+              <Button className="mt-2" size="sm" variant="outline" disabled={busy} onClick={() => requeue(event)}>
+                Вернуть в очередь
+              </Button>
+            )}
           </div>)}
         </div>
       </CardContent>
