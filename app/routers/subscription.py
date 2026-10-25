@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from app.db import AsyncSession, get_db
 from app.models.settings import Application, ConfigFormat
 from app.models.stats import UserUsageStatsList
 from app.models.user import SubscriptionUserResponse
+from app.subscription.firewall import response_for_failure
 from app.operation import OperatorType
 from app.operation.subscription import SubscriptionOperation
 from config import subscription_env_settings
@@ -25,15 +26,26 @@ async def user_subscription(
     headers=Depends(get_subscription_headers),
 ):
     """Provides a subscription link based on the user agent (Clash, V2Ray, etc.)."""
-    return await subscription_operator.user_subscription(
-        db,
-        token=token,
-        accept_header=request.headers.get("Accept", ""),
-        user_agent=user_agent,
-        ip=request.client.host if request.client else None,
-        request_url=str(request.url),
-        **headers.model_dump(),
-    )
+    try:
+        return await subscription_operator.user_subscription(
+            db,
+            token=token,
+            accept_header=request.headers.get("Accept", ""),
+            user_agent=user_agent,
+            ip=request.client.host if request.client else None,
+            request_url=str(request.url),
+            **headers.model_dump(),
+        )
+    except HTTPException as exc:
+        # Legacy client adapters require HTTP 200 with informational proxy
+        # links, but only for explicit HWID clients and enabled templates.
+        fallback = await response_for_failure(
+            db, exc, client_accept=request.headers.get("Accept", ""),
+            hwid=headers.x_hwid, user_agent=user_agent,
+        )
+        if fallback is not None:
+            return fallback
+        raise
 
 
 @router.head("/{token}/")

@@ -23,6 +23,7 @@ from app.models.stats import UserUsageStatsList
 from app.models.subscription import SubscriptionUsageQuery
 from app.models.user import SubscriptionUserResponse, UsersResponseWithInbounds
 from app.settings import hwid_settings, subscription_settings
+from app.subscription.device_webhook import check_legacy_device_access
 from app.subscription import sub_update_buffer as _sub_update_buffer  # noqa: F401  # registers per-worker flush loop
 from app.subscription.share import (
     apply_custom_format_variables,
@@ -442,7 +443,12 @@ class SubscriptionOperation(BaseOperation):
             if last_used is not None and last_used.tzinfo is None:
                 last_used = last_used.replace(tzinfo=UTC)
             if last_used is not None and (dt.now(UTC) - last_used).total_seconds() < 300:
-                return
+                # Metadata updates must not be swallowed by the 5-minute
+                # last-used debounce: forward them as device.updated events.
+                incoming = (x_device_os, x_ver_os, x_device_model)
+                stored = (existing_hwid.device_os, existing_hwid.os_version, existing_hwid.device_model)
+                if all(value is None or value == previous for value, previous in zip(incoming, stored)):
+                    return
 
         if not await register_user_hwid(db, user_id, x_hwid, x_device_os, x_ver_os, x_device_model, limit=limit):
             await self.raise_error(message="Device limit reached", code=403)
@@ -513,6 +519,11 @@ class SubscriptionOperation(BaseOperation):
             client_type = matched_rule.target if matched_rule else None
             if client_type == ConfigFormat.block or not client_type:
                 await self.raise_error(message="Client not supported", code=406)
+            await check_legacy_device_access(
+                db, token=token, ip=ip or "", hwid=x_hwid,
+                user_agent=user_agent, device_os=x_device_os,
+                os_version=x_ver_os, device_model=x_device_model,
+            )
             await self.validate_and_register_hwid(
                 db,
                 db_user.id,

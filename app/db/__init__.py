@@ -21,3 +21,6 @@ from app.db import acme as _acme_tables  # noqa: F401, E402
 
 # Client-side Xray subscription balancer groups.
 from app.db import host_balancer as _host_balancer_tables  # noqa: F401, E402
+
+# Persist client notice design and device webhook outbox.
+from app.db import subscription_firewall as _subscription_firewall_tables  # noqa: F401, E402

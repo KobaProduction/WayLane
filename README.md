@@ -213,3 +213,45 @@ production certificate before real client traffic.
 
 Limits: initial implementation supports Cloudflare DNS-01 only and lego v5,
 not HTTP-01, EAB, DNS providers beyond Cloudflare, or an always-on scheduler.
+
+## Embedded Subscription Firewall and device webhooks
+
+The old Intens Subscription Firewall proxied PasarGuard subscription responses,
+converted certain errors to Base64-encoded informational Shadowsocks links and
+verified client device access via a Telegram-bot check endpoint. WayLane embeds
+this behavior in the panel without a reverse proxy or second device database.
+
+The message designer lives under Settings > Subscriptions > Subscription
+Firewall. Admins can edit the headings and text lines of seven failure
+scenarios and preview both the encoded Base64 body and announce header.
+Conversion is disabled by default; when enabled it is restricted to
+Happ/v2RayTun/ClientHub link clients with X-HWID. HTML and other client
+formats keep their original HTTP status codes. HWID count limits are
+never bypassed. The optional legacy device-check URL receives
+(subscription, ip, hwid) JSON and understands ACCESS_GRANTED, ACCESS_DENIED,
+LIMIT_DEVICES and BOT_ERROR. On timeout, WayLane falls back to its
+existing local HWID policy; explicit deny/limit decisions block access.
+
+The device event outbox records device.added, device.updated, device.removed and device.reset
+in the same database transaction as the HWID change, and then attempts
+delivery without blocking subscription requests. Events survive delivery
+failures and can be retried explicitly via the admin API. Recipient
+idempotency uses the event ID.
+
+To enable outgoing events set WAYLANE_DEVICE_WEBHOOK_SECRET to a protected,
+random secret of at least 32 characters, then configure a HTTPS URL in the
+designer. HTTP/local targets are only permitted during isolated local tests
+with WAYLANE_WEBHOOK_ALLOW_LOCAL_TEST=1. For a legacy internal-only
+service, operators may explicitly allowlist its exact host through
+WAYLANE_WEBHOOK_ALLOWED_INTERNAL_HOSTS (comma separated), for example a
+private bridge address. This is an explicit trust boundary, not a public
+webhook default. Events are recorded only while webhook delivery is enabled.
+The receiver verifies
+X-WayLane-Signature (HMAC-SHA256 over the UTF-8 bytes of
+X-WayLane-Timestamp + "." + request body); reject old timestamps and
+deduplicate X-WayLane-Event-ID. No redirects are followed.
+
+The forward-only Alembic revision is b9af0263d1e8, continuing the restored
+PasarGuard history. Do not remove the separate legacy firewall or redirect
+production subscribers until the actual receiver and external clients have
+been validated in an authorized staging cutover.

@@ -63,6 +63,13 @@ async def register_user_hwid(
             await db.commit()  # Release the lock on rejected registrations too.
             return False
 
+    # For unlimited-device accounts the registration path still needs to
+    # detect first registration, not emit "added" on every refresh.
+    if limit is None or limit <= 0:
+        existing_id = (await db.execute(
+            select(UserHWID.id).where(UserHWID.user_id == user_id, UserHWID.hwid == hwid)
+        )).scalar_one_or_none()
+
     now = datetime.now(UTC)
     params = {
         "user_id": user_id,
@@ -74,6 +81,12 @@ async def register_user_hwid(
         "last_used_at": now,
     }
     table = cast(Table, UserHWID.__table__)
+    existing_device = await get_user_hwid_by_value(db, user_id, hwid) if existing_id is not None else None
+    changed_metadata = {
+        field: params[field] for field in ("device_os", "os_version", "device_model")
+        if existing_device is not None and params[field] is not None
+        and getattr(existing_device, field) != params[field]
+    }
 
     if dialect == "postgresql":
         stmt = pg_insert(table).values(
@@ -129,7 +142,24 @@ async def register_user_hwid(
         await db.execute(insert_stmt, [params])
         await db.execute(update_stmt, [update_params])
 
+    event_id = None
+    if changed_metadata:
+        await db.execute(update(table).where(
+            table.c.user_id == user_id, table.c.hwid == hwid
+        ).values(**changed_metadata))
+    if existing_id is None or changed_metadata:
+        from app.subscription.device_webhook import enqueue_device_event
+
+        event_id = await enqueue_device_event(
+            db, "device.added" if existing_id is None else "device.updated",
+            user_id, hwid,
+            {field: params[field] for field in ("device_os", "os_version", "device_model")},
+        )
     await db.commit()
+    if event_id:
+        from app.subscription.device_webhook import dispatch_after_commit
+
+        dispatch_after_commit(event_id)
     return True
 
 
@@ -137,7 +167,16 @@ async def delete_user_hwid(db: AsyncSession, user_id: int, hwid: str) -> bool:
     """Delete a specific HWID for a user by its value. Returns True if deleted."""
     stmt = delete(UserHWID).where(UserHWID.user_id == user_id, UserHWID.hwid == hwid)
     result = await db.execute(stmt)
+    event_id = None
+    if result.rowcount > 0:
+        from app.subscription.device_webhook import enqueue_device_event
+
+        event_id = await enqueue_device_event(db, "device.removed", user_id, hwid)
     await db.commit()
+    if event_id:
+        from app.subscription.device_webhook import dispatch_after_commit
+
+        dispatch_after_commit(event_id)
     return result.rowcount > 0
 
 
@@ -145,5 +184,16 @@ async def reset_user_hwids(db: AsyncSession, user_id: int) -> int:
     """Delete all HWIDs for a user. Returns the number of HWIDs deleted."""
     stmt = delete(UserHWID).where(UserHWID.user_id == user_id)
     result = await db.execute(stmt)
+    event_id = None
+    if result.rowcount > 0:
+        from app.subscription.device_webhook import enqueue_device_event
+
+        event_id = await enqueue_device_event(
+            db, "device.reset", user_id, None, {"removed_count": result.rowcount}
+        )
     await db.commit()
+    if event_id:
+        from app.subscription.device_webhook import dispatch_after_commit
+
+        dispatch_after_commit(event_id)
     return result.rowcount
