@@ -200,7 +200,7 @@ def apply_custom_format_variables(format_variables: dict, custom_variables: list
             continue
         try:
             format_variables[key] = raw_value.format_map(base_variables)
-        except ValueError, KeyError:
+        except (ValueError, KeyError):
             format_variables[key] = raw_value
 
     return format_variables
@@ -213,7 +213,7 @@ def _format_dynamic_value(value, format_variables: dict):
             return value
         try:
             return value.format_map(format_variables)
-        except ValueError, KeyError, AttributeError, IndexError, TypeError:
+        except (ValueError, KeyError, AttributeError, IndexError, TypeError):
             # A value the variables cannot fill (stray brace, {0}, {X.y}) is kept as it is
             return value
     if isinstance(value, list):
@@ -458,9 +458,13 @@ async def process_inbounds_and_tags(
 ) -> str | bytes:
     proxy_settings = user.proxy_settings.dict()
     proxy_settings["_user_id"] = user.id
-    hosts = await filter_hosts(list((await host_manager.get_hosts()).values()), user.status)
-    if randomize_order and len(hosts) > 1:
-        random.shuffle(hosts)
+    host_entries = [
+        (host_id, host)
+        for host_id, host in (await host_manager.get_hosts()).items()
+        if not host.status or user.status in host.status
+    ]
+    if randomize_order and len(host_entries) > 1:
+        random.shuffle(host_entries)
 
     def _resolve_host_xray_template_content(inbound: SubscriptionInboundData) -> str | None:
         if xray_template_overrides is None:
@@ -472,7 +476,69 @@ async def process_inbounds_and_tags(
             return None
         return xray_template_overrides.get(template_id)
 
-    for host_data in hosts:
+    balancers = []
+    suppressed_host_ids: set[int] = set()
+    if isinstance(conf, XrayConfiguration):
+        from sqlalchemy import select
+
+        from app.db import GetDB
+        from app.db.host_balancer import host_balancers
+
+        async with GetDB() as db:
+            balancers = (await db.execute(
+                select(host_balancers).where(host_balancers.c.is_disabled.is_(False))
+                .order_by(host_balancers.c.id)
+            )).mappings().all()
+
+        # Only hide normal entries after all group members are authorized,
+        # active and convertible for the requesting user.
+        eligible_by_id = dict(host_entries)
+        for balancer in balancers:
+            members = []
+            for host_id in balancer["host_ids"]:
+                host_data = eligible_by_id.get(host_id)
+                if host_data is None:
+                    continue
+                processed = await process_host(
+                    host_data, format_variables.copy(), user.inbounds,
+                    proxy_settings, custom_variables,
+                )
+                if not processed:
+                    continue
+                inbound_copy, settings = processed
+                address = _format_dynamic_value(inbound_copy.address, format_variables)
+                if has_markup_unsafe_chars(address):
+                    continue
+                members.append((address, inbound_copy, settings))
+            if len(members) < 2:
+                continue
+            # Keep XHTTP download configuration processing identical to
+            # standalone hosts before passing members to the Xray builder.
+            ready_members = []
+            for address, inbound_copy, settings in members:
+                download_settings = getattr(inbound_copy.transport_config, "download_settings", None)
+                if isinstance(download_settings, SubscriptionInboundData):
+                    processed_download = await _prepare_download_settings(
+                        download_settings, format_variables.copy(), user.inbounds,
+                        proxy_settings, client_templates, custom_variables, conf,
+                    )
+                    inbound_copy.transport_config.download_settings = processed_download
+                ready_members.append((address, inbound_copy, settings))
+
+            # Hide individual entries only when their combined profile was
+            # actually emitted. Unsupported protocols must not disappear.
+            if conf.add_balancer(
+                balancer_id=balancer["id"],
+                name=_format_dynamic_value(balancer["name"], format_variables),
+                members=ready_members,
+                strategy=balancer["strategy"],
+                probe_interval=balancer["probe_interval"],
+            ) and balancer["hide_members"]:
+                suppressed_host_ids.update(balancer["host_ids"])
+
+    for host_id, host_data in host_entries:
+        if isinstance(conf, XrayConfiguration) and host_id in suppressed_host_ids:
+            continue
         if host_data.network in XRAY_ONLY_NETWORKS and not isinstance(conf, XrayConfiguration):
             # Links, sing-box, Clash and Outline cannot carry these transports.
             continue

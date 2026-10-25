@@ -114,6 +114,35 @@ per-node outcomes are reported. External ACME/ACM provisioning is not yet part
 of this feature.
 
 
+## Client-side Xray host balancer groups
+
+An administrator can manage named balancer groups under **Hosts → Xray
+balancers** or via \`/api/host-balancers\`. A group contains **2–32 references
+to existing individual hosts**, an Xray selection strategy (\`roundRobin\`,
+\`random\`, \`leastPing\`, \`leastLoad\`), an optional 30–3600 second probe
+interval, an enabled flag, and a flag that hides its member hosts from the
+**Xray JSON** subscription only. These groups do not create listening
+servers, forwarders or new node configuration.
+
+Each eligible member is resolved through the existing user authorization,
+host-status and per-user outbound generator. Its own TLS, transport, protocol
+and credentials are retained. One additional Xray client profile is emitted
+with unique outbound/dialer tags, a matching \`routing.balancers\` selector and
+a routing rule. \`leastPing\` includes \`observatory\`, while \`leastLoad\`
+includes \`burstObservatory\`, probing a fixed public 204 endpoint. Regular
+hosts stay visible in non-Xray subscriptions, since those formats cannot
+carry this Xray-specific JSON structure.
+
+**Limits:** nested balancers and cross-format balancers are deliberately not
+supported. All group members must be real hosts, not other groups. Hosts with
+no authorized inbound or no active user protocol are skipped; a group with
+fewer than two valid members is not emitted and does not hide single-host
+entries. Host deletion refuses to remove a referenced member until the
+group is edited or removed. Background reachability probing runs on the
+client under Xray, not in the WayLane backend. Client software importing
+only subscription URLs or per-outbound links cannot express a balancer;
+test the actual Xray JSON import pathway and client core support.
+
 ## Automatic ACME issuance — OpenFlare-inspired DNS-01
 
 The WayLane control plane follows the design of

@@ -18,3 +18,6 @@ from app.db import tls as _tls_tables  # noqa: F401, E402
 
 # Register managed ACME accounts and orders with the central metadata.
 from app.db import acme as _acme_tables  # noqa: F401, E402
+
+# Client-side Xray subscription balancer groups.
+from app.db import host_balancer as _host_balancer_tables  # noqa: F401, E402

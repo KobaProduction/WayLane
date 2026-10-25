@@ -125,9 +125,25 @@ class HostOperation(BaseOperation):
 
         return host
 
+    async def check_balancer_members_unused(self, db: AsyncSession, host_ids: set[int]) -> None:
+        """Do not orphan a virtual host by deleting one of its members."""
+        from sqlalchemy import select
+
+        from app.db.host_balancer import host_balancers
+
+        rows = (await db.execute(select(host_balancers.c.name, host_balancers.c.host_ids))).all()
+        referenced = [name for name, members in rows if host_ids.intersection(members)]
+        if referenced:
+            await self.raise_error(
+                "Host belongs to an Xray balancer: " + ", ".join(referenced) +
+                "; remove it from the balancer first",
+                409, db=db,
+            )
+
     async def remove_host(self, db: AsyncSession, host_id: int, admin: AdminDetails):
         db_host = await self.get_validated_host(db, host_id)
         await self.check_download_hosts_unused(db, {db_host.id})
+        await self.check_balancer_members_unused(db, {db_host.id})
         await remove_host(db, db_host)
         logger.info(f'Host "{db_host.id}" deleted by admin "{admin.username}"')
 
@@ -186,6 +202,7 @@ class HostOperation(BaseOperation):
 
         host_ids = [h.id for h in db_hosts]
         await self.check_download_hosts_unused(db, set(host_ids))
+        await self.check_balancer_members_unused(db, set(host_ids))
 
         # Batch delete using CRUD function
         await remove_hosts(db, host_ids)

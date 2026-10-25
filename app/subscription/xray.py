@@ -110,6 +110,104 @@ class XrayConfiguration(BaseSubscription):
 
         self.add_config(remarks=remark, outbounds=all_outbounds, template_content=template_content)
 
+    def add_balancer(
+        self,
+        *,
+        balancer_id: int,
+        name: str,
+        members: list[tuple[str, SubscriptionInboundData, dict]],
+        strategy: str,
+        probe_interval: int = 60,
+    ) -> bool:
+        """Build one independent Xray client profile from authorized host outbounds.
+
+        Each member retains its own transport, TLS and user credentials.
+        Auxiliary dialer outbounds receive unique tags, preventing collisions.
+        Other client formats cannot represent Xray routing balancers.
+        """
+        prefix = f"wlb-{balancer_id}-member-"
+        balancer_tag = f"wlb-{balancer_id}"
+        outbounds = []
+        for index, (address, inbound, settings) in enumerate(members):
+            handler = self.protocol_handlers.get(inbound.protocol)
+            if handler is None:
+                continue
+            result = handler(address=address, inbound=inbound, settings=settings)
+            if not result:
+                continue
+            main, extras = result if isinstance(result, tuple) else (result, [])
+            if not isinstance(main, dict) or not main:
+                continue
+            main = dict(main)
+            main["tag"] = f"{prefix}{index}"
+            # The default dialer tag is per-configuration, not per-outbound.
+            # Isolate it when combining independent host configurations.
+            dialer_tags = {}
+            for extra_index, extra in enumerate(extras):
+                old = extra.get("tag")
+                if not old:
+                    continue
+                renamed = f"wlb-{balancer_id}-aux-{index}-{extra_index}"
+                dialer_tags[old] = renamed
+                outbounds.append({**extra, "tag": renamed})
+            sockopt = (main.get("streamSettings") or {}).get("sockopt")
+            if isinstance(sockopt, dict) and sockopt.get("dialerProxy") in dialer_tags:
+                main["streamSettings"] = {
+                    **main["streamSettings"],
+                    "sockopt": {**sockopt, "dialerProxy": dialer_tags[sockopt["dialerProxy"]]},
+                }
+            outbounds.append(main)
+        if len([item for item in outbounds if item.get("tag", "").startswith(prefix)]) < 2:
+            return False
+
+        from copy import deepcopy
+
+        config = deepcopy(self.template)
+        config["remarks"] = name
+        # Include all bound members before template defaults. The routing rule
+        # selects only actual member tags, not helper/dialer outbounds.
+        config["outbounds"] = outbounds + config.get("outbounds", [])
+        routing = config.setdefault("routing", {})
+        balancer_rule = {"type": "field", "network": "tcp,udp", "balancerTag": balancer_tag}
+        rules = routing.setdefault("rules", [])
+        # Keep specific user routing overrides, but precede a generic
+        # catch-all that would otherwise shadow the balancer entirely.
+        for position, existing in enumerate(rules):
+            if (
+                existing.get("type") == "field"
+                and set(existing) <= {"type", "network", "outboundTag", "balancerTag"}
+                and existing.get("network", "tcp,udp") in ("tcp,udp", "udp,tcp")
+            ):
+                rules.insert(position, balancer_rule)
+                break
+        else:
+            rules.append(balancer_rule)
+        routing.setdefault("balancers", []).append({
+            "tag": balancer_tag,
+            "selector": [prefix],
+            "strategy": {"type": strategy},
+        })
+        if strategy == "leastPing":
+            config["observatory"] = {
+                "subjectSelector": [prefix],
+                "probeUrl": "https://www.gstatic.com/generate_204",
+                "probeInterval": f"{probe_interval}s",
+                "enableConcurrency": True,
+            }
+        elif strategy == "leastLoad":
+            config["burstObservatory"] = {
+                "subjectSelector": [prefix],
+                "pingConfig": {
+                    "destination": "https://www.gstatic.com/generate_204",
+                    "interval": f"{probe_interval}s",
+                    "sampling": 5,
+                    "timeout": "5s",
+                    "httpMethod": "HEAD",
+                },
+            }
+        self.config.append(config)
+        return True
+
     # ========== Transport Handlers (Registry Methods) ==========
 
     def _transport_ws(self, config: WebSocketTransportConfig, path: str) -> dict:
