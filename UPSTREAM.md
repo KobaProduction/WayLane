@@ -17,3 +17,17 @@ template is included.
 - Runtime storage paths and log names are not silently migrated.
 
 **Licensing:** existing GitHub root `LICENSE` (MIT) is retained as authored by Koba Production, but derived PasarGuard code is governed by `LICENSE.UPSTREAM` (AGPL-3.0 for panel/frontend or GPL-3.0 for node). See `LICENSING.md`.
+
+## Preserved Alembic lineage
+
+The 160 original PasarGuard Panel migration files from the imported snapshot
+(`a628af3`, sourced from the upstream commit pinned above) were restored
+without modification. Their exact file hashes are tracked in
+`app/db/migrations/legacy_history_sha256.json`. The historical tip
+`c8d2e4f6a1b3` precedes the new WayLane compatibility bridge
+`waylane_0001`; none of the original migration IDs have been replaced.
+
+The former collapsed `waylane_0001` create-all baseline was discarded as an
+active migration: executing it against an existing PasarGuard database would
+attempt to recreate existing tables. Use the full preserved history for fresh
+installs and the in-place forward upgrade path for existing panels.

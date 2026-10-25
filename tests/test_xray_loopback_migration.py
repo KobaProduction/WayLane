@@ -1,4 +1,7 @@
-"""The consolidated baseline must not ship an exposed Xray client listener."""
+"""The frozen reference template must not expose client listeners.
+
+Real fresh-database seeding now comes from the historical PasarGuard chain.
+"""
 
 import json
 from pathlib import Path

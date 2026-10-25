@@ -35,19 +35,35 @@ deployment compatibility, or complete the eventual Vue/HA migration.
 Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft license applicable to derived code. See `LICENSING.md` and `LICENSE.UPSTREAM`.
 
 
-## Database baseline (fresh databases only)
+## Database migrations — existing PasarGuard databases are supported
 
-WayLane has a single initial Alembic migration,
-`app/db/migrations/versions/waylane_0001_waylane_initial_schema.py`,
-plus a frozen non-secret `bootstrap_seed.json` fixture. It creates the current
-schema and seeds the initial roles, settings, core configuration, subscription
-templates and a **new random** JWT signing key.
+The original **160 Alembic revisions** from PasarGuard Panel (pinned in
+`UPSTREAM.md`) are retained unchanged. The historical root is
+`94a5cc12c0d6` and the historical tip is `c8d2e4f6a1b3`. The WayLane
+`waylane_0001` revision now **continues that tip** instead of replacing the
+entire migration graph with a second, incompatible baseline. Subsequent
+WayLane migrations (`waylane_0002` and later) remain forward-only features.
 
-Validated using PostgreSQL 15 (`upgrade → downgrade → upgrade`, plus
-`alembic check`) and a fresh SQLite database. **Breaking change:** existing
-databases stamped with historic PasarGuard revisions cannot use a normal
-`alembic upgrade head`; migrate or explicitly reset those databases under a
-separate reviewed plan. Never reset Intens production to adopt this baseline.
+Both an empty database and an existing database on a known PasarGuard Alembic
+revision advance using the same `alembic upgrade head` history. An existing
+installation keeps its users, subscription settings, roles, credentials, JWT
+signing key, and node data; the WayLane bridge never bootstraps or overwrites
+those rows. On PostgreSQL it converts three columns from JSON to JSONB to
+align with current model types; the existing upstream server defaults are
+intentionally retained. On SQLite/MySQL the bridge does not change column
+storage types. The preserved `bootstrap_seed.json` is a read-only fixture for
+verification; the historical migrations own actual fresh-database seeding.
+
+**Before migrating a production PasarGuard database**, capture a consistent
+backup, verify its current `alembic_version` is on this exact ancestry, and
+rehearse a full upgrade on a restored nonproduction clone. JSON-to-JSONB
+conversion obtains PostgreSQL DDL locks and normalizes JSON representation;
+validate stored settings, device keys, nodes, users, custom extensions, and
+application compatibility before planning a maintenance window. Never stamp
+an unknown revision or run migrations against Intens production without
+explicit deployment authorization. The restored historical files are
+protected by `app/db/migrations/legacy_history_sha256.json` and the verify
+script, so future modifications cannot silently rewrite migration history.
 
 
 ## First local development owner (CLI)
@@ -68,9 +84,9 @@ For normal managed environments use the existing one-time setup-key flow.
 
 ## TLS certificate presets (feature migration `waylane_0002`)
 
-The initial schema remains one `waylane_0001` baseline. New features have
-incremental forward migrations; `waylane_0002` adds TLS presets and per-node
-inbound bindings. Apply with `alembic upgrade head`.
+After the historical migration chain, `waylane_0001` performs only the
+compatibility bridge. Feature migrations are incremental; `waylane_0002`
+adds TLS presets and per-node inbound bindings. Apply with `alembic upgrade head`.
 
 Configure a stable **Fernet encryption key** as `WAYLANE_TLS_SECRET_KEY`
 before adding presets. Protect and back up this secret separately from the DB:
