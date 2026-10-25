@@ -17,9 +17,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-dev
 ADD . /build
-# Required cross-repository UI artifact, supplied by waylane-frontend CI.
-# Fail before the final image is produced instead of trying to build UI at runtime.
-RUN test -f /build/dashboard/build/index.html && test -d /build/dashboard/build/statics
+# A separate frontend image serves the UI in the new Coolify topology.
+# When prebuilt dashboard/build exists, the legacy combined image stays valid.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -56,6 +55,5 @@ RUN chmod +x /code/start.sh
 
 ENTRYPOINT ["/code/start.sh"]
 
-# WayLane: the web bundle is produced in a separate repository.
-# Install it using scripts/install_frontend.sh before building this image.
-RUN test -f /code/dashboard/build/index.html && test -d /code/dashboard/build/statics
+EXPOSE 8000
+HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=3 CMD /code/healthcheck.sh

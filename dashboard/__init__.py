@@ -70,10 +70,15 @@ def run_build(app):
     # WayLane builds the frontend in its own repository. Do not compile UI at
     # backend startup: runtime images deliberately do not include Bun/Node.
     if not (build_dir / "index.html").is_file() or not statics_dir.is_dir():
-        raise RuntimeError(
-            "WayLane frontend artifact missing: install waylane-frontend/build "
-            "into dashboard/build before starting the backend"
+        # Standalone API images intentionally omit the frontend. A separately
+        # deployed web application owns the dashboard route in this topology.
+        # Keep the previous combined deployment available when assets exist.
+        import logging
+
+        logging.getLogger(__name__).info(
+            "Dashboard assets absent; running WayLane API without embedded frontend"
         )
+        return
 
     app.mount(dashboard_settings.path, DashboardStaticFiles(directory=build_dir, html=True), name="dashboard")
     app.mount("/statics/", DashboardStaticFiles(directory=statics_dir, html=True), name="statics")
