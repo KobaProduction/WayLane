@@ -85,3 +85,42 @@ key is decrypted into the ephemeral node-facing `Start` request, never the
 persistent core JSON. Certificate rotation force-applies only to bound nodes;
 per-node outcomes are reported. External ACME/ACM provisioning is not yet part
 of this feature.
+
+
+## Automatic ACME issuance — OpenFlare-inspired DNS-01
+
+The WayLane control plane follows the design of
+[OpenFlare](https://github.com/Rain-kl/OpenFlare) (Apache-2.0):
+encrypted DNS credentials, a managed ACME account/order lifecycle,
+Cloudflare DNS-01, renewal due seven days before expiry and certificate
+deployment to bound nodes. No OpenFlare implementation source was copied.
+
+Install **lego v5** (https://go-acme.github.io/lego/) on the control-plane
+host and set `WAYLANE_LEGO_BIN` to the trusted absolute executable path,
+`WAYLANE_ACME_WORK_DIR` to a private 0700 filesystem directory, and
+`WAYLANE_TLS_SECRET_KEY` to the same backed-up Fernet key used by TLS
+presets. Only explicitly selected CA endpoints are accepted:
+`letsencrypt-staging` (default) or `letsencrypt` (production).
+A Cloudflare token needs Zone/DNS:Edit and Zone/Zone:Read, ideally scoped
+to one DNS zone. The token is Fernet-encrypted in PostgreSQL.
+Lego account and certificate files exist in private temporary directories
+only while issuing; their persisted archive is encrypted.
+
+In the TLS Presets admin section create a DNS account, issue an ACME
+certificate for one or more DNS names (wildcards require DNS-01), then
+attach the resulting TLS preset to chosen Xray node inbounds.
+The issuance endpoint enqueues an application background task and returns
+immediately; check `/api/acme/orders` to see persistent state.
+An error never overwrites a previously valid TLS certificate.
+
+For automatic renewal **schedule** `python waylane-cli.py acme-renew-due`
+as a one-shot task (e.g. daily) in the deployment's authorized scheduler;
+it does not create a process monitor or install a system service.
+Manual admin alternative: `POST /api/acme/renew-due`.
+An order with auto-renew enabled becomes due seven days before its expiry.
+The control plane only deploys successfully validated certificates to the
+already explicitly bound nodes. Staging certificates are **not publicly
+trusted**; obtain a production certificate before real client traffic.
+
+Limits: initial implementation supports Cloudflare DNS-01 only and lego v5,
+not HTTP-01, EAB, DNS providers beyond Cloudflare, or an always-on scheduler.

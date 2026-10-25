@@ -35,6 +35,17 @@ def cmd_init_owner(
     init_owner(username, Path(credentials_file))
 
 
+@app.command("acme-renew-due")
+def acme_renew_due():
+    """One-shot renewal of due ACME orders; schedule via an external orchestrator."""
+    import asyncio
+
+    from app.operation.acme import run_due_once
+
+    count = asyncio.run(run_due_once())
+    console.print(f"Processed {count} due ACME certificate order(s).")
+
+
 @app.command()
 def version():
     """Show WayLane version."""

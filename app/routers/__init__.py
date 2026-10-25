@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from . import (
     admin,
+    acme,
     admin_role,
     api_key,
     client_template,
@@ -26,6 +27,7 @@ api_router = APIRouter()
 routers = [
     home.router,
     admin.router,
+    acme.router,
     api_key.router,
     admin_role.router,
     setup.router,

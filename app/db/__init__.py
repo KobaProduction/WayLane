@@ -15,3 +15,6 @@ __all__ = [
 
 # Register TLS preset tables in the central SQLAlchemy metadata.
 from app.db import tls as _tls_tables  # noqa: F401, E402
+
+# Register managed ACME accounts and orders with the central metadata.
+from app.db import acme as _acme_tables  # noqa: F401, E402
