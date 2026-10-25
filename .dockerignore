@@ -1,0 +1,13 @@
+.git
+.github
+.githooks
+node_modules
+build
+.runtime
+.env
+.env.*
+*.log
+*.tmp
+subscription-page/node_modules
+subscription-page/.nuxt
+subscription-page/.output
