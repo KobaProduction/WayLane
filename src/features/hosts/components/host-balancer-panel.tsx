@@ -146,6 +146,13 @@ export default function HostBalancerPanel({ hosts, canCreate, canUpdate }: {
                 <option value="leastPing">Минимальный пинг (observatory)</option>
                 <option value="leastLoad">Наиболее стабильный (burstObservatory)</option>
               </select>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {strategy === 'roundRobin' || strategy === 'random'
+                  ? 'Распределяет подключения без проверки доступности. Если один сервер отключится, часть новых подключений может завершиться ошибкой. Для автоматического обхода недоступного сервера используйте «Минимальный пинг».'
+                  : strategy === 'leastPing'
+                    ? 'Проверяет доступность серверов и переключает новые подключения на рабочий сервер по результатам проверок. Интервал влияет на скорость обнаружения отказа.'
+                    : 'Выбирает наиболее стабильный сервер по серии проверок. Обнаружение отказа может занимать несколько минут; для быстрого переключения используйте «Минимальный пинг».'}
+              </p>
             </div>
             {(strategy === 'leastPing' || strategy === 'leastLoad') && (
               <div>
