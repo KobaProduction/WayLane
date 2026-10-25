@@ -1,3 +1,4 @@
+import { CorePresetsPanel } from '@/features/nodes/components/core-presets-panel'
 import { useCallback, useMemo, useState } from 'react'
 import Cores from '@/features/nodes/components/cores/cores-list'
 import { useGetAllCores, useDeleteCoreConfig, useCreateCoreConfig } from '@/service/api'
@@ -143,6 +144,7 @@ export default function CoresIndexPage() {
 
   return (
     <div className="flex flex-col px-4">
+      <CorePresetsPanel canCreate={canCreateCores} canUpdate={canUpdateCores} canDelete={canDeleteCores} />
       <Cores
         cores={cores}
         onDuplicateCore={canCreateCores ? handleDuplicateCore : undefined}
