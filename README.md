@@ -350,3 +350,45 @@ chain. No automatic changes are applied to existing core configurations:
 they retain their previous inline settings until an administrator explicitly
 binds a preset. New secrets require WAYLANE_TLS_SECRET_KEY on every WayLane
 backend process that materializes Xray configs.
+
+## Read-only business statistics (PasarGuard issue #582)
+
+WayLane offers an owner-only business analytics dashboard with four primary
+views: General, Nodes and speeds, User traffic, Devices. The specification
+originates from https://github.com/PasarGuard/panel/issues/582, adapted to the
+requirement that no existing database schema or telemetry collector may change.
+CPU, RAM and disk panels are not duplicated: Grafana owns resource monitoring.
+Existing operational metrics and exporters remain unchanged.
+
+Backend routes under /api/business-analytics read existing tables only:
+- /catalog — node and user names/status for filters.
+- /matrix — per-user/per-node total traffic from node_user_usages; filter
+  by user, node, status, time range or lifetime, and exclude bridge IDs.
+  It supports node to users and user to nodes; limit 1,500 relationships.
+- /traffic-series — when a user or node is selected, a time-series for the
+  12 highest-traffic related nodes/users, using existing 10-minute aggregate
+  user-node history samples (total bytes only).
+- /nodes — hourly/daily directional node_usages samples. When bridge users
+  are excluded, totals derive from node_user_usages and directional values
+  are explicitly unavailable; limit 8,000 buckets.
+- /devices — current HWID systems, models, OS versions and last-used time,
+  plus User-Agent counts of subscription refreshes in a selected period.
+- For current aggregate and per-node speeds, the UI calls the existing
+  /api/nodes/realtime_stats endpoint and sums current inbound/outbound
+  bytes/second into Mbps. The UI refreshes only while the page is open
+  and visible, every 15 seconds. No new collectors or jobs are installed.
+
+Period filters offer 24 hours, 7/30/90 days, custom timezone-aware bounds
+and lifetime totals for the user/node matrix. Historical time series have
+a maximum span of 366 days; the all-time selection on the graph falls back
+to the most recent 90 days. Node colors and temporary bridge/node exclusions
+live only in the administrator browser's local storage, never the database.
+Access is owner-only because user names/HWID details span admin scopes.
+
+Source limitations: node_user_usages retains only aggregate used_traffic per
+user/node/time bucket and cannot yield accurate per-user upload/download.
+These aggregates must not be confused with directional node_usages or live
+network speed. No retention setting, migration, data write, polling job, or
+telemetry collection change is involved. Deleted users/nodes may be missing
+from the historical joins due to existing cascades. The issue's future
+inbound-to-outbound path tracing is not implemented in this read-only scope.
