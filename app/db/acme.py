@@ -34,6 +34,7 @@ acme_orders = sa.Table(
     sa.Column("last_attempt_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("next_renewal_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("lease_token", sa.String(36), nullable=True),
     sa.Column("encrypted_lego_state", sa.Text(), nullable=True),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     sa.Index("ix_acme_orders_due", "auto_renew", "next_renewal_at"),

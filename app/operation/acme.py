@@ -184,6 +184,7 @@ async def issue_order(order_id: str) -> None:
     async with GetDB() as db:
         now = datetime.now(UTC)
         lease = now + timedelta(seconds=ACME_TIMEOUT_SECONDS + 30)
+        lease_token = str(uuid4())
         claimed = await db.execute(
             update(acme_orders)
             .where(
@@ -194,7 +195,7 @@ async def issue_order(order_id: str) -> None:
                     acme_orders.c.lease_until < now,
                 ),
             )
-            .values(status="running", last_error=None, last_attempt_at=now, lease_until=lease)
+            .values(status="running", last_error=None, last_attempt_at=now, lease_until=lease, lease_token=lease_token)
             .returning(acme_orders.c.id)
         )
         if claimed.first() is None:
@@ -221,10 +222,17 @@ async def issue_order(order_id: str) -> None:
         )
         info = validate_certificate_pair(cert, key)
         async with GetDB() as db:
-            # Only publish after the complete, validated certificate is available.
-            preset_id = order["preset_id"] or str(uuid4())
+            # Fencing: take the order row lock and reread ownership *before*
+            # modifying either the preset or the order. A superseded worker
+            # must not publish its stale certificate or clear the newer lease.
+            current = (await db.execute(
+                select(acme_orders).where(acme_orders.c.id == order_id).with_for_update()
+            )).mappings().first()
+            if not current or current["status"] != "running" or current["lease_token"] != lease_token:
+                return
+            preset_id = current["preset_id"] or str(uuid4())
             previous = None
-            if order["preset_id"]:
+            if current["preset_id"]:
                 previous = (await db.execute(
                     select(tls_presets).where(tls_presets.c.id == preset_id)
                 )).mappings().one()
@@ -245,6 +253,7 @@ async def issue_order(order_id: str) -> None:
                     encrypted_lego_state=new_state,
                     last_error=None,
                     lease_until=None,
+                    lease_token=None,
                     next_renewal_at=info["not_after"] - ACME_RENEW_BEFORE,
                 )
             )
@@ -260,24 +269,40 @@ async def issue_order(order_id: str) -> None:
         else:
             msg = "ACME issue or deployment failed; check server diagnostics"
         async with GetDB() as db:
-            await db.execute(update(acme_orders).where(acme_orders.c.id == order_id).values(
+            await db.execute(update(acme_orders).where(
+                acme_orders.c.id == order_id,
+                acme_orders.c.status == "running",
+                acme_orders.c.lease_token == lease_token,
+            ).values(
                 status="error", last_error=msg,
-                lease_until=None, next_renewal_at=datetime.now(UTC) + timedelta(hours=1),
+                lease_until=None, lease_token=None,
+                next_renewal_at=datetime.now(UTC) + timedelta(hours=1),
             ))
             await db.commit()
 
 
 async def due_orders() -> list[str]:
-    """Return IDs only; an external one-shot CLI or authorized API triggers renewal."""
+    """Select due renewals, abandoned first issues and expired leases.
+
+    This is a one-shot recovery scan, not an internal scheduler. Pending
+    initial orders are recovered even when subsequent auto-renew is disabled.
+    """
     now = datetime.now(UTC)
+    pending_grace = now - timedelta(minutes=1)
     async with GetDB() as db:
-        stmt = select(acme_orders.c.id).where(
-            and_(
-                acme_orders.c.auto_renew.is_(True),
-                acme_orders.c.preset_id.is_not(None),
-                acme_orders.c.next_renewal_at <= now,
-                or_(acme_orders.c.status != "running", acme_orders.c.lease_until < now),
-            )
+        stmt = (
+            select(acme_orders.c.id)
+            .where(or_(
+                and_(acme_orders.c.status == "pending", acme_orders.c.created_at <= pending_grace),
+                and_(acme_orders.c.status == "running", acme_orders.c.lease_until < now),
+                and_(
+                    acme_orders.c.auto_renew.is_(True),
+                    acme_orders.c.status.in_(("ready", "error")),
+                    acme_orders.c.next_renewal_at <= now,
+                ),
+            ))
+            .order_by(acme_orders.c.created_at, acme_orders.c.id)
+            .limit(100)
         )
         return list((await db.scalars(stmt)).all())
 

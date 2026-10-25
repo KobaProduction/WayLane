@@ -229,3 +229,142 @@ def test_persistent_order_issuance_and_renewal_updates_tls_preset(monkeypatch, t
 
     asyncio.run(exercise())
     assert call_count == 2
+
+
+def test_one_shot_recovery_selects_only_abandoned_and_due_orders(monkeypatch, tmp_path):
+    """The external one-shot worker recovers abandoned first issues and expired leases."""
+    import asyncio
+    from contextlib import asynccontextmanager
+    from uuid import uuid4
+
+    from sqlalchemy import insert
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import Base
+    from app.db.acme import acme_dns_accounts, acme_orders
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'recovery.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def test_db():
+        async with sessions() as db:
+            yield db
+
+    monkeypatch.setattr(acme, "GetDB", test_db)
+    now = datetime.now(UTC)
+
+    async def exercise():
+        async with engine.begin() as db:
+            await db.run_sync(Base.metadata.create_all)
+        dns_id = str(uuid4())
+        rows = {
+            "abandoned_pending": dict(status="pending", auto_renew=False, created_at=now - timedelta(minutes=5)),
+            "fresh_pending": dict(status="pending", auto_renew=False, created_at=now),
+            "expired_running": dict(status="running", auto_renew=False, lease_until=now - timedelta(minutes=1)),
+            "active_running": dict(status="running", auto_renew=True, lease_until=now + timedelta(minutes=5)),
+            "ready_due": dict(status="ready", auto_renew=True, next_renewal_at=now - timedelta(minutes=1)),
+            "ready_later": dict(status="ready", auto_renew=True, next_renewal_at=now + timedelta(days=10)),
+            "ready_disabled": dict(status="ready", auto_renew=False, next_renewal_at=now - timedelta(days=1)),
+            "retry_due": dict(status="error", auto_renew=True, next_renewal_at=now - timedelta(minutes=1)),
+            "retry_later": dict(status="error", auto_renew=True, next_renewal_at=now + timedelta(minutes=50)),
+        }
+        async with sessions() as db:
+            await db.execute(insert(acme_dns_accounts).values(
+                id=dns_id, name="recovery", provider="cloudflare", encrypted_dns_token="fixture"))
+            for name, attrs in rows.items():
+                await db.execute(insert(acme_orders).values(
+                    id=name, name=name, dns_account_id=dns_id,
+                    email="test@example.org", domains=["example.org"], environment="staging",
+                    **attrs,
+                ))
+            await db.commit()
+        selected = set(await acme.due_orders())
+        assert selected == {"abandoned_pending", "expired_running", "ready_due", "retry_due"}
+        await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("stale_fails", [False, True])
+def test_stale_acme_worker_cannot_overwrite_newer_issuance(monkeypatch, tmp_path, stale_fails):
+    """A timed-out worker completing late cannot overwrite the new lease owner."""
+    import asyncio
+    import threading
+    from contextlib import asynccontextmanager
+    from uuid import uuid4
+
+    from sqlalchemy import insert, select, update
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import Base
+    from app.db.acme import acme_dns_accounts, acme_orders
+    from app.db.tls import tls_presets
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'fencing.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    cert_old, key_old = certificate_pair(["example.org"])
+    cert_new, key_new = certificate_pair(["example.org"])
+    first_started = threading.Event()
+    finish_first = threading.Event()
+    calls = 0
+
+    @asynccontextmanager
+    async def test_db():
+        async with sessions() as db:
+            yield db
+
+    def fake_issuer(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            first_started.set()
+            if not finish_first.wait(timeout=15):
+                raise TimeoutError("test fixture timeout")
+            if stale_fails:
+                raise acme.AcmeError("Superseded attempt failed")
+            return cert_old, key_old, "old-state"
+        return cert_new, key_new, "new-state"
+
+    monkeypatch.setenv("WAYLANE_TLS_SECRET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setattr(acme, "GetDB", test_db)
+    monkeypatch.setattr(acme, "_run_lego", fake_issuer)
+
+    async def exercise():
+        async with engine.begin() as db:
+            await db.run_sync(Base.metadata.create_all)
+        order_id, dns_id = str(uuid4()), str(uuid4())
+        async with sessions() as db:
+            await db.execute(insert(acme_dns_accounts).values(
+                id=dns_id, name="fencing", provider="cloudflare",
+                encrypted_dns_token=acme.encrypt_private_key("fixture-private-token")))
+            await db.execute(insert(acme_orders).values(
+                id=order_id, name="fenced-order", dns_account_id=dns_id,
+                email="test@example.org", domains=["example.org"], environment="staging",
+                auto_renew=True, status="pending"))
+            await db.commit()
+        first_task = asyncio.create_task(acme.issue_order(order_id))
+        try:
+            assert await asyncio.wait_for(asyncio.to_thread(first_started.wait, 10), timeout=11)
+            async with sessions() as db:
+                await db.execute(update(acme_orders).where(acme_orders.c.id == order_id).values(
+                    lease_until=datetime.now(UTC) - timedelta(minutes=1)))
+                await db.commit()
+            await acme.issue_order(order_id)
+        finally:
+            finish_first.set()
+            await first_task
+        async with sessions() as db:
+            order = (await db.execute(select(acme_orders))).mappings().one()
+            preset = (await db.execute(select(tls_presets))).mappings().one()
+            assert order["status"] == "ready"
+            assert order["lease_token"] is None
+            assert order["encrypted_lego_state"] == "new-state"
+            assert order["preset_id"] == preset["id"]
+            assert preset["revision"] == 1
+            assert preset["certificate_pem"] == cert_new
+            assert decrypt_private_key(preset["encrypted_private_key"]) == key_new
+        await engine.dispose()
+
+    asyncio.run(exercise())
+    assert calls == 2

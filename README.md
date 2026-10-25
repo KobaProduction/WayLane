@@ -118,9 +118,21 @@ as a one-shot task (e.g. daily) in the deployment's authorized scheduler;
 it does not create a process monitor or install a system service.
 Manual admin alternative: `POST /api/acme/renew-due`.
 An order with auto-renew enabled becomes due seven days before its expiry.
+The same one-shot command recovers abandoned initial `pending` orders (after a
+one-minute grace period) and `running` attempts whose lease has expired, even
+if future automatic renewal was disabled. Failed auto-renew orders retry after
+one hour. Each issuance attempt has a unique persisted fencing token: an old
+worker cannot overwrite a certificate after another worker takes over its
+expired lease. The scanner processes at most 100 orders per invocation;
+subsequent invocations handle remaining eligible orders. For reliable recovery,
+configure the external scheduler deliberately; no scheduler is installed by
+the application itself.
+
 The control plane only deploys successfully validated certificates to the
-already explicitly bound nodes. Staging certificates are **not publicly
-trusted**; obtain a production certificate before real client traffic.
+already explicitly bound nodes. The current order status indicates issuance;
+node-level apply failures must be checked separately using TLS bindings and
+node status. Staging certificates are **not publicly trusted**; obtain a
+production certificate before real client traffic.
 
 Limits: initial implementation supports Cloudflare DNS-01 only and lego v5,
 not HTTP-01, EAB, DNS providers beyond Cloudflare, or an always-on scheduler.
