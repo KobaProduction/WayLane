@@ -1,14 +1,14 @@
 """Add per-attempt fencing tokens to ACME orders.
 
-Revision ID: waylane_0004
-Revises: waylane_0003
+Revision ID: 9266245ebd3d
+Revises: 985f97eefe3d
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "waylane_0004"
-down_revision = "waylane_0003"
+revision = "9266245ebd3d"
+down_revision = "985f97eefe3d"
 branch_labels = None
 depends_on = None
 

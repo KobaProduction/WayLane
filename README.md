@@ -40,9 +40,9 @@ Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft
 The original **160 Alembic revisions** from PasarGuard Panel (pinned in
 `UPSTREAM.md`) are retained unchanged. The historical root is
 `94a5cc12c0d6` and the historical tip is `c8d2e4f6a1b3`. The WayLane
-`waylane_0001` revision now **continues that tip** instead of replacing the
+`21bec95874f4` revision now **continues that tip** instead of replacing the
 entire migration graph with a second, incompatible baseline. Subsequent
-WayLane migrations (`waylane_0002` and later) remain forward-only features.
+WayLane migrations (`bd1c0d80d86f` and later) remain forward-only features.
 
 Both an empty database and an existing database on a known PasarGuard Alembic
 revision advance using the same `alembic upgrade head` history. An existing
@@ -53,6 +53,17 @@ align with current model types; the existing upstream server defaults are
 intentionally retained. On SQLite/MySQL the bridge does not change column
 storage types. The preserved `bootstrap_seed.json` is a read-only fixture for
 verification; the historical migrations own actual fresh-database seeding.
+
+**Early WayLane preview databases only:** revisions formerly named
+`waylane_0001` through `waylane_0004` are no longer revision IDs in the
+main Alembic graph. After a verified backup and before a normal
+`alembic upgrade head`, reconcile one of these *already applied* previews
+using `python -m scripts.reconcile_legacy_waylane_revision` (dry-run) and
+the explicit `--apply` option. This script validates the expected
+application table/column state, then updates only `alembic_version`; it
+refuses all unknown revisions. It must never be used to skip migrations on
+a PasarGuard database. Rehearse on a restored database first; do not apply
+to production without authorization.
 
 **Before migrating a production PasarGuard database**, capture a consistent
 backup, verify its current `alembic_version` is on this exact ancestry, and
@@ -82,10 +93,10 @@ bootstrap or overwriting existing credentials. Sign in through
 For normal managed environments use the existing one-time setup-key flow.
 
 
-## TLS certificate presets (feature migration `waylane_0002`)
+## TLS certificate presets (feature migration `bd1c0d80d86f`)
 
-After the historical migration chain, `waylane_0001` performs only the
-compatibility bridge. Feature migrations are incremental; `waylane_0002`
+After the historical migration chain, `21bec95874f4` performs only the
+compatibility bridge. Feature migrations are incremental; `bd1c0d80d86f`
 adds TLS presets and per-node inbound bindings. Apply with `alembic upgrade head`.
 
 Configure a stable **Fernet encryption key** as `WAYLANE_TLS_SECRET_KEY`

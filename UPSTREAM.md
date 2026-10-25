@@ -25,7 +25,7 @@ The 160 original PasarGuard Panel migration files from the imported snapshot
 without modification. Their exact file hashes are tracked in
 `app/db/migrations/legacy_history_sha256.json`. The historical tip
 `c8d2e4f6a1b3` precedes the new WayLane compatibility bridge
-`waylane_0001`; none of the original migration IDs have been replaced.
+`21bec95874f4`; none of the original migration IDs have been replaced.
 
 The former collapsed `waylane_0001` create-all baseline was discarded as an
 active migration: executing it against an existing PasarGuard database would

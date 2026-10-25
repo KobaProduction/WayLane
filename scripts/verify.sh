@@ -14,11 +14,13 @@ from pathlib import Path
 import ast
 import hashlib
 import json
+import re
 
 root = Path("app/db/migrations")
 versions = sorted((root / "versions").glob("*.py"))
 manifest = json.loads((root / "legacy_history_sha256.json").read_text())
-legacy = {p.name: p for p in versions if not p.name.startswith("waylane_")}
+legacy = {p.name: p for p in versions if p.name in manifest}
+assert len(versions) >= len(manifest) + 4, "Core Alembic migration files missing"
 assert len(manifest) == len(legacy) == 160, "Historical migrations are missing or untracked"
 for name, sha256 in manifest.items():
     assert name in legacy, f"Missing historical migration {name}"
@@ -35,13 +37,21 @@ for file in versions:
         and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id in {"revision", "down_revision"}
     }
+    assert re.fullmatch(r"[0-9a-f]{12}", entries["revision"]), f"Invalid Alembic revision ID: {file.name}"
+    assert file.name.startswith(entries["revision"] + "_"), f"Migration filename disagrees with revision: {file.name}"
     assert entries["revision"] not in revisions, f"Duplicate revision {entries['revision']}"
     revisions[entries["revision"]] = entries["down_revision"]
 assert len(revisions) >= 164, "WayLane core migrations are missing"
 assert revisions["94a5cc12c0d6"] is None, "Original PasarGuard root was changed"
-assert revisions["waylane_0001"] == "c8d2e4f6a1b3", "WayLane must continue the original tip"
-for step in range(2, 5):
-    assert revisions[f"waylane_{step:04d}"] == f"waylane_{step-1:04d}"
+assert revisions["21bec95874f4"] == "c8d2e4f6a1b3", "WayLane must continue the original tip"
+waylane_revisions = (
+    "21bec95874f4",
+    "bd1c0d80d86f",
+    "985f97eefe3d",
+    "9266245ebd3d",
+)
+for previous, next_revision in zip(waylane_revisions, waylane_revisions[1:]):
+    assert revisions[next_revision] == previous, "WayLane migration ancestry changed"
 def parents(value):
     if value is None:
         return ()
@@ -52,7 +62,7 @@ def parents(value):
 heads = set(revisions) - {parent for links in revisions.values() for parent in parents(links)}
 assert len(heads) == 1, f"Unexpected Alembic heads: {heads}"
 current_head = next(iter(heads))
-assert current_head.startswith("waylane_"), f"No WayLane head: {current_head}"
+assert re.fullmatch(r"[0-9a-f]{12}", current_head), f"Unexpected Alembic head: {current_head}"
 visiting = set()
 seen = set()
 

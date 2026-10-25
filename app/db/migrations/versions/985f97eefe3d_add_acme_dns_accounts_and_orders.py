@@ -1,14 +1,14 @@
 """ACME DNS provider accounts and managed certificate lifecycle.
 
-Revision ID: waylane_0003
-Revises: waylane_0002
+Revision ID: 985f97eefe3d
+Revises: bd1c0d80d86f
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "waylane_0003"
-down_revision = "waylane_0002"
+revision = "985f97eefe3d"
+down_revision = "bd1c0d80d86f"
 branch_labels = None
 depends_on = None
 

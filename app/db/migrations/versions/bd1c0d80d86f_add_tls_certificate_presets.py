@@ -1,13 +1,13 @@
 """Add encrypted TLS presets and explicit node/inbound bindings.
 
-Revision ID: waylane_0002
-Revises: waylane_0001
+Revision ID: bd1c0d80d86f
+Revises: 21bec95874f4
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "waylane_0002"
-down_revision = "waylane_0001"
+revision = "bd1c0d80d86f"
+down_revision = "21bec95874f4"
 branch_labels = None
 depends_on = None
 

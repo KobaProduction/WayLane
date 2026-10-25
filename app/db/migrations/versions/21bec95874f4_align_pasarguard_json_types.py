@@ -1,6 +1,6 @@
 """WayLane schema compatibility bridge for historical PasarGuard databases.
 
-Revision ID: waylane_0001
+Revision ID: 21bec95874f4
 Revises: c8d2e4f6a1b3
 
 Existing PasarGuard installations have already created and populated the
@@ -11,7 +11,7 @@ credentials, JWT signing keys, or node records.
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "waylane_0001"
+revision = "21bec95874f4"
 down_revision = "c8d2e4f6a1b3"
 branch_labels = None
 depends_on = None
