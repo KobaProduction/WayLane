@@ -8,7 +8,7 @@ import { Separator } from '@/components/ui/separator'
 import { useAdmin } from '@/hooks/use-admin'
 import { useClipboard } from '@/hooks/use-clipboard'
 import type { AdminDetails, UserResponse } from '@/service/api'
-import { useGetSystemResourceStats, useGetSystemUsersStats } from '@/service/api'
+import { useGetSystemUsersStats } from '@/service/api'
 import { Bookmark } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -86,12 +86,6 @@ const Dashboard = () => {
 
   const systemUsersStatsParams = canReadAllUsers && selectedAdmin && selectedAdmin.username !== 'Total' ? { admin_username: selectedAdmin.username } : undefined
 
-  const { data: systemResourceStatsData } = useGetSystemResourceStats({
-    query: {
-      refetchInterval: 5000,
-    },
-  })
-
   const { data: systemUsersStatsData } = useGetSystemUsersStats(systemUsersStatsParams, {
     query: {
       refetchInterval: 5000,
@@ -107,7 +101,7 @@ const Dashboard = () => {
 
       <div className="w-full px-3 pt-2 sm:px-4">
         <div className="flex flex-col gap-4 sm:gap-6">
-          <DashboardStatistics resourceData={systemResourceStatsData} usersData={systemUsersStatsData} />
+          <DashboardStatistics usersData={systemUsersStatsData} />
           {canReadNodeStats && <WorkersHealthCard />}
           <Separator className="my-4" />
           {canReadAllUsers ? (
