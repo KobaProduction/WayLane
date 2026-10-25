@@ -310,3 +310,43 @@ the due-events index without rewriting the PasarGuard migration chain.
 Legacy failed rows with NULL timestamps become immediately due;
 previously exhausted 10-attempt failures remain available for manual
 requeue.
+
+## Reusable Xray core presets: REALITY, VLESS Encryption and routing
+
+The Cores page exposes a reusable preset editor for Xray core configs:
+
+- REALITY preset: validated x25519 private key and derived public key, shortIds,
+  optional ML-DSA65 seed/verify. The private key and seed are encrypted with
+  the deployment's existing WAYLANE_TLS_SECRET_KEY (Fernet); API/list responses
+  return only public metadata and IDs.
+- VLESS Encryption preset: the paired Xray vlessenc server decryption and
+  client encryption fields. Only the server decryption is encrypted at rest;
+  the client encryption string is used for subscription generation. VMess
+  does not have the same server/client vlessenc key-pair contract.
+- Routing preset: JSON routing rules, balancers and strategy, separate from
+  core-specific outbound definitions. A binding verifies that named outbound
+  tags exist before saving the shared routing template.
+
+Core bindings target one existing core/inbound tag (or __routing__ for
+whole-core routing). Applying a binding replaces inline secret fields in
+core_configs.config with a preset reference plus public metadata. Xray core
+manager and public REST endpoints never require the managed REALITY private
+key or server-side VLESS decryption value; they remain inside the encrypted
+presets table. Only at the node Start RPC boundary are encrypted keys
+materialized into an ephemeral Xray JSON payload. As with managed TLS
+certificates, DO NOT log or retain that payload.
+
+Preset rotation updates bound cores' public projections, but deliberately
+does not restart live nodes. After reviewing the impact, use an explicit
+core/node restart action to deploy changed server credentials. Key rotation
+can break clients if they have not yet refreshed their subscriptions: schedule
+a coordinated rollout. Referenced presets cannot be deleted while bound.
+Changing a managed core to a different backend is blocked until bindings
+are deliberately removed/migrated. The first version supports replacing
+bindings, not removing the managed references independently of their cores.
+
+Migration a4b9d8e31f20 extends the restored PasarGuard/WayLane Alembic
+chain. No automatic changes are applied to existing core configurations:
+they retain their previous inline settings until an administrator explicitly
+binds a preset. New secrets require WAYLANE_TLS_SECRET_KEY on every WayLane
+backend process that materializes Xray configs.

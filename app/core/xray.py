@@ -273,10 +273,13 @@ class XRayConfig(dict):
         settings["sni"] = [str(sni) for sni in (tls_settings.get("serverNames") or [])]
 
         pvk = tls_settings.get("privateKey")
-        if not pvk:
+        if not pvk and not tls_settings.get("waylanePresetId"):
             raise ValueError(f"You need to provide privateKey in realitySettings of {inbound_tag}")
 
-        settings["pbk"] = get_x25519_public_key(pvk)
+        # Managed REALITY presets expose only public metadata to the core
+        # manager and subscriptions. Private key material is injected only
+        # when the final config is sent to a node.
+        settings["pbk"] = get_x25519_public_key(pvk) if pvk else tls_settings.get("publicKey")
         if not settings.get("pbk"):
             raise ValueError(f"You need to provide publicKey in realitySettings of {inbound_tag}")
 
@@ -297,7 +300,7 @@ class XRayConfig(dict):
 
         if seed_set or verify_set:
             # Client pqv without a matching server seed causes silent REALITY auth failure.
-            if verify_set and not seed_set:
+            if verify_set and not seed_set and not tls_settings.get("waylanePresetId"):
                 raise ValueError(
                     f"mldsa65Verify is set without mldsa65Seed in realitySettings of {inbound_tag}. "
                     "Set both (matching pair) or clear both."

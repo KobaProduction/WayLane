@@ -379,12 +379,16 @@ class NodeOperation(BaseOperation):
             core_payload = core.to_str()
             if core.type == CoreType.xray:
                 from app.operation.tls_presets import hydrate_tls_config
+                from app.operation.core_presets import hydrate_core_preset_config
 
                 # Resolve encrypted presets exclusively at the node-facing RPC
                 # boundary. Never save private key material in core_configs.
                 async with GetDB() as tls_db:
                     core_payload = await hydrate_tls_config(
                         tls_db, core_payload, db_node.id, db_node.core_config_id or 1
+                    )
+                    core_payload = await hydrate_core_preset_config(
+                        tls_db, core_payload, db_node.core_config_id or 1
                     )
             start_kwargs = {
                 "config": core_payload,

@@ -24,3 +24,6 @@ from app.db import host_balancer as _host_balancer_tables  # noqa: F401, E402
 
 # Persist client notice design and device webhook outbox.
 from app.db import subscription_firewall as _subscription_firewall_tables  # noqa: F401, E402
+
+# Managed Xray core security and routing presets.
+from app.db import core_presets as _core_presets_tables  # noqa: F401, E402

@@ -6,6 +6,7 @@ from app.core.hosts import host_manager
 from app.core.live_update import node_facing, only_live_parts_changed
 from app.core.manager import core_manager
 from app.db import AsyncSession
+from app.db.models import CoreType
 from app.db.crud.core import (
     create_core_config,
     get_core_configs,
@@ -169,6 +170,32 @@ class CoreOperation(BaseOperation):
     ) -> CoreModification:
         db_core = await self.get_validated_core_config(db, core_id)
         was_wg = bool(wg_core_interfaces(db_core))
+        if modified_core.type not in (None, db_core.type):
+            from sqlalchemy import select
+
+            from app.db.core_presets import core_preset_bindings
+
+            bound = (await db.execute(
+                select(core_preset_bindings.c.id).where(
+                    core_preset_bindings.c.core_id == core_id
+                ).limit(1)
+            )).first()
+            if bound:
+                await self.raise_error(
+                    "Cannot change core backend type while managed Xray presets are attached",
+                    409, db=db,
+                )
+        # Managed core presets always own their target fields. Admin edits
+        # cannot accidentally put REALITY/VLESS secrets back into core JSON.
+        if modified_core.type in (None, db_core.type) and db_core.type in (None, CoreType.xray):
+            from app.operation.core_presets import project_bound_core_config
+
+            try:
+                modified_core = modified_core.model_copy(update={
+                    "config": await project_bound_core_config(db, core_id, modified_core.config)
+                })
+            except ValueError as exc:
+                await self.raise_error(message=str(exc), code=422, db=db)
         # What nodes run now, read before update_core replaces it.
         before = node_facing(await core_manager.get_core(db_core.id))
         try:
