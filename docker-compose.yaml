@@ -1,0 +1,82 @@
+# All-in-one CONTROL PLANE: PostgreSQL + backend + frontend.
+# Nodes run separately (they require privileged NET_ADMIN and enrollment).
+# Start: docker compose up -d --build with untracked .env credentials.
+name: waylane
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-waylane}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  backend:
+    build:
+      context: ./services/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-waylane}
+      ROLE: all-in-one
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: "8000"
+      UVICORN_WORKERS: "1"
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+    volumes:
+      - backend_data:/var/lib/pasarguard
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database, application]
+    healthcheck:
+      test: ["CMD", "/code/healthcheck.sh"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_API: /
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./deploy/compose/all-in-one/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [application]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  application: {}
+  database:
+    internal: true
+volumes:
+  postgres_data: {}
+  backend_data: {}

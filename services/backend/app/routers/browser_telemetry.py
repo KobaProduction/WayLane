@@ -10,12 +10,43 @@ from collections import OrderedDict
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.routing import APIRoute
+from starlette.requests import Request
 from pydantic import BaseModel, ConfigDict
 
 from app.models.admin import AdminDetails
 from .authentication import get_current
 
-router = APIRouter(prefix="/api/telemetry", tags=["Runtime telemetry"])
+# Anonymous attempts have no authenticated identity. Emit only one fixed
+# warning per minute to prevent public 401 spam exhausting the log exporter.
+_last_denied_warning = 0.0
+_denied_lock = threading.Lock()
+
+
+class AuthenticatedTelemetryRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def wrapped(request: Request):
+            global _last_denied_warning
+            try:
+                return await handler(request)
+            except HTTPException as exc:
+                if exc.status_code in (401, 403):
+                    now = time.monotonic()
+                    with _denied_lock:
+                        if now - _last_denied_warning >= 60:
+                            _last_denied_warning = now
+                            log.warning("browser.unauthenticated")
+                raise
+
+        return wrapped
+
+
+router = APIRouter(
+    prefix="/api/telemetry", tags=["Runtime telemetry"],
+    route_class=AuthenticatedTelemetryRoute,
+)
 _events: OrderedDict[int, tuple[float, int]] = OrderedDict()
 _lock = threading.Lock()
 log = logging.getLogger("waylane.telemetry")

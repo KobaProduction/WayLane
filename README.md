@@ -23,3 +23,11 @@ Provenance snapshot (2026-10-26):
 
 Source and upstream LICENSE, UPSTREAM and LICENSING remain with each module.
 Read docs/deployment/README.md for gates and topology.
+
+## Deployment options
+
+Use ordinary Compose or Coolify adapters for either a self-contained
+PostgreSQL/backend/frontend management stack or separately deployed
+backend/frontend with external DB and API ingress. The deployment inputs,
+credentials, smoke commands and security constraints are documented at
+[deploy/compose/README.md](deploy/compose/README.md).

@@ -41,6 +41,7 @@ jobs:
           tests/test_device_webhook_auto_retry.py
           tests/test_dashboard_api_only.py
           tests/test_direct_otlp.py
+          tests/test_compose_contract.py
   image:
     needs: verify
     runs-on: ubuntu-latest

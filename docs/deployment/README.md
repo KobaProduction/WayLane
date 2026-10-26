@@ -37,3 +37,14 @@ parsed Coolify Watch Paths, generated domains and secret references; signed
 GitHub App webhooks received on both sites; health/login/API; OTLP logs and
 traces visible by service.name/namespace/environment; DB backup and rollback.
 This migration branch is not itself a running Coolify deployment.
+
+## Source-controlled Compose variants
+
+The root docker-compose.yaml / docker-compose.coolify.yaml provide a
+PostgreSQL+backend+frontend management stack; the module-local ordinary and
+Coolify Compose pairs under services/backend and services/frontend support
+independent Watch Paths and an externally owned database/API balancer.
+
+Exact external variable contract, commands, security and source ownership:
+deploy/compose/README.md. Actual Coolify parser resolution, Shared secrets,
+domain generation and persistence must be verified before live deployment.
