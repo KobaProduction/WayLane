@@ -1,0 +1,102 @@
+name: Compose configurations
+on:
+  push:
+    branches: [main, development, migration/waylane-monorepo]
+    paths:
+      - docker-compose.yaml
+      - docker-compose.coolify.yaml
+      - "deploy/compose/**"
+      - "services/backend/docker-compose*.yaml"
+      - "services/backend/compose_db_entrypoint.py"
+      - "services/frontend/docker-compose*.yaml"
+      - "services/node/docker-compose.coolify.yaml"
+      - ".github/workflows/compose.yml"
+  pull_request:
+    paths:
+      - docker-compose.yaml
+      - docker-compose.coolify.yaml
+      - "deploy/compose/**"
+      - "services/backend/docker-compose*.yaml"
+      - "services/backend/compose_db_entrypoint.py"
+      - "services/frontend/docker-compose*.yaml"
+      - "services/node/docker-compose.coolify.yaml"
+      - ".github/workflows/compose.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: ci_waylane
+      POSTGRES_PASSWORD: synthetic-compose-ci-only
+      POSTGRES_DB: waylane_test
+      SQLALCHEMY_DATABASE_URL: postgresql+asyncpg://ci_waylane:synthetic-compose-ci-only@db.invalid:5432/waylane_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Docker Compose files and extensions
+        run: |
+          set -euo pipefail
+          docker compose version
+          docker compose -f docker-compose.yaml config --quiet
+          docker compose -f docker-compose.coolify.yaml config --quiet
+          docker compose -f services/backend/docker-compose.yaml config --quiet
+          docker compose -f services/backend/docker-compose.coolify.yaml config --quiet
+          docker compose -f services/frontend/docker-compose.yaml config --quiet
+          docker compose -f services/frontend/docker-compose.coolify.yaml config --quiet
+      - name: Verify required DB variable enforcement
+        run: |
+          set -euo pipefail
+          if env -u POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing PostgreSQL password was accepted" >&2
+            exit 1
+          fi
+          if env -u POSTGRES_USER docker compose -f docker-compose.coolify.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing PostgreSQL user was accepted" >&2
+            exit 1
+          fi
+          if env -u SQLALCHEMY_DATABASE_URL docker compose -f services/backend/docker-compose.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing external database DSN was accepted" >&2
+            exit 1
+          fi
+      - name: Verify local bundled Nginx config syntax
+        run: |
+          docker run --rm --add-host backend:127.0.0.1 \
+            -v "$PWD/deploy/compose/all-in-one/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginxinc/nginx-unprivileged:1.28-alpine nginx -t
+
+  bundled-smoke:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      POSTGRES_USER: waylane_ci
+      POSTGRES_PASSWORD: synthetic-compose-ci-only
+      POSTGRES_DB: waylane_ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start bundled management stack
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yaml up -d --build --wait --wait-timeout 240
+      - name: Exercise same-origin frontend and unauthorized telemetry
+        run: |
+          set -euo pipefail
+          curl --fail --retry 5 --retry-delay 3 http://127.0.0.1:8080/health
+          curl --fail --retry 5 --retry-delay 3 http://127.0.0.1:8080/
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            -X POST http://127.0.0.1:8080/api/telemetry/browser \
+            -H 'Content-Type: application/json' \
+            -d '{"kind":"uncaught_error","route_group":"dashboard"}')"
+          test "$code" = 401
+          echo "Bundled same-origin authentication enforced"
+      - name: Diagnostics (only on failure)
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yaml ps
+          docker compose -f docker-compose.yaml logs --no-color --tail=65 postgres backend frontend |
+            sed -E 's#(postgresql\+asyncpg://)[^@[:space:]]+@#\1[REDACTED]@#g'
+      - name: Remove synthetic test stack
+        if: always()
+        run: docker compose -f docker-compose.yaml down -v --remove-orphans

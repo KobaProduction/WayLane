@@ -1,0 +1,20 @@
+# Coolify: Base Directory /services/backend
+# Docker compose location /docker-compose.coolify.yaml
+# Persist EXACT resource Watch Paths; do not watch unrelated owners.
+x-watch-path-coolify:
+  - "services/backend/**"
+
+services:
+  backend:
+    extends:
+      file: docker-compose.yaml
+      service: backend
+    environment:
+      SQLALCHEMY_DATABASE_URL: ${SQLALCHEMY_DATABASE_URL:?}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+
+volumes:
+  backend_data: {}

@@ -1,0 +1,44 @@
+# Coolify: Base Directory / ; Docker compose location /docker-compose.coolify.yaml
+# Configure the generated POSTGRES_USER/PASSWORD as Required (protected
+# environment/project scope), POSTGRES_DB as Optional with safe default.
+x-watch-path-coolify:
+  - "docker-compose.yaml"
+  - "docker-compose.coolify.yaml"
+  - "deploy/compose/all-in-one/**"
+  - "services/backend/**"
+  - "services/frontend/**"
+
+services:
+  postgres:
+    extends:
+      file: docker-compose.yaml
+      service: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-waylane}
+  backend:
+    extends:
+      file: docker-compose.yaml
+      service: backend
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-waylane}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+  frontend:
+    extends:
+      file: docker-compose.yaml
+      service: frontend
+
+# Compose extends merges services but does NOT import top-level declarations.
+networks:
+  application: {}
+  database:
+    internal: true
+volumes:
+  postgres_data: {}
+  backend_data: {}

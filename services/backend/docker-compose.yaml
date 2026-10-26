@@ -1,0 +1,33 @@
+# Standalone backend using an EXTERNALLY managed PostgreSQL database.
+# Use only one connection contract: SQLALCHEMY_DATABASE_URL includes
+# externally administered username, password, hostname and DB name.
+# No PostgreSQL container or database volume is created by this deployment.
+name: waylane-backend
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SQLALCHEMY_DATABASE_URL: ${SQLALCHEMY_DATABASE_URL:?}
+      ROLE: all-in-one
+      UVICORN_HOST: backend
+      UVICORN_PORT: "8000"
+      UVICORN_WORKERS: "1"
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - backend_data:/var/lib/pasarguard
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://backend:8000/health >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+volumes:
+  backend_data: {}

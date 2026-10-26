@@ -1,0 +1,62 @@
+from fastapi import APIRouter
+
+from . import (
+    admin,
+    acme,
+    admin_role,
+    api_key,
+    client_template,
+    core,
+    core_presets,
+    business_analytics,
+    browser_telemetry,
+    group,
+    home,
+    host,
+    host_balancer,
+    hwid,
+    node,
+    passkey,
+    settings,
+    tls_presets,
+    setup,
+    subscription,
+    subscription_firewall,
+    system,
+    user,
+    user_template,
+)
+
+api_router = APIRouter()
+
+routers = [
+    home.router,
+    admin.router,
+    acme.router,
+    api_key.router,
+    admin_role.router,
+    setup.router,
+    system.router,
+    settings.router,
+    tls_presets.router,
+    group.router,
+    core.router,
+    core_presets.router,
+    business_analytics.router,
+    browser_telemetry.router,
+    client_template.router,
+    host.router,
+    host_balancer.router,
+    node.router,
+    user.router,
+    subscription.router,
+    subscription_firewall.router,
+    user_template.router,
+    hwid.router,
+    passkey.router,
+]
+
+for router in routers:
+    api_router.include_router(router)
+
+__all__ = ["api_router"]

@@ -1,0 +1,13 @@
+# Coolify: Base Directory /services/frontend
+# Docker compose location /docker-compose.coolify.yaml
+x-watch-path-coolify:
+  - "services/frontend/**"
+
+services:
+  frontend:
+    extends:
+      file: docker-compose.yaml
+      service: frontend
+    build:
+      args:
+        VITE_BASE_API: ${VITE_BASE_API:-/}

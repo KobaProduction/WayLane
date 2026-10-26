@@ -1,0 +1,12 @@
+node_modules/
+build/
+dist/
+.env
+.env.*
+!.env.example
+
+# Host-specific cached build toolchains (not Git content)
+.toolchains/
+
+# Local development logs, not repository content
+.runtime/

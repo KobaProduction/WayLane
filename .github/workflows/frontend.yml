@@ -1,0 +1,38 @@
+name: Frontend
+on:
+  push:
+    branches: [main, development, migration/waylane-monorepo]
+    paths:
+      - "services/frontend/**"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    paths:
+      - "services/frontend/**"
+      - ".github/workflows/frontend.yml"
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - run: ./scripts/verify.sh
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./services/frontend
+          file: ./services/frontend/Dockerfile
+          push: false
+          platforms: linux/amd64
+          tags: waylane-frontend:ci
