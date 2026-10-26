@@ -1,8 +1,9 @@
 # WayLane deployment variants (source files, not deployed)
 
 The monorepo supports a bundled management stack and independently
-deployable API/UI. A privileged VPN node is intentionally not started
-inside the management stack; enroll and deploy nodes independently.
+deployable API/UI. A VPN node is never part of this management stack;
+enroll and deploy nodes independently. Current node NET_ADMIN and host
+network assumptions require separate least-privilege hardening.
 No existing data volumes, credentials, Coolify apps or domains are touched
 by committing these manifests.
 

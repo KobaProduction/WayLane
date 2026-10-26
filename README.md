@@ -1,14 +1,14 @@
 # WayLane — flat service-folder monorepo
 
-Staged migration branch, NOT production authority. One Git source, separate
-independent service owners, following Briareus style. Do not delete or archive
-the original three repositories until cutover is verified.
+Monorepo migration is staged for main, not yet deployed to production.
+One Git source with independent service owners. Retain former frontend/node
+repositories until source/history, release references and runtime cutover are verified.
 
 | Owner folder | Runtime | Deployment |
 | --- | --- | --- |
 | services/backend/ | Python 3.14, FastAPI, scheduler, node RPC | independent Coolify backend |
 | services/frontend/ | React/Bun, static Nginx | independent Coolify frontend |
-| services/node/ | Go, Xray, WireGuard | independently deployed privileged VPN nodes |
+| services/node/ | Go, Xray, WireGuard | independently deployed VPN nodes; rootless hardening pending |
 | services/external/ | managed PostgreSQL, ingress, API balancer, OTLP | separately owned infrastructure |
 | shared/contracts/ | narrowly shared wire DTOs | docs / protocol checks |
 
@@ -22,6 +22,9 @@ Provenance snapshot (2026-10-26):
 - node a03465c385f3d5bf79dc1766444feeab3aea1803
 
 Source and upstream LICENSE, UPSTREAM and LICENSING remain with each module.
+The original frontend and node Git histories are joined as separate merge-parent
+ancestries; their historical paths are unchanged. Importing history is not
+authorization to delete the original repositories or their releases.
 Read docs/deployment/README.md for gates and topology.
 
 ## Deployment options

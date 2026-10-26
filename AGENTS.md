@@ -1,9 +1,9 @@
 # WayLane monorepo — service owners
 
-This is the isolated migration branch of the original WayLane backend repository.
-Until explicitly accepted, the canonical repositories remain:
-KobaProduction/waylane-backend, KobaProduction/waylane-frontend,
-and KobaProduction/waylane-node.
+KobaProduction/waylane is the accepted source layout; the migration branch
+must pass review and merge before main becomes its authority. The former
+frontend/node repositories remain available for compatibility and rollback
+until the retirement audit and deployment cutover are accepted.
 
 Read ArthurKoba/ai-agent-workflow/AGENTS.md and the skill for the task.
 Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
@@ -14,7 +14,7 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: Go VPN agent, Xray and WireGuard privileged runtime,
+- services/node/: Go VPN agent, Xray and WireGuard; currently NET_ADMIN/host-network dependent,
   independently deployed and never a sidecar in frontend/backend.
 - services/external/: approved contracts for separate PostgreSQL,
   API load balancer/ingress, external SigNoz OTLP endpoints.

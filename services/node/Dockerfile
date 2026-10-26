@@ -19,7 +19,7 @@ RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} XRAY_TAG=${XRAY_TAG} make install_xray
 
 FROM alpine:latest
 
-LABEL org.opencontainers.image.source="https://github.com/KobaProduction/waylane-backend/tree/migration/waylane-monorepo/services/node"
+LABEL org.opencontainers.image.source="https://github.com/KobaProduction/waylane/tree/main/services/node"
 
 RUN apk update && apk add --no-cache wireguard-tools nftables iproute2 procps
 

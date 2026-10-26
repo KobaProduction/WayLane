@@ -1,8 +1,8 @@
 Source: https://github.com/PasarGuard/panel at commit
 `5eb8628cfe6db233ed2a6bbaf53f0ed497e797f9`, retrieved 2026-10-24.
 AGPL-3.0 license and upstream copyright notices remain intact in `LICENSE.UPSTREAM`.
-The original dashboard React/TypeScript source was extracted into
-`intens-cloud/waylane-frontend`; the Python dashboard serving shim remains here.
+The original dashboard React/TypeScript source is now in
+`services/frontend/`; the Python dashboard serving shim remains here.
 No source ownership is transferred by this split. Preserve original attribution.
 A separate repository PasarGuard/subscription-template has no root LICENSE in the
 snapshot inspected; its code was NOT copied. Only the original panel-integrated HTML

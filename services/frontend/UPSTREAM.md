@@ -1,7 +1,7 @@
 Dashboard extracted from https://github.com/PasarGuard/panel
 commit `5eb8628cfe6db233ed2a6bbaf53f0ed497e797f9` (2026-10-24).
 Originally path: `dashboard/`; Python integration module `dashboard/__init__.py`
-remains in `intens-cloud/waylane-backend`.
+remains in `services/backend/`.
 Preserve PasarGuard AGPL-3.0 and copyright attribution. The imported dashboard source itself was not rewritten as Vue.
 No external subscription-template source is imported.
 
