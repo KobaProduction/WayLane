@@ -12,7 +12,7 @@ services:
     environment:
       SQLALCHEMY_DATABASE_URL: ${SQLALCHEMY_DATABASE_URL:?}
       ROLE: all-in-one
-      UVICORN_HOST: 0.0.0.0
+      UVICORN_HOST: backend
       UVICORN_PORT: "8000"
       UVICORN_WORKERS: "1"
       OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
@@ -24,7 +24,7 @@ services:
     volumes:
       - backend_data:/var/lib/pasarguard
     healthcheck:
-      test: ["CMD", "/code/healthcheck.sh"]
+      test: ["CMD-SHELL", "curl -fsS http://backend:8000/health >/dev/null"]
       interval: 20s
       timeout: 5s
       retries: 5

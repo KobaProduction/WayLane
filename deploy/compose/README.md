@@ -27,7 +27,7 @@ Run locally from the repository root:
 
 Access http://127.0.0.1:8080/. The bundled nginx proxy forwards /api/ and
 /sub/ to the private backend, ensuring same-origin auth and telemetry.
-Only loopback 8080 is published; backend/database remain private.
+Only loopback 8080 is published; backend/database remain private. WayLane's TLS-free startup binds to the private Docker network alias waylane-api (not 0.0.0.0), allowing Nginx to reach it without exposing the API to public host interfaces.
 For public use, add an approved HTTPS edge proxy: do not expose plaintext
 admin UI to the Internet.
 

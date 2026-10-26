@@ -31,7 +31,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: ${POSTGRES_DB:-waylane}
       ROLE: all-in-one
-      UVICORN_HOST: 0.0.0.0
+      UVICORN_HOST: waylane-api
       UVICORN_PORT: "8000"
       UVICORN_WORKERS: "1"
       OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
@@ -43,9 +43,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks: [database, application]
+    networks:
+      database: {}
+      application:
+        aliases: [waylane-api]
     healthcheck:
-      test: ["CMD", "/code/healthcheck.sh"]
+      test: ["CMD-SHELL", "curl -fsS http://waylane-api:8000/health >/dev/null"]
       interval: 20s
       timeout: 5s
       retries: 5

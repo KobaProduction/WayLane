@@ -34,6 +34,9 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     assert "compose_db_entrypoint.py" not in ignore
     assert "scripts" in ignore  # Regression: keep script outside ignored path.
     assert (ROOT / "services/backend/compose_db_entrypoint.py").is_file()
+    assert services["backend"]["environment"]["UVICORN_HOST"] == "waylane-api"
+    assert services["backend"]["networks"]["application"]["aliases"] == ["waylane-api"]
+    assert "waylane-api:8000/health" in services["backend"]["healthcheck"]["test"][1]
     assert services["frontend"]["ports"] == ["127.0.0.1:8080:8080"]
     assert services["frontend"]["build"]["args"]["VITE_BASE_API"] == "/"
 
@@ -83,6 +86,8 @@ def test_split_apps_do_not_bundle_postgres_or_other_service():
     assert set(backend["services"]) == {"backend"}
     assert set(frontend["services"]) == {"frontend"}
     assert backend["services"]["backend"]["environment"]["SQLALCHEMY_DATABASE_URL"] == "${SQLALCHEMY_DATABASE_URL:?}"
+    assert backend["services"]["backend"]["environment"]["UVICORN_HOST"] == "backend"
+    assert "backend:8000/health" in backend["services"]["backend"]["healthcheck"]["test"][1]
     assert "POSTGRES_PASSWORD" not in backend["services"]["backend"]["environment"]
     assert frontend["services"]["frontend"]["build"]["args"]["VITE_BASE_API"] == "${VITE_BASE_API:-/}"
     assert "environment" not in frontend["services"]["frontend"]
