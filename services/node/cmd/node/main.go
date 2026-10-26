@@ -1,0 +1,63 @@
+package main
+
+import (
+	"context"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
+	"time"
+
+	"github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane-node/controller"
+	"github.com/KobaProduction/waylane-node/controller/rest"
+	"github.com/KobaProduction/waylane-node/controller/rpc"
+	"github.com/KobaProduction/waylane-node/pkg/tlsutil"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	addr := net.JoinHostPort(cfg.NodeHost, strconv.Itoa(cfg.ServicePort))
+
+	tlsConfig, err := tlsutil.LoadTLSCredentials(cfg.SslCertFile, cfg.SslKeyFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("Starting Node: v%s", controller.NodeVersion)
+
+	var shutdownFunc func(ctx context.Context) error
+	var service controller.Service
+
+	if cfg.ServiceProtocol == "rest" {
+		shutdownFunc, service, err = rest.StartHttpListener(tlsConfig, addr, cfg)
+	} else {
+		shutdownFunc, service, err = rpc.StartGRPCListener(tlsConfig, addr, cfg)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer service.Disconnect()
+
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+
+	<-stopChan
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err = shutdownFunc(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	log.Println("Server gracefully stopped")
+}

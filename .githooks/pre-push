@@ -1,4 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/.."
-exec ./scripts/verify.sh
+cd "$(git rev-parse --show-toplevel)"
+# The migration branch changes all three owners. Workflows run independently
+# after publication; pre-push verifies exactly the affected module owners.
+base=""
+if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then
+  base="$(git merge-base HEAD refs/remotes/origin/main)"
+fi
+if [[ -n "$base" ]]; then
+  changed="$(git diff --name-only "$base" HEAD)"
+else
+  changed=$'services/backend/\nservices/frontend/\nservices/node/'
+fi
+for service in backend frontend node; do
+  if printf '%s\n' "$changed" | grep -q "^services/$service/"; then
+    echo "[pre-push] verifying $service"
+    (cd "services/$service" && ./scripts/verify.sh)
+  fi
+done
+python="services/backend/.venv/bin/python"
+if [[ ! -x "$python" ]]; then
+  python=python3
+fi
+"$python" scripts/verify-layout.py

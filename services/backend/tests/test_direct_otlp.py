@@ -1,0 +1,138 @@
+"""Direct OTLP/HTTP acceptance against a one-shot localhost receiver."""
+import logging
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+from opentelemetry import trace
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+from app.observability import runtime
+from app.routers import browser_telemetry
+
+
+def test_browser_diagnostics_are_structurally_bounded():
+    from pydantic import ValidationError
+    payload = browser_telemetry.BrowserEvent(
+        kind="uncaught_error", route_group="dashboard",
+    )
+    assert payload.model_dump() == {"kind": "uncaught_error", "route_group": "dashboard"}
+    with pytest.raises(ValidationError):
+        browser_telemetry.BrowserEvent(
+            kind="uncaught_error", route_group="dashboard", stack="private-secret",
+        )
+    with pytest.raises(ValidationError):
+        browser_telemetry.BrowserEvent(
+            kind="uncaught_error", route_group="https://example.test/?token=ABC",
+        )
+
+
+@pytest.mark.asyncio
+async def test_browser_diagnostics_per_admin_rate_limit():
+    browser_telemetry._events.clear()
+    body = browser_telemetry.BrowserEvent(kind="unhandled_rejection", route_group="other")
+    for _ in range(10):
+        assert (await browser_telemetry.capture_browser_error(
+            body=body, admin=SimpleNamespace(id=12),
+        ))["accepted"]
+    with pytest.raises(HTTPException) as error:
+        await browser_telemetry.capture_browser_error(body=body, admin=SimpleNamespace(id=12))
+    assert error.value.status_code == 429
+    assert (await browser_telemetry.capture_browser_error(
+        body=body, admin=SimpleNamespace(id=13),
+    ))["accepted"]
+    browser_telemetry._events.clear()
+
+
+def test_otlp_requires_pair_and_https(monkeypatch):
+    monkeypatch.delenv("OTLP_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTLP_BEARER_TOKEN", raising=False)
+    assert runtime.configure_direct_otlp() is None
+    monkeypatch.setenv("OTLP_ENDPOINT", "https://example.invalid")
+    with pytest.raises(RuntimeError):
+        runtime.configure_direct_otlp()
+    monkeypatch.setenv("OTLP_BEARER_TOKEN", "test-synthetic-token")
+    monkeypatch.setenv("OTLP_ENDPOINT", "http://192.0.2.10:4318")
+    with pytest.raises(RuntimeError):
+        runtime.configure_direct_otlp()
+    monkeypatch.setenv("OTLP_ENDPOINT", "https://user:pass@example.invalid")
+    with pytest.raises(RuntimeError):
+        runtime.configure_direct_otlp()
+    assert runtime._telemetry is None
+
+
+def test_direct_otlp_logs_traces_are_sanitized(monkeypatch):
+    captured = []
+
+    class Collector(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(n)
+            captured.append((
+                self.path,
+                self.headers.get("Authorization"),
+                self.headers.get("Content-Type"),
+                body,
+            ))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Collector)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("OTLP_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
+        monkeypatch.setenv("OTLP_BEARER_TOKEN", "synthetic-local-test-bearer")
+        monkeypatch.setenv("WAYLANE_OTLP_LOCAL_TEST", "1")
+        monkeypatch.setenv("OTEL_SERVICE_NAMESPACE", "waylane")
+        monkeypatch.setenv("OTEL_DEPLOYMENT_ENVIRONMENT_NAME", "development")
+        providers = runtime.configure_direct_otlp()
+        assert providers
+        logging.getLogger("waylane.telemetry").warning(
+            "browser.error", extra={
+                "event_kind": "uncaught_error",
+                "route_group": "dashboard",
+            },
+        )
+        logging.getLogger("security.issue").error(
+            "Sensitive URI /sub/synthetic-super-secret?token=synthetic-secret",
+        )
+        with trace.get_tracer("waylane.test").start_as_current_span("safe.browser.error"):
+            logging.getLogger("waylane.telemetry").warning("http.error")
+        traces, logs, _ = providers
+        assert traces.force_flush(timeout_millis=3000)
+        assert logs.force_flush(timeout_millis=3000)
+        runtime.flush_and_shutdown_direct_otlp()
+        assert {path for path, *_ in captured} >= {"/v1/traces", "/v1/logs"}
+        assert all(auth == "Bearer synthetic-local-test-bearer" for _, auth, _, _ in captured)
+        assert all("protobuf" in ctype for _, _, ctype, _ in captured)
+        log_requests = [
+            ExportLogsServiceRequest.FromString(body) for path, _, _, body in captured
+            if path == "/v1/logs"
+        ]
+        assert any(
+            rec.body.string_value == "browser.error"
+            for packet in log_requests for group in packet.resource_logs
+            for scope in group.scope_logs for rec in scope.log_records
+        )
+        assert all(b"synthetic-secret" not in body for _, _, _, body in captured)
+        trace_requests = [
+            ExportTraceServiceRequest.FromString(body) for path, _, _, body in captured
+            if path == "/v1/traces"
+        ]
+        assert any(
+            span.name == "safe.browser.error"
+            for packet in trace_requests for group in packet.resource_spans
+            for scope in group.scope_spans for span in scope.spans
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
