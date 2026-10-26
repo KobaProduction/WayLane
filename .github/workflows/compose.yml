@@ -29,9 +29,9 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     env:
-      POSTGRES_USER: ci_waylane
-      POSTGRES_PASSWORD: synthetic-compose-ci-only
-      POSTGRES_DB: waylane_test
+      WAYLANE_POSTGRES_USERNAME: ci_waylane
+      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
+      WAYLANE_POSTGRES_DATABASE: waylane_test
       SQLALCHEMY_DATABASE_URL: postgresql+asyncpg://ci_waylane:synthetic-compose-ci-only@db.invalid:5432/waylane_test
     steps:
       - uses: actions/checkout@v4
@@ -48,14 +48,15 @@ jobs:
       - name: Verify required DB variable enforcement
         run: |
           set -euo pipefail
-          if env -u POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then
-            echo "Missing PostgreSQL password was accepted" >&2
+          if env -u WAYLANE_POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing WayLane PostgreSQL password was accepted" >&2
             exit 1
           fi
-          if env -u POSTGRES_USER docker compose -f docker-compose.coolify.yaml config --quiet >/dev/null 2>&1; then
-            echo "Missing PostgreSQL user was accepted" >&2
-            exit 1
-          fi
+          env -u WAYLANE_POSTGRES_USERNAME -u WAYLANE_POSTGRES_DATABASE \
+            docker compose -f docker-compose.coolify.yaml config --format json | \
+            python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all(s[x]["environment"]["POSTGRES_USER"]=="waylane" and s[x]["environment"]["POSTGRES_DB"]=="waylane" for x in ("postgres","backend"))'
+          docker compose -f docker-compose.yaml config --format json | \
+            python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all(s[x]["environment"]["POSTGRES_USER"]=="ci_waylane" and s[x]["environment"]["POSTGRES_DB"]=="waylane_test" for x in ("postgres","backend"))'
           if env -u SQLALCHEMY_DATABASE_URL docker compose -f services/backend/docker-compose.yaml config --quiet >/dev/null 2>&1; then
             echo "Missing external database DSN was accepted" >&2
             exit 1
@@ -71,9 +72,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      POSTGRES_USER: waylane_ci
-      POSTGRES_PASSWORD: synthetic-compose-ci-only
-      POSTGRES_DB: waylane_ci
+      WAYLANE_POSTGRES_USERNAME: waylane_ci
+      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
+      WAYLANE_POSTGRES_DATABASE: waylane_ci
     steps:
       - uses: actions/checkout@v4
       - name: Build and start bundled management stack

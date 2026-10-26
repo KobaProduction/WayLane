@@ -13,16 +13,20 @@ by committing these manifests.
 * docker-compose.coolify.yaml — extends ordinary Compose with Coolify
   variable discovery and repository-relative Watch Paths.
 
-A local, untracked .env file supplies the required upstream PostgreSQL
-variables POSTGRES_USER and POSTGRES_PASSWORD. POSTGRES_DB defaults to
-waylane. Both PostgreSQL and the backend use the SAME DB name and credentials.
-The backend constructs its SQLALCHEMY_DATABASE_URL using SQLAlchemy escaping,
-rather than unsafe unencoded password interpolation in YAML.
+A local, untracked .env file supplies the approved All-in-One operator
+variables: WAYLANE_POSTGRES_USERNAME (default waylane, editable),
+WAYLANE_POSTGRES_PASSWORD (required nonempty manual input; no generated
+password), and WAYLANE_POSTGRES_DATABASE (optional, default waylane).
+Compose translates these inputs to the official PostgreSQL container's
+POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB variables; the backend receives
+the exact same resolved values. The backend constructs its internal
+SQLALCHEMY_DATABASE_URL using SQLAlchemy escaping, rather than unsafe
+unencoded password interpolation in YAML.
 
 Run locally from the repository root:
 
     cp .env.example .env
-    # Edit .env to set nonempty POSTGRES_USER and POSTGRES_PASSWORD.
+    # Edit .env to set WAYLANE_POSTGRES_PASSWORD (and optional user/database).
     docker compose -f docker-compose.yaml config --quiet
     docker compose -f docker-compose.yaml up -d --build
 
@@ -36,9 +40,10 @@ Coolify: Base Directory /, Compose Location /docker-compose.coolify.yaml.
 Watch Paths include both service directories and the root/deploy Compose
 sources. A change to either backend or frontend rebuilds this resource.
 
-The DB volume is persistent. Changing POSTGRES_USER, POSTGRES_PASSWORD or
-POSTGRES_DB on an existing PostgreSQL volume does NOT migrate existing
-users, passwords or databases; perform explicit DB administration and backup.
+The DB volume is persistent. Changing WAYLANE_POSTGRES_USERNAME,
+WAYLANE_POSTGRES_PASSWORD or WAYLANE_POSTGRES_DATABASE on an existing volume
+does NOT migrate PostgreSQL users, passwords or databases. Never use
+re-deployment as a credential-rotation shortcut: back up and migrate explicitly.
 
 ## Split backend (services/backend)
 
@@ -53,9 +58,10 @@ POSTGRES_USER/PASSWORD plus DSN. Example shape ONLY, not a real secret:
     postgresql+asyncpg://USER:PERCENT_ENCODED_PASS@db.internal:5432/DATABASE
 
 The external database owner supplies the actual DB name; the bundled DB
-default does not silently override an independent database. Configure the
-DSN via protected Coolify Shared scope. For the local plain Compose, use
-an untracked environment file at services/backend/.env.
+default does not silently override an independent database. Place the DSN
+in an approved protected secret-provider scope (exact scope pending agreement).
+For local plain Compose use an untracked environment file at
+services/backend/.env.
 
 Coolify Base Directory /services/backend, Compose Location
 /docker-compose.coolify.yaml; Watch Paths services/backend/** and
@@ -76,24 +82,43 @@ Coolify Base Directory /services/frontend, Compose Location
 /docker-compose.coolify.yaml; Watch Paths services/frontend/** and
 shared/contracts/frontend/** (if consumed).
 
-## Required/default variable contract proposed for Coolify
+## Operator contract and pending decisions
 
-Variable                     Owner          Required   Default     Secret
-POSTGRES_USER                bundled PG/BE  YES        blank       protected
-POSTGRES_PASSWORD            bundled PG/BE  YES        blank       YES
-POSTGRES_DB                  bundled PG/BE  no         waylane     no
-SQLALCHEMY_DATABASE_URL      split backend  YES        blank       YES
-VITE_BASE_API                split UI build no         /           no
-OTLP_ENDPOINT                backend        optional   blank       metadata
-OTLP_BEARER_TOKEN            backend        optional   blank       YES
-OTEL_SERVICE_NAMESPACE       backend        optional   waylane     no
-OTEL_DEPLOYMENT_ENVIRONMENT_NAME backend    optional   development no
+**Approved for the bundled PostgreSQL deployment only:**
 
-OTLP_ENDPOINT and OTLP_BEARER_TOKEN must be set together for direct export.
-These source defaults are NOT proof that Coolify has generated correct
-Required/default flags or resolved the actual protected Shared values.
-The full operator-variable contract, Coolify parser behavior, FQDN, networks
-and production application placement require explicit approval/verification.
+| Operator key | Owner | Desired Coolify Required | Default | Value |
+| --- | --- | --- | --- | --- |
+| WAYLANE_POSTGRES_USERNAME | bundled PostgreSQL + backend | yes | waylane | editable user name |
+| WAYLANE_POSTGRES_PASSWORD | bundled PostgreSQL + backend | yes | unset | manually supplied secret |
+| WAYLANE_POSTGRES_DATABASE | bundled PostgreSQL + backend | no | waylane | editable DB name |
+
+The operator names are distinct from the official image environment inputs.
+The username Required+default combination is the **approved operator UX**,
+but Compose `:-waylane` alone does not guarantee a Coolify Required flag:
+verify the exact generated parser state before deploying, and record a
+version-specific incompatibility if Coolify cannot express both simultaneously.
+Secret-manager scope and reference syntax have **not** been approved.
+
+**Not yet approved:** the separate backend operator name
+`WAYLANE_POSTGRES_URL` is approved, but its Required/default/secret-scope
+contract and Compose implementation are not. The current split backend
+continues using the internal `SQLALCHEMY_DATABASE_URL` input. Likewise
+`VITE_BASE_API` and the existing OTLP/OTEL runtime inputs remain as currently
+implemented; proposals to rename/expose them are not approvals.
+Do not invent extra operator aliases simply to enumerate every available
+backend/node runtime setting. Their ownership and necessity require review.
+
+When enabled, OTLP_ENDPOINT and OTLP_BEARER_TOKEN must be set together for
+direct export. These Compose defaults are NOT proof of correct Coolify
+Required/default flags, secret visibility, successful Shared resolution,
+network membership, or generated domains. `x-watch-path-coolify` documents
+intended repository-relative scope, but Coolify Watch Paths must be **saved
+and verified on each actual deployment resource**.
+
+No production or DEV runtime activation has been authorized. Git source,
+Coolify parser, container runtime and consumer-facing HTTPS/auth/telemetry
+acceptance are separate gates. Actual secrets must not be revealed to agents
+merely to validate their presence.
 
 ## Security and browser telemetry
 

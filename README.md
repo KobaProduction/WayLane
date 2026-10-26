@@ -1,8 +1,9 @@
 # WayLane — flat service-folder monorepo
 
-Monorepo migration is staged for main, not yet deployed to production.
-One Git source with independent service owners. Retain former frontend/node
-repositories until source/history, release references and runtime cutover are verified.
+The monorepo was merged into main on 2026-10-26; this did not deploy
+WayLane to production. One Git source has independent service owners.
+Retain former frontend/node repositories until release consumers and
+runtime cutover are verified.
 
 | Owner folder | Runtime | Deployment |
 | --- | --- | --- |

@@ -1,9 +1,9 @@
 # WayLane monorepo — service owners
 
-KobaProduction/waylane is the accepted source layout; the migration branch
-must pass review and merge before main becomes its authority. The former
-frontend/node repositories remain available for compatibility and rollback
-until the retirement audit and deployment cutover are accepted.
+KobaProduction/waylane main is the authoritative source layout following
+monorepo merge. The former frontend/node repositories remain available for
+compatibility and rollback until the retirement audit, dependency migration
+and deployment cutover are accepted.
 
 Read ArthurKoba/ai-agent-workflow/AGENTS.md and the skill for the task.
 Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
