@@ -140,61 +140,61 @@ def test_direct_otlp_logs_traces_are_sanitized(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unauthenticated_browser_events_are_rejected_and_warn_without_secrets(caplog):
-    from fastapi import FastAPI, Depends
-    from httpx import ASGITransport, AsyncClient
-    from app.routers.authentication import get_current
-
-    app = FastAPI()
-    app.include_router(browser_telemetry.router)
-
-    async def deny():
-        raise HTTPException(status_code=401, detail="invalid synthetic token")
-
-    app.dependency_overrides[get_current] = deny
-    browser_telemetry._last_denied_warning = 0
-    with caplog.at_level(logging.WARNING, logger="waylane.telemetry"):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            for _ in range(2):
-                response = await client.post(
-                    "/api/telemetry/browser",
-                    json={"kind": "uncaught_error", "route_group": "dashboard"},
-                    headers={"Authorization": "Bearer synthetic-credential"},
-                )
-                assert response.status_code == 401
-    warning_messages = [
-        row.getMessage() for row in caplog.records
-        if row.name == "waylane.telemetry"
-    ]
-    assert warning_messages == ["browser.unauthenticated"]
-    assert all("synthetic" not in line for line in warning_messages)
-
-
-@pytest.mark.asyncio
-async def test_authenticated_browser_event_is_accepted_and_logged(caplog):
+async def test_unauthenticated_browser_events_are_rejected_and_warn_without_secrets(monkeypatch):
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
     from app.routers.authentication import get_current
 
     app = FastAPI()
     app.include_router(browser_telemetry.router)
+    recorded = []
+    monkeypatch.setattr(browser_telemetry.log, "warning",
+                        lambda event, *args, **kwargs: recorded.append(event))
+
+    async def deny():
+        raise HTTPException(status_code=401, detail="invalid synthetic token")
+
+    app.dependency_overrides[get_current] = deny
+    browser_telemetry._last_denied_warning = 0
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for _ in range(2):
+            response = await client.post(
+                "/api/telemetry/browser",
+                json={"kind": "uncaught_error", "route_group": "dashboard"},
+                headers={"Authorization": "Bearer synthetic-credential"},
+            )
+            assert response.status_code == 401
+    assert recorded == ["browser.unauthenticated"]
+    assert all("synthetic" not in text for text in recorded)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_browser_event_is_accepted_and_logged(monkeypatch):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from app.routers.authentication import get_current
+
+    app = FastAPI()
+    app.include_router(browser_telemetry.router)
+    recorded = []
+    monkeypatch.setattr(browser_telemetry.log, "warning",
+                        lambda event, *args, **kwargs: recorded.append(event))
 
     async def allow():
         return SimpleNamespace(id=203)
 
     app.dependency_overrides[get_current] = allow
     browser_telemetry._events.clear()
-    with caplog.at_level(logging.WARNING, logger="waylane.telemetry"):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            response = await client.post(
-                "/api/telemetry/browser",
-                json={"kind": "uncaught_error", "route_group": "settings"},
-            )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/telemetry/browser",
+            json={"kind": "uncaught_error", "route_group": "settings"},
+        )
     assert response.status_code == 202
     assert response.json() == {"accepted": True}
-    assert "browser.error" in [record.getMessage() for record in caplog.records]
+    assert recorded == ["browser.error"]
     browser_telemetry._events.clear()
