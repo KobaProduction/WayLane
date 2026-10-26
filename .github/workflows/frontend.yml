@@ -1,7 +1,7 @@
 name: Frontend
 on:
   push:
-    branches: [main, development]
+    branches: [main, development, migration/waylane-monorepo]
     paths:
       - "services/frontend/**"
       - ".github/workflows/frontend.yml"
