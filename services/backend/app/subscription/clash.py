@@ -524,6 +524,11 @@ class ClashConfiguration(BaseSubscription):
         self, remark: str, address: str, inbound: SubscriptionInboundData, settings: dict
     ) -> dict | None:
         """Build WireGuard node for Clash Premium userspace WireGuard."""
+        # AWG 3.1 needs matching obfuscation fields. Never emit an
+        # unusable legacy WireGuard profile in unsupported formats.
+        if inbound.wireguard_amnezia is not None:
+            return None
+
         private_key = settings.get("private_key", "")
         peer_ips = list(settings.get("peer_ips") or [])
         public_key = inbound.wireguard_public_key
@@ -714,6 +719,11 @@ class ClashMetaConfiguration(ClashConfiguration):
         self, remark: str, address: str, inbound: SubscriptionInboundData, settings: dict
     ) -> dict | None:
         """Build WireGuard node using Clash.Meta's documented fields."""
+        # AWG 3.1 needs matching obfuscation fields. Never emit an
+        # unusable legacy WireGuard profile in unsupported formats.
+        if inbound.wireguard_amnezia is not None:
+            return None
+
         private_key = settings.get("private_key", "")
         peer_ips = list(settings.get("peer_ips") or [])
         public_key = inbound.wireguard_public_key

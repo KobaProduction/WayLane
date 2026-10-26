@@ -64,6 +64,13 @@ class _FakeNode:
 def manager(monkeypatch: pytest.MonkeyPatch) -> NodeManager:
     manager = NodeManager()
     monkeypatch.setattr(node_operation_module, "node_manager", manager)
+    # A synthetic Xray core has no real TLS/CorePreset database; isolate
+    # hydrators to test batching, not persistence schema.
+    from app.operation import tls_presets, core_presets
+    async def preserve_config(db, config, *args):
+        return config
+    monkeypatch.setattr(tls_presets, "hydrate_tls_config", preserve_config)
+    monkeypatch.setattr(core_presets, "hydrate_core_preset_config", preserve_config)
     return manager
 
 
@@ -76,7 +83,7 @@ def _backend(core_type: CoreType):
 
 
 async def _start(pg_node: _FakeNode, users: list, core_type: CoreType = CoreType.wg):
-    db_node = SimpleNamespace(id=NODE_ID, name="wg-node", keep_alive=60)
+    db_node = SimpleNamespace(id=NODE_ID, name="wg-node", keep_alive=60, core_config_id=1)
     return await NodeOperation._start_or_attach_node(pg_node, db_node, _core(core_type), users, _backend(core_type))
 
 

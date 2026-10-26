@@ -312,6 +312,25 @@ export default function CoreConfigModal({ isDialogOpen, onOpenChange, form, edit
     [debouncedConfigChange, form, validateJsonContent],
   )
 
+  const applyAmneziaWGTemplate = useCallback(() => {
+    try {
+      const config = JSON.parse(form.getValues('config')) as Record<string, unknown>
+      // Existing WG identities and peer allocations must be retained.
+      const awg = {
+        s1: 16, s2: 16, s3: 16, s4: 16,
+        h1: '100', h2: '200', h3: '300', h4: '400',
+        jc: 4, jmin: 24, jmax: 48,
+        random_trailers: true,
+      }
+      const next = JSON.stringify({ ...config, engine: 'amneziawg', amnezia: awg }, null, 2)
+      form.setValue('config', next, { shouldDirty: true, shouldValidate: true })
+      validateJsonContent(next)
+      debouncedConfigChange(next)
+    } catch {
+      toast.error(t('coreConfigModal.invalidJson', { defaultValue: 'Invalid WireGuard JSON configuration' }))
+    }
+  }, [form, validateJsonContent, debouncedConfigChange, t])
+
   const generateWireGuardKeys = useCallback(() => {
     try {
       const keyPair = generateWireGuardKeyPair()
@@ -976,7 +995,7 @@ export default function CoreConfigModal({ isDialogOpen, onOpenChange, form, edit
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="xray">Xray</SelectItem>
-                                <SelectItem value="wg">WireGuard</SelectItem>
+                                <SelectItem value="wg">WireGuard / AmneziaWG 3.1</SelectItem>
                               </SelectContent>
                             </Select>
                           </FormControl>
@@ -986,6 +1005,16 @@ export default function CoreConfigModal({ isDialogOpen, onOpenChange, form, edit
                     />
 
                     <div>
+                      {!isXrayBackend && (
+                        <div className="mb-3">
+                          <Button type="button" variant="outline" onClick={applyAmneziaWGTemplate} className="w-full">
+                            AmneziaWG 3.1 — Enable obfuscation preset
+                          </Button>
+                          <p className="text-muted-foreground mt-1 text-xs">
+                            Requires WayLane node v0.6.0+. Older WireGuard clients need an unobfuscated interface.
+                          </p>
+                        </div>
+                      )}
                       {!isXrayBackend && (
                         <LoaderButton type="button" onClick={viewWireGuardKeys} className="h-10 w-full text-sm font-medium transition-all hover:shadow-md sm:h-11" isLoading={false}>
                           <span className="flex items-center gap-2 truncate">

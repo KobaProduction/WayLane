@@ -82,6 +82,25 @@ CONNECT_CONCURRENCY = 10
 NODE_RESTART_FIELDS = frozenset({"core_config_id", "keep_alive"})
 WIREGUARD_BATCHED_START_THRESHOLD = 1000
 WIREGUARD_START_BATCH_SIZE = 100
+
+AWG_MIN_NODE_VERSION = (0, 6, 0)
+
+
+def require_amnezia_node_version(version: str | None) -> None:
+    """Reject older nodes before handing off obfuscated WireGuard settings.
+
+    Legacy nodes otherwise silently ignore unknown JSON keys and start
+    ordinary WireGuard, which cannot serve obfuscated AmneziaWG clients.
+    """
+    if not isinstance(version, str):
+        raise ValueError("AmneziaWG requires node >=0.6.0")
+    parts = version.removeprefix("v").split(".")
+    if len(parts) != 3 or any(not part.isdecimal() for part in parts):
+        raise ValueError("AmneziaWG requires a versioned node >=0.6.0")
+    if tuple(map(int, parts)) < AWG_MIN_NODE_VERSION:
+        raise ValueError("AmneziaWG requires WayLane node >=0.6.0")
+
+
 type CoreUsers = list | Callable[[], Awaitable[list]]
 
 logger = get_logger("node-operation")
@@ -348,6 +367,10 @@ class NodeOperation(BaseOperation):
         force_start: bool = False,
         stop_first: bool = True,
     ):
+        if core.type == CoreType.wg and getattr(core, "get", lambda key: None)("engine") == "amneziawg":
+            node_info = await pg_node.info()
+            require_amnezia_node_version(getattr(node_info, "node_version", None))
+
         if not force_start:
             state = await pg_node.get_lifecycle_state()
             if state is not None and (

@@ -81,6 +81,7 @@ type Manager struct {
 	setLinkMTU func(netlink.Link, int) error
 	defaultMTU int
 	mtuManaged bool
+	amnezia    *awgRuntime
 	mu         sync.RWMutex
 }
 
@@ -156,20 +157,28 @@ func (m *Manager) initializeWithPeers(privateKey wgtypes.Key, listenPort int, se
 		parsedAddrs = append(parsedAddrs, addr)
 	}
 
-	// Clean up any existing interface
-	if err := m.cleanupExistingInterface(); err != nil {
-		return fmt.Errorf("failed to cleanup existing interface: %w", err)
-	}
-
-	// Create WireGuard interface
-	link := &netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: m.iFaceName}}
-	if err := nl.LinkAdd(link); err != nil {
-		return fmt.Errorf("failed to add link: %w", wrapPermissionDeniedError("creating wireguard interface", err))
+	if m.amnezia != nil {
+		// AWG-Go owns the TUN interface. Do not create kernel WireGuard
+		// or delete another process' existing interface.
+		if err := m.amnezia.start(nl); err != nil {
+			return fmt.Errorf("failed to start amnezia interface: %w", err)
+		}
+	} else {
+		if err := m.cleanupExistingInterface(); err != nil {
+			return fmt.Errorf("failed to cleanup existing interface: %w", err)
+		}
+		link := &netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: m.iFaceName}}
+		if err := nl.LinkAdd(link); err != nil {
+			return fmt.Errorf("failed to add link: %w", wrapPermissionDeniedError("creating wireguard interface", err))
+		}
 	}
 	cleanupOnError := true
 	defer func() {
 		if cleanupOnError {
 			_ = m.cleanupExistingInterface()
+			if m.amnezia != nil {
+				_ = m.amnezia.stop()
+			}
 		}
 	}()
 
@@ -322,6 +331,11 @@ func (m *Manager) Close() error {
 		}
 	}
 
+	if m.amnezia != nil {
+		if err := m.amnezia.stop(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	// Remove interface
 	if err := m.cleanupExistingInterface(); err != nil {
 		errs = append(errs, err)

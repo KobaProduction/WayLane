@@ -9,6 +9,7 @@ from pathlib import PosixPath
 import commentjson
 
 from app.models.core import CoreType
+from .amneziawg import AmneziaWG31
 from app.models.protocol import ProxyProtocol
 from app.utils.crypto import get_wireguard_public_key, validate_wireguard_key
 
@@ -54,6 +55,16 @@ class WireGuardConfig(dict):
             raise ValueError("exclude_inbound_tags is only supported for xray cores")
         if self.fallbacks_inbound_tags:
             raise ValueError("fallbacks_inbound_tags is only supported for xray cores")
+
+        engine = self.get("engine", "wireguard")
+        if engine not in ("wireguard", "amneziawg"):
+            raise ValueError("engine must be wireguard or amneziawg")
+        if engine != "amneziawg" and self.get("amnezia") is not None:
+            raise ValueError("amnezia options require engine=amneziawg")
+        if engine == "amneziawg":
+            options = AmneziaWG31.model_validate(self.get("amnezia") or {})
+            self["engine"] = engine
+            self["amnezia"] = options.model_dump(mode="json", exclude_defaults=True)
 
         interface_name = str(self.get("interface_name") or "").strip()
         if not interface_name:
@@ -109,6 +120,8 @@ class WireGuardConfig(dict):
             "public_key": self.get("public_key", ""),
             "private_key": self.get("private_key", ""),
             "pre_shared_key": self.get("pre_shared_key", ""),
+            "engine": self.get("engine", "wireguard"),
+            "amnezia": deepcopy(self.get("amnezia")) if self.get("engine") == "amneziawg" else None,
         }
         self._inbounds = [interface_name]
         self._inbounds_by_tag = {interface_name: metadata}

@@ -17,6 +17,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} make NAME=main build
 # install_xray also installs the pinned geo files (Makefile install_geofiles) and fails the build unless xray loads them
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} XRAY_TAG=${XRAY_TAG} make install_xray
 
+# Pinned official AWG-Go 3.1 userspace runtime, no host kernel installer.
+FROM golang:1.27.1-alpine AS amnezia_builder
+ARG AMNEZIAWG_GO_VERSION=v3.1.20260828
+RUN GOBIN=/out CGO_ENABLED=0 go install github.com/amnezia-vpn/amneziawg-go/v3@${AMNEZIAWG_GO_VERSION}
+
 FROM alpine:latest
 
 LABEL org.opencontainers.image.source="https://github.com/KobaProduction/waylane/tree/main/services/node"
@@ -26,6 +31,8 @@ RUN apk update && apk add --no-cache wireguard-tools nftables iproute2 procps
 WORKDIR /app
 COPY --from=builder /src/main /app/main
 COPY --from=builder /usr/local/bin/xray /usr/local/bin/xray
+COPY --from=amnezia_builder /out/amneziawg-go /usr/local/bin/amneziawg-go
+COPY LICENSE.AMNEZIAWG /usr/share/licenses/amneziawg-go/LICENSE
 COPY --from=builder /usr/local/share/xray /usr/local/share/xray
 
 ENTRYPOINT ["./main"]

@@ -26,3 +26,43 @@ Node health/acceptance requires more than Docker process running:
 validate mTLS/API authentication, heartbeat, Xray and kernel WireGuard paths,
 certificate renewal, UDP/TCP reachability, restart, and rollback on a
 disposable independent host. No production node changes are authorized.
+
+
+## AWG 3.1 opt-in (Linux)
+
+For AmneziaWG-enabled standalone nodes, use generic Compose with the
+additional `docker-compose.amnezia.yaml` override, or in Coolify use
+Compose Location `/docker-compose.amnezia.coolify.yaml`.
+These variants mount host `/dev/net/tun`; normal kernel-only WireGuard
+does not require this mount. Node image includes pinned userspace AWG-Go 3.1.
+Old `engine`-less `wg` cores stay on kernel WireGuard.
+
+For an isolated AWG core, choose WireGuard/AmneziaWG in the UI, then apply
+the AmneziaWG 3.1 preset (or specify `engine: amneziawg` and an
+`amnezia` settings object in core JSON). Prefer a distinct interface
+and listen port while preserving active WireGuard clients. The panel exports
+Amnezia parameters to client `.conf`; standard WG peers only interoperate
+when obfuscation is off.
+
+Validated in source: AWG UAPI/Go regression and upstream binary build.
+NOT host-validated: TUN capability, real UDP handshake, traffic forwarding,
+mobile client imports or rootless operation. Current AWG uses host network,
+NET_ADMIN and /dev/net/tun in this opt-in baseline. Only perform live host
+testing after authorization; never reconfigure current production nodes.
+
+## Compatibility and supported client formats
+
+AWG 3.1 uses the same asymmetric WireGuard identity and peer-address model,
+but a profile with active AWG obfuscation is NOT interoperable with a plain
+WireGuard client. Switching an already-running interface requires a planned
+migration of all its active client profiles. For an opt-in AWG 3.1 core, the
+backend builds its own AmneziaWG `.conf` profile with matching options.
+Clash/Mihomo, sing-box, Xray and ordinary `wireguard://` exporters cannot
+yet reproduce all AWG 3.1 obfuscation parameters and therefore skip AWG
+hosts instead of advertising broken WireGuard connections. Do not assume
+generic VPN clients will import every AWG-specific option.
+
+Backend rejects AWG 3.1 core starts on WayLane Node versions older than
+`0.6.0` so old Go agents never silently ignore unsupported settings.
+Both backend and Go node must be upgraded together before assigning an AWG
+core. Existing WireGuard cores require no config migration.

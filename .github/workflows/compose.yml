@@ -48,6 +48,8 @@ jobs:
           docker compose -f deploy/backend-postgres/docker-compose.coolify.yaml config --quiet
           docker compose -f services/node/docker-compose.yaml config --quiet
           docker compose -f services/node/docker-compose.coolify.yaml config --quiet
+          docker compose -f services/node/docker-compose.amnezia.coolify.yaml config --quiet
+          docker compose -f services/node/docker-compose.yaml -f services/node/docker-compose.amnezia.yaml config --quiet
           docker compose -f services/backend/docker-compose.yaml config --quiet
           docker compose -f services/backend/docker-compose.coolify.yaml config --quiet
           docker compose -f services/frontend/docker-compose.yaml config --quiet

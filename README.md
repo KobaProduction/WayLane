@@ -9,7 +9,7 @@ runtime cutover are verified.
 | --- | --- | --- |
 | services/backend/ | Python 3.14, FastAPI, scheduler, node RPC | independent Coolify backend |
 | services/frontend/ | React/Bun, static Nginx | independent Coolify frontend |
-| services/node/ | Go, Xray, WireGuard | independently deployed VPN nodes; rootless hardening pending |
+| services/node/ | Go, Xray, kernel WireGuard and opt-in AmneziaWG 3.1 | independently deployed VPN nodes; rootless hardening pending |
 | services/external/ | managed PostgreSQL, ingress, API balancer, OTLP | separately owned infrastructure |
 | shared/contracts/ | narrowly shared wire DTOs | docs / protocol checks |
 

@@ -337,6 +337,9 @@ class StandardLinks(BaseSubscription):
 
     def _build_wireguard(self, remark: str, address: str, inbound: SubscriptionInboundData, settings: dict) -> str:
         """Build WireGuard link"""
+        # Obfuscated AWG links are not compatible with wireguard:// clients.
+        if inbound.wireguard_amnezia is not None:
+            return ""
         components = self._build_wireguard_components(remark, address, inbound, settings)
         if not components:
             return ""

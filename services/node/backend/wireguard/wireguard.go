@@ -113,20 +113,28 @@ func (wg *WireGuard) ensureRunningWithManagerLocked() error {
 
 // New creates a new WireGuard backend instance
 func New(cfg *config.Config, wgConfig *Config, users []*common.User) (*WireGuard, error) {
-	return newWithManagerFactory(cfg, wgConfig, users, NewManager)
+	return newWithManagerFactory(cfg, wgConfig, users, nil)
 }
 
 // newWithManagerFactory is an internal constructor seam for tests and controlled startup injection.
 // Keep unexported; production callers should use New(...).
 func newWithManagerFactory(cfg *config.Config, wgConfig *Config, users []*common.User, managerFactory newManagerFunc) (*WireGuard, error) {
 	if managerFactory == nil {
-		managerFactory = NewManager
+		if wgConfig != nil && wgConfig.Engine == "amneziawg" {
+			managerFactory = func(name string) (*Manager, error) {
+				return NewAmneziaManager(name, wgConfig.Amnezia)
+			}
+		} else {
+			managerFactory = NewManager
+		}
 	}
 
 	wgCtx, wgCancel := context.WithCancel(context.Background())
 
-	// Get WireGuard version before starting
 	version := getWireGuardVersion()
+	if wgConfig != nil && wgConfig.Engine == "amneziawg" {
+		version = "amneziawg-go 3.1"
+	}
 
 	wg := &WireGuard{
 		cancelFunc:     wgCancel,
