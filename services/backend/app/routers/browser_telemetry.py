@@ -19,8 +19,14 @@ from .authentication import get_current
 
 # Anonymous attempts have no authenticated identity. Emit only one fixed
 # warning per minute to prevent public 401 spam exhausting the log exporter.
-_last_denied_warning = 0.0
+_last_denied_warning: float | None = None
 _denied_lock = threading.Lock()
+
+
+def _warning_due(last: float | None, now: float) -> bool:
+    # A newly started process must emit its very first warning even when
+    # system monotonic uptime is under 60 seconds (ephemeral CI workers).
+    return last is None or now - last >= 60
 
 
 class AuthenticatedTelemetryRoute(APIRoute):
@@ -35,7 +41,7 @@ class AuthenticatedTelemetryRoute(APIRoute):
                 if exc.status_code in (401, 403):
                     now = time.monotonic()
                     with _denied_lock:
-                        if now - _last_denied_warning >= 60:
+                        if _warning_due(_last_denied_warning, now):
                             _last_denied_warning = now
                             log.warning("browser.unauthenticated")
                 raise

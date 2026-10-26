@@ -155,7 +155,7 @@ async def test_unauthenticated_browser_events_are_rejected_and_warn_without_secr
         raise HTTPException(status_code=401, detail="invalid synthetic token")
 
     app.dependency_overrides[get_current] = deny
-    browser_telemetry._last_denied_warning = 0
+    browser_telemetry._last_denied_warning = None
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -198,3 +198,9 @@ async def test_authenticated_browser_event_is_accepted_and_logged(monkeypatch):
     assert response.json() == {"accepted": True}
     assert recorded == ["browser.error"]
     browser_telemetry._events.clear()
+
+
+def test_first_unknown_caller_warning_does_not_wait_for_60s_uptime():
+    assert browser_telemetry._warning_due(None, 3.0)
+    assert not browser_telemetry._warning_due(3.0, 15.0)
+    assert browser_telemetry._warning_due(3.0, 63.0)
