@@ -129,8 +129,26 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --retry 5 --retry-delay 3 http://127.0.0.1:8000/health
-          docker compose -f deploy/backend-postgres/docker-compose.yaml exec -T backend \
-            python -c 'import os; from sqlalchemy.engine import make_url; url = make_url(os.environ["SQLALCHEMY_DATABASE_URL"]); assert url.host == "database" and url.port == 5432'
+          cat <<'PYSQL' | docker compose -f deploy/backend-postgres/docker-compose.yaml exec -T backend python -
+          import asyncio
+          import os
+          import asyncpg
+
+          async def check():
+              connection = await asyncpg.connect(
+                  host=os.environ["POSTGRES_HOST"],
+                  port=5432,
+                  user=os.environ["POSTGRES_USER"],
+                  password=os.environ["POSTGRES_PASSWORD"],
+                  database=os.environ["POSTGRES_DB"],
+              )
+              try:
+                  assert await connection.fetchval("SELECT 1") == 1
+              finally:
+                  await connection.close()
+
+          asyncio.run(check())
+          PYSQL
       - name: Diagnostics (only on failure)
         if: failure()
         run: docker compose -f deploy/backend-postgres/docker-compose.yaml ps
