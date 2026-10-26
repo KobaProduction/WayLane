@@ -38,6 +38,15 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     assert services["frontend"]["build"]["args"]["VITE_BASE_API"] == "/"
 
 
+def test_extends_adapters_redeclare_top_level_networks_and_volumes():
+    bundled = read("docker-compose.coolify.yaml")
+    assert bundled["networks"]["database"]["internal"] is True
+    assert set(bundled["networks"]) == {"application", "database"}
+    assert set(bundled["volumes"]) == {"postgres_data", "backend_data"}
+    backend = read("services/backend/docker-compose.coolify.yaml")
+    assert "backend_data" in backend["volumes"]
+
+
 def test_bundled_postgres_dsn_handles_uri_reserved_password(monkeypatch):
     filename = ROOT / "services/backend/compose_db_entrypoint.py"
     spec = importlib.util.spec_from_file_location("waylane_bundled_dsn", filename)

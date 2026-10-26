@@ -33,3 +33,12 @@ services:
     extends:
       file: docker-compose.yaml
       service: frontend
+
+# Compose extends merges services but does NOT import top-level declarations.
+networks:
+  application: {}
+  database:
+    internal: true
+volumes:
+  postgres_data: {}
+  backend_data: {}
