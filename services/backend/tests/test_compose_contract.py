@@ -123,3 +123,11 @@ def test_root_ingress_routes_browser_telemetry_to_backend():
     assert "location /sub/" in content
     assert "proxy_pass http://backend:8000" in content
     assert "server_tokens off;" in content
+
+
+def test_runtime_includes_webhook_http_client_dependency():
+    import tomllib
+
+    config = tomllib.loads((ROOT / 'services/backend/pyproject.toml').read_text())
+    runtime = config['project']['dependencies']
+    assert any(value.startswith('httpx') for value in runtime)
