@@ -34,7 +34,13 @@ Access http://127.0.0.1:8080/. The bundled nginx proxy forwards /api/ and
 /sub/ to the private backend, ensuring same-origin auth and telemetry.
 Only loopback 8080 is published; backend/database remain private. WayLane's TLS-free startup binds to the private Docker network alias waylane-api (not 0.0.0.0), allowing Nginx to reach it without exposing the API to public host interfaces.
 For public use, add an approved HTTPS edge proxy: do not expose plaintext
-admin UI to the Internet.
+admin UI to the Internet. The Coolify adapter declares the managed
+`SERVICE_FQDN_FRONTEND_8080` route for the frontend only; verify generated
+HTTPS routing to port 8080 against the actual Coolify parser before public use.
+Backend/PostgreSQL remain private and are not assigned managed public domains.
+Subscription URL paths carry bearer-like tokens. Bundled Nginx suppresses
+`/sub/` access logs and backend access logs redact the subscription token and
+exclude query strings; external ingress logs must be sanitized separately.
 
 Coolify: Base Directory /, Compose Location /docker-compose.coolify.yaml.
 Watch Paths include both service directories and the root/deploy Compose

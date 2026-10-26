@@ -130,6 +130,24 @@ def test_coolify_watch_scopes_and_extend_source(adapter, expected, forbidden):
     assert all(s["extends"]["file"] == "docker-compose.yaml" for s in manifest["services"].values())
 
 
+def test_coolify_bundled_frontend_declares_only_public_managed_route():
+    doc = read("docker-compose.coolify.yaml")
+    assert doc["services"]["frontend"]["environment"] == {
+        "SERVICE_FQDN_FRONTEND_8080": "/",
+    }
+    assert "environment" not in doc["services"]["postgres"] or (
+        "SERVICE_FQDN_POSTGRES_5432" not in doc["services"]["postgres"]["environment"]
+    )
+    assert "SERVICE_FQDN_BACKEND_8000" not in doc["services"]["backend"]["environment"]
+
+
+def test_bundle_subscription_access_logging_off():
+    content = (ROOT / "deploy/compose/all-in-one/nginx.conf").read_text()
+    assert "location /sub/" in content
+    subscription_location = content.split("location /sub/ {", 1)[1].split("location =", 1)[0]
+    assert "access_log off;" in subscription_location
+
+
 def test_root_ingress_routes_browser_telemetry_to_backend():
     content = (ROOT / "deploy/compose/all-in-one/nginx.conf").read_text()
     assert "location /api/" in content

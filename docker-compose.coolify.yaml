@@ -35,6 +35,9 @@ services:
     extends:
       file: docker-compose.yaml
       service: frontend
+    environment:
+      # Coolify-managed public route; no new operator-supplied ENV.
+      SERVICE_FQDN_FRONTEND_8080: /
 
 # Compose extends merges services but does NOT import top-level declarations.
 networks:
