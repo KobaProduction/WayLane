@@ -6,7 +6,7 @@
 x-watch-path-coolify:
   - "docker-compose.yaml"
   - "docker-compose.coolify.yaml"
-  - "deploy/compose/all-in-one/**"
+  - "deploy/compose/**"
   - "services/backend/**"
   - "services/frontend/**"
 
@@ -15,6 +15,14 @@ services:
     extends:
       file: docker-compose.yaml
       service: postgres
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+  pgbouncer:
+    extends:
+      file: docker-compose.yaml
+      service: pgbouncer
     environment:
       POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
       POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}

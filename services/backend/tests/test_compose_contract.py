@@ -16,7 +16,7 @@ def read(path):
 def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     doc = read("docker-compose.yaml")
     services = doc["services"]
-    assert set(services) == {"postgres", "backend", "frontend"}
+    assert set(services) == {"postgres", "pgbouncer", "backend", "frontend"}
     assert services["postgres"]["environment"]["POSTGRES_USER"] == "${WAYLANE_POSTGRES_USERNAME:-waylane}"
     assert services["postgres"]["environment"]["POSTGRES_PASSWORD"] == "${WAYLANE_POSTGRES_PASSWORD:?}"
     assert services["postgres"]["environment"]["POSTGRES_DB"] == "${WAYLANE_POSTGRES_DATABASE:-waylane}"
@@ -27,6 +27,15 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     assert "ports" not in services["postgres"]
     assert "ports" not in services["backend"]
     assert services["postgres"]["networks"] == ["database"]
+    pool = services["pgbouncer"]
+    assert pool["networks"]["database"]["aliases"] == ["database"]
+    assert pool["environment"]["POSTGRES_USER"] == services["postgres"]["environment"]["POSTGRES_USER"]
+    assert pool["environment"]["POSTGRES_PASSWORD"] == services["postgres"]["environment"]["POSTGRES_PASSWORD"]
+    assert "ports" not in pool
+    assert pool["user"] == "10001:10001"
+    assert services["backend"]["environment"]["POSTGRES_HOST"] == "database"
+    assert "postgres" not in services["backend"]["depends_on"]
+    assert services["backend"]["depends_on"]["pgbouncer"]["condition"] == "service_healthy"
     assert doc["networks"]["database"]["internal"] is True
     assert "postgres_data:/var/lib/postgresql/data" in services["postgres"]["volumes"]
     assert services["backend"]["entrypoint"] == [
@@ -48,7 +57,7 @@ def test_extends_adapters_redeclare_top_level_networks_and_volumes():
     assert bundled["networks"]["database"]["internal"] is True
     assert set(bundled["networks"]) == {"application", "database"}
     assert set(bundled["volumes"]) == {"postgres_data", "backend_data"}
-    for service in ("postgres", "backend"):
+    for service in ("postgres", "pgbouncer", "backend"):
         env = bundled["services"][service]["environment"]
         assert env["POSTGRES_USER"] == "${WAYLANE_POSTGRES_USERNAME:-waylane}"
         assert env["POSTGRES_PASSWORD"] == "${WAYLANE_POSTGRES_PASSWORD:?}"
@@ -67,6 +76,7 @@ def test_bundled_postgres_dsn_handles_uri_reserved_password(monkeypatch):
     monkeypatch.setenv("POSTGRES_USER", "username")
     monkeypatch.setenv("POSTGRES_PASSWORD", "ab:@/#!+%&£")
     monkeypatch.setenv("POSTGRES_DB", "custom-db")
+    monkeypatch.setenv("POSTGRES_HOST", "database")
 
     class Executed(Exception):
         pass
@@ -81,7 +91,7 @@ def test_bundled_postgres_dsn_handles_uri_reserved_password(monkeypatch):
     url = make_url(module.os.environ["SQLALCHEMY_DATABASE_URL"])
     assert url.username == "username"
     assert url.password == "ab:@/#!+%&£"
-    assert url.host == "postgres"
+    assert url.host == "database"
     assert url.database == "custom-db"
     monkeypatch.delenv("POSTGRES_PASSWORD")
     with pytest.raises(SystemExit):
@@ -162,3 +172,61 @@ def test_runtime_includes_webhook_http_client_dependency():
     config = tomllib.loads((ROOT / 'services/backend/pyproject.toml').read_text())
     runtime = config['project']['dependencies']
     assert any(value.startswith('httpx') for value in runtime)
+
+
+def test_managed_backend_pooler_is_private_and_shares_only_approved_credentials():
+    doc = read("deploy/backend-postgres/docker-compose.yaml")
+    services = doc["services"]
+    assert set(services) == {"postgres", "pgbouncer", "backend"}
+    assert doc["networks"]["database"]["internal"] is True
+    assert "ports" not in services["postgres"]
+    assert "ports" not in services["pgbouncer"]
+    assert services["pgbouncer"]["networks"]["database"]["aliases"] == ["database"]
+    assert services["backend"]["environment"]["POSTGRES_HOST"] == "database"
+    assert services["backend"]["ports"] == ["127.0.0.1:8000:8000"]
+    assert services["postgres"]["volumes"] == ["postgres_data:/var/lib/postgresql/data"]
+    for service in ("postgres", "pgbouncer", "backend"):
+        env = services[service]["environment"]
+        assert env["POSTGRES_PASSWORD"] == "${WAYLANE_POSTGRES_PASSWORD:?}"
+        assert env["POSTGRES_USER"] == "${WAYLANE_POSTGRES_USERNAME:-waylane}"
+        assert env["POSTGRES_DB"] == "${WAYLANE_POSTGRES_DATABASE:-waylane}"
+    adapter = read("deploy/backend-postgres/docker-compose.coolify.yaml")
+    assert set(adapter["services"]) == set(services)
+    for service in services:
+        assert adapter["services"][service]["extends"]["file"] == "docker-compose.yaml"
+    assert "deploy/compose/pgbouncer/**" in adapter["x-watch-path-coolify"]
+    assert "services/frontend/**" not in adapter["x-watch-path-coolify"]
+
+
+def test_split_frontend_has_one_coolify_domain_and_never_backend_credentials():
+    adapter = read("services/frontend/docker-compose.coolify.yaml")
+    env = adapter["services"]["frontend"]["environment"]
+    assert env == {"SERVICE_FQDN_FRONTEND_8080": "/"}
+    assert adapter["services"]["frontend"]["build"]["args"]["VITE_BASE_API"] == "${VITE_BASE_API:-/}"
+
+
+def test_node_is_an_independent_required_authenticated_resource():
+    generic = read("services/node/docker-compose.yaml")
+    coolify = read("services/node/docker-compose.coolify.yaml")
+    assert set(generic["services"]) == {"node"}
+    svc = generic["services"]["node"]
+    assert svc["environment"]["API_KEY"] == "${API_KEY:?}"
+    assert svc["network_mode"] == "host"
+    assert svc["cap_add"] == ["NET_ADMIN"]
+    assert svc.get("privileged") is not True
+    assert "/var/lib/pg-node:/var/lib/pg-node" in svc["volumes"]
+    assert coolify["services"]["node"]["environment"]["API_KEY"] == "${API_KEY:?}"
+    assert coolify["x-watch-path-coolify"] == ["services/node/**"]
+    assert "SERVICE_FQDN_NODE_62050" not in coolify["services"]["node"]["environment"]
+
+
+def test_pgbouncer_config_is_session_pooling_scram_and_never_trust_auth():
+    from pathlib import Path
+    source = (ROOT / "deploy/compose/pgbouncer/start.py").read_text()
+    assert "auth_type = scram-sha-256" in source
+    assert "pool_mode = session" in source
+    assert "listen_port = 5432" in source
+    assert "host=postgres port=5432" in source
+    assert "os.chmod(auth_file, 0o600)" in source
+    assert "password" in source
+    assert "auth_type = trust" not in source

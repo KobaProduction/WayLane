@@ -9,9 +9,21 @@ by committing these manifests.
 
 ## Bundled Compose (repository root)
 
-* docker-compose.yaml — PostgreSQL 17, backend FastAPI, frontend Nginx.
-* docker-compose.coolify.yaml — extends ordinary Compose with Coolify
-  variable discovery and repository-relative Watch Paths.
+* docker-compose.yaml — PostgreSQL 17, private PgBouncer (SCRAM/session mode),
+  backend FastAPI and frontend Nginx. VPN nodes never run in this stack.
+* docker-compose.coolify.yaml — extends ordinary Compose, declares frontend
+  `SERVICE_FQDN_FRONTEND_8080: /` so Coolify creates the public domain, and
+  repeats variable discovery and top-level networks/volumes. Actual domain
+  generation requires fresh-parser acceptance in the deployed Coolify version.
+
+The backend's `POSTGRES_HOST=database` is an **internal literal** resolving to
+PgBouncer's private service-DNS alias at port 5432. PostgreSQL remains reachable
+internally as `postgres:5432` for approved direct administration/migrations.
+PgBouncer uses `session` pool mode, SCRAM auth and the SAME approved credentials,
+not extra passwords; it writes its auth file with 0600 permissions in a
+non-root container. Neither PostgreSQL nor PgBouncer publishes any host ports.
+The bootstrap/migrations currently run through PgBouncer session pooling;
+different pool modes require a separate compatibility review.
 
 A local, untracked .env file supplies the approved All-in-One operator
 variables: WAYLANE_POSTGRES_USERNAME (default waylane, editable),
@@ -44,14 +56,34 @@ exclude query strings; external ingress logs must be sanitized separately.
 
 Coolify: Base Directory /, Compose Location /docker-compose.coolify.yaml.
 Watch Paths include both service directories and the root/deploy Compose
-sources. A change to either backend or frontend rebuilds this resource.
+sources (including `deploy/compose/pgbouncer/**`). A change to backend or frontend
+rebuilds this one resource. Persist these Watch Paths in the Coolify UI/API;
+`x-watch-path-coolify` is not an automatic registration mechanism.
 
 The DB volume is persistent. Changing WAYLANE_POSTGRES_USERNAME,
 WAYLANE_POSTGRES_PASSWORD or WAYLANE_POSTGRES_DATABASE on an existing volume
 does NOT migrate PostgreSQL users, passwords or databases. Never use
 re-deployment as a credential-rotation shortcut: back up and migrate explicitly.
 
-## Split backend (services/backend)
+## Split backend — owned PostgreSQL and PgBouncer
+
+Use `deploy/backend-postgres/docker-compose.yaml` for ONE dedicated
+backend dependency stack (three containers: PostgreSQL, PgBouncer, backend).
+Coolify Base Directory `/deploy/backend-postgres` and Compose Location
+`/docker-compose.coolify.yaml`. Persist Watch Paths
+`deploy/backend-postgres/**`, `deploy/compose/pgbouncer/**` and
+`services/backend/**` in the resource. Shared PostgreSQL credentials use
+exactly the three approved `WAYLANE_POSTGRES_*` inputs: no second
+PgBouncer identity, no frontend, and no node.
+
+The externally accessible backend listener in plain Compose is loopback
+port 8000. On another host/resource, backend-to-frontend communication
+requires an explicitly approved network/HTTPS ingress route; the selected
+Coolify Destination label alone does not attach private networks.
+Never run this stack and an existing writable PostgreSQL volume concurrently.
+No production database/volume migration is authorized by these manifests.
+
+## Split backend — external PostgreSQL (services/backend)
 
 * docker-compose.yaml — FastAPI only, external PostgreSQL and local port 8000.
 * docker-compose.coolify.yaml — Coolify extends base with backend-only watches.
@@ -79,9 +111,12 @@ and ingress must be explicitly verified; the Compose does not create them.
 * docker-compose.yaml — standalone Nginx UI, binds 127.0.0.1:8081.
 * docker-compose.coolify.yaml — frontend-only watches, build-time API base.
 
-The existing build argument VITE_BASE_API defaults to /. A separately owned
-API load balancer or HTTPS ingress must forward /api/ and /sub/ to backend
-while / goes to frontend. This enables one immutable frontend image across
+The existing build argument VITE_BASE_API defaults to /. The Coolify adapter
+declares `SERVICE_FQDN_FRONTEND_8080: /`, allowing Coolify to generate the
+frontend domain without an operator-entered FQDN. The domain routes to the
+static frontend only; it does NOT automatically link an independently deployed
+backend. A separately owned API load balancer or HTTPS ingress must forward
+/api/ and /sub/ to backend while / goes to frontend. This enables one immutable frontend image across
 environments. Separate-domain API hosting requires a separate frontend
 build with an explicit HTTPS VITE_BASE_API and exact backend CORS allowlist.
 Coolify Base Directory /services/frontend, Compose Location

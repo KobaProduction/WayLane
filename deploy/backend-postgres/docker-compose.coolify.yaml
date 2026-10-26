@@ -1,0 +1,43 @@
+# Coolify Base Directory /deploy/backend-postgres, Compose Location /docker-compose.coolify.yaml
+# Persist Watch Paths deploy/backend-postgres/**, deploy/compose/pgbouncer/**,
+# services/backend/** in the actual resource configuration.
+x-watch-path-coolify:
+  - "deploy/backend-postgres/**"
+  - "deploy/compose/pgbouncer/**"
+  - "services/backend/**"
+services:
+  postgres:
+    extends:
+      file: docker-compose.yaml
+      service: postgres
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+  pgbouncer:
+    extends:
+      file: docker-compose.yaml
+      service: pgbouncer
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+  backend:
+    extends:
+      file: docker-compose.yaml
+      service: backend
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+networks:
+  database:
+    internal: true
+  application: {}
+volumes:
+  postgres_data: {}
+  backend_data: {}

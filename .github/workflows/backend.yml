@@ -43,6 +43,7 @@ jobs:
           tests/test_direct_otlp.py
           tests/test_compose_contract.py
           tests/test_access_log_redaction.py
+          tests/test_pgbouncer_bootstrap.py
   image:
     needs: verify
     runs-on: ubuntu-latest

@@ -17,7 +17,7 @@ def main() -> None:
         raise SystemExit("POSTGRES_USER and POSTGRES_PASSWORD must be nonempty")
     url = URL.create(
         "postgresql+asyncpg",
-        username=username, password=password, host="postgres",
+        username=username, password=password, host=os.getenv("POSTGRES_HOST", "postgres"),
         port=5432, database=database,
     )
     os.environ["SQLALCHEMY_DATABASE_URL"] = url.render_as_string(hide_password=False)

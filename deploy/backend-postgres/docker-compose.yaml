@@ -1,0 +1,84 @@
+# Standalone backend with owned PostgreSQL and private session-mode PgBouncer.
+# NO frontend and NO VPN node: a single three-container deployment resource.
+name: waylane-backend-postgres
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  pgbouncer:
+    build:
+      context: ../compose/pgbouncer
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      database:
+        aliases: [database]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; c=socket.socket(); c.settimeout(2); assert c.connect_ex(('127.0.0.1', 5432)) == 0; c.close()"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ../../services/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: database
+      ROLE: all-in-one
+      UVICORN_HOST: backend
+      UVICORN_PORT: "8000"
+      UVICORN_WORKERS: "1"
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+    volumes:
+      - backend_data:/var/lib/pasarguard
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    networks: [database, application]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://backend:8000/health >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+networks:
+  database:
+    internal: true
+  application: {}
+volumes:
+  postgres_data: {}
+  backend_data: {}
