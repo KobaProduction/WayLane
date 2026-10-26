@@ -381,6 +381,11 @@ class SingBoxConfiguration(BaseSubscription):
         self, remark: str, address: str, inbound: SubscriptionInboundData, settings: dict
     ) -> dict | None:
         """Build WireGuard endpoint for sing-box subscriptions (replaces deprecated outbound)."""
+        # AWG 3.1 needs matching obfuscation fields. Never emit an
+        # unusable legacy WireGuard profile in unsupported formats.
+        if inbound.wireguard_amnezia is not None:
+            return None
+
         private_key = settings.get("private_key", "")
         peer_ips = list(settings.get("peer_ips") or [])
         public_key = inbound.wireguard_public_key

@@ -59,6 +59,33 @@ class WireGuardConfiguration(BaseSubscription):
         if keepalive := payload.get("keepalive"):
             config_data["Peer"]["PersistentKeepalive"] = str(keepalive)
 
+        # Only AmneziaWG clients understand these additional parameters.
+        # Never add AWG fields to legacy WireGuard profiles.
+        if inbound.wireguard_amnezia is not None:
+            awg = inbound.wireguard_amnezia
+            field_names = {
+                "jc": "Jc", "jmin": "Jmin", "jmax": "Jmax",
+                "s1": "S1", "s2": "S2", "s3": "S3", "s4": "S4",
+                "h1": "H1", "h2": "H2", "h3": "H3", "h4": "H4",
+                "i1": "I1", "i2": "I2", "i3": "I3", "i4": "I4", "i5": "I5",
+                "header_protection_key": "HeaderProtectionKey",
+                "content_padding_addition": "ContentPaddingAddition",
+                "rekey_after_time": "RekeyAfterTime",
+                "rekey_timeout": "RekeyTimeout",
+                "reject_after_time": "RejectAfterTime",
+                "keepalive_timeout": "KeepaliveTimeout",
+                "max_handshake_attempts": "MaxHandshakeAttempts",
+                "random_trailers": "RandomTrailers",
+                "disable_cookies": "DisableCookies",
+            }
+            for name, external in field_names.items():
+                value = awg.get(name)
+                if value is None or value is False or value == "" or value == 0:
+                    continue
+                config_data["Interface"][external] = (
+                    "on" if value is True else str(value)
+                )
+
         config_content = self._render_config(config_data)
         self.configs.append((components["remark"], config_content))
 

@@ -10,3 +10,19 @@ GPL-3.0 upstream license and attribution preserved in `LICENSE.UPSTREAM`.
 - `XRAY_INSTALLER_URL` still points to a pinned upstream installer; this is an explicit external build dependency, not an Intens-controlled artifact.
 
 **Licensing:** existing GitHub root `LICENSE` (MIT) is retained as authored by Koba Production, but derived PasarGuard code is governed by `LICENSE.UPSTREAM` (AGPL-3.0 for panel/frontend or GPL-3.0 for node). See `LICENSING.md`.
+
+
+## AmneziaWG 3.1 external runtime
+
+The optional Linux AmneziaWG userspace device is built from
+`github.com/amnezia-vpn/amneziawg-go/v3@v3.1.20260828`
+(upstream commit `b5928efb6ca19f0153958460c3d141f04abc5c2e`).
+Its MIT license is preserved in `LICENSE.AMNEZIAWG` and shipped
+inside the node image. No upstream AWG source is vendored into this repository.
+
+`engine=amneziawg` inside an existing `wg` core uses that binary and
+its `/var/run/amneziawg/<interface>.sock` UAPI. An omitted engine keeps
+the pre-existing Linux kernel WireGuard implementation and existing protobuf
+wire format. AWG 3.1 requires matching client config for obfuscated
+handshakes; compatibility with plain WireGuard only when obfuscation disabled.
+The panel rejects node versions older than v0.6.0 for AWG.

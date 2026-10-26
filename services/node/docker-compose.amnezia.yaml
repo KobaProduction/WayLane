@@ -1,0 +1,6 @@
+# Linux AmneziaWG-Go 3.1 deployment only (requires host /dev/net/tun).
+# Use with generic base: docker compose -f docker-compose.yaml -f docker-compose.amnezia.yaml ...
+services:
+  node:
+    devices:
+      - /dev/net/tun:/dev/net/tun

@@ -322,6 +322,7 @@ class SubscriptionInboundData(BaseModel):
     wireguard_mtu: int | None = Field(default=None)
     wireguard_reserved: str | None = Field(default=None)
     wireguard_dns: list[str] | None = Field(default=None)
+    wireguard_amnezia: dict[str, object] | None = Field(default=None)
 
     # MASQUE DNS comes from the host or its inbound, not the user.
     masque_remote_dns: list[str] = Field(default_factory=list)

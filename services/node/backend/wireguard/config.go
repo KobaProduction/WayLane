@@ -14,6 +14,8 @@ import (
 // Config represents the WireGuard configuration
 type Config struct {
 	InterfaceName string         `json:"interface_name"`
+	Engine        string         `json:"engine,omitempty"`
+	Amnezia       *AWG31         `json:"amnezia,omitempty"`
 	PrivateKey    string         `json:"private_key"`
 	PreSharedKey  string         `json:"pre_shared_key,omitempty"`
 	ListenPort    int            `json:"listen_port"`
@@ -61,6 +63,16 @@ func NewConfig(config string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Omitted engine stays Linux kernel WireGuard for existing nodes.
+	if wgConfig.Engine != "" && wgConfig.Engine != "wireguard" && wgConfig.Engine != "amneziawg" {
+		return nil, errors.New("engine must be wireguard or amneziawg")
+	}
+	if wgConfig.Engine != "amneziawg" && wgConfig.Amnezia != nil {
+		return nil, errors.New("amnezia options require engine=amneziawg")
+	}
+	if err := wgConfig.Amnezia.Validate(); err != nil {
+		return nil, err
+	}
 	// Validate configuration
 	if err := validateMTU(wgConfig.MTU); err != nil {
 		return nil, err

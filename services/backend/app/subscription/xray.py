@@ -665,6 +665,11 @@ class XrayConfiguration(BaseSubscription):
 
     def _build_wireguard(self, address: str, inbound: SubscriptionInboundData, settings: dict) -> tuple:
         """Build WireGuard outbound for Xray subscriptions."""
+        # AWG 3.1 needs matching obfuscation fields. Never emit an
+        # unusable legacy WireGuard profile in unsupported formats.
+        if inbound.wireguard_amnezia is not None:
+            return {}
+
         private_key = settings.get("private_key", "")
         peer_ips = list(settings.get("peer_ips") or [])
         public_key = inbound.wireguard_public_key

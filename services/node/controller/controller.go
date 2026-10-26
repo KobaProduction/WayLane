@@ -20,7 +20,7 @@ import (
 	"github.com/KobaProduction/waylane-node/pkg/sysstats"
 )
 
-const NodeVersion = "0.5.5"
+const NodeVersion = "0.6.0"
 
 // keepAliveGrace is added to the configured keep-alive so a panel whose
 // health interval equals keep_alive does not trip the watchdog on jitter.
