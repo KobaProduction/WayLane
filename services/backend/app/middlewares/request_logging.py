@@ -5,6 +5,19 @@ from h11 import LocalProtocolError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.utils.performance import request_phases, start_request_phases
+from config import subscription_env_settings
+
+
+def safe_access_path(path: str) -> str:
+    """Never include subscription credentials or URL query strings in access logs.
+
+    The public subscription path is operator-configurable, so use the same
+    setting as its router instead of hardcoding /sub.
+    """
+    base = "/" + subscription_env_settings.path.strip("/")
+    if path.startswith(base + "/"):
+        return base + "/[REDACTED]"
+    return path
 
 
 class RequestProcessTimeLoggingMiddleware:
@@ -46,10 +59,9 @@ class RequestProcessTimeLoggingMiddleware:
                 raise
         finally:
             process_time_ms = (perf_counter() - start_time) * 1000
-            path = scope.get("path", "")
-            query_bytes = scope.get("query_string", b"")
-            if query_bytes:
-                path = f"{path}?{query_bytes.decode(errors='replace')}"
+            path = safe_access_path(str(scope.get("path", "")))
+            # Query strings may carry links, bearer tokens and credentials.
+            # They are intentionally excluded from all access log events.
             http_version = scope.get("http_version", "1.1")
             client = scope.get("client")
             client_addr = client[0] if client else "-"

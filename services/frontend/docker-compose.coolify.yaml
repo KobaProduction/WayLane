@@ -8,6 +8,8 @@ services:
     extends:
       file: docker-compose.yaml
       service: frontend
+    environment:
+      SERVICE_FQDN_FRONTEND_8080: /
     build:
       args:
         VITE_BASE_API: ${VITE_BASE_API:-/}

@@ -7,9 +7,9 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      POSTGRES_DB: ${POSTGRES_DB:-waylane}
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks: [database]
@@ -20,6 +20,29 @@ services:
       retries: 10
       start_period: 15s
 
+  pgbouncer:
+    build:
+      context: ./deploy/compose/pgbouncer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+    networks:
+      database:
+        aliases: [database]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; c=socket.socket(); c.settimeout(2); assert c.connect_ex(('127.0.0.1', 5432)) == 0; c.close()"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
+      start_period: 10s
+
   backend:
     build:
       context: ./services/backend
@@ -27,9 +50,10 @@ services:
     restart: unless-stopped
     entrypoint: ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      POSTGRES_DB: ${POSTGRES_DB:-waylane}
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: database
       ROLE: all-in-one
       UVICORN_HOST: waylane-api
       UVICORN_PORT: "8000"
@@ -41,7 +65,7 @@ services:
     volumes:
       - backend_data:/var/lib/pasarguard
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
     networks:
       database: {}

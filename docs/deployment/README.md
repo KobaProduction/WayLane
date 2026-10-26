@@ -5,6 +5,8 @@
 | Backend | /services/backend | /Dockerfile | services/backend/** |
 | Frontend | /services/frontend | /Dockerfile | services/frontend/** |
 | Node | /services/node | /Dockerfile | services/node/** |
+| Owned backend+PostgreSQL+PgBouncer | /deploy/backend-postgres | /docker-compose.coolify.yaml | deploy/backend-postgres/**, deploy/compose/pgbouncer/**, services/backend/** |
+| All-in-One Control Plane | / | /docker-compose.coolify.yaml | docker-compose*.yaml, deploy/compose/**, services/backend/**, services/frontend/** |
 
 Add narrow shared/contracts paths to watches only when a service actually
 imports those exact contracts. Docker Compose Location is relative to
@@ -21,7 +23,10 @@ PROD: independent signed/pinned release images. Proposed component-prefixed
 tags backend-vX.Y.Z, frontend-vX.Y.Z and node-vX.Y.Z. Promote by immutable
 digest, not floating latest, and keep rollback to previous artifacts.
 
-PostgreSQL and API balancer remain external. Generated domains, HTTPS,
+PostgreSQL is internal ONLY in the separately selected All-in-One or owned
+backend+PgBouncer deployment; the other standalone backend uses an external
+PostgreSQL. The API balancer for split frontend/backend remains external.
+Generated domains, HTTPS,
 Coolify networks and protected env references are runtime state and need
 explicit owner approval. Existing vpn-core/web-app/prod PostgreSQL remain intact.
 
@@ -36,7 +41,10 @@ Acceptance: native per-module verification; independent image builds;
 parsed Coolify Watch Paths, generated domains and secret references; signed
 GitHub App webhooks received on both sites; health/login/API; OTLP logs and
 traces visible by service.name/namespace/environment; DB backup and rollback.
-This migration branch is not itself a running Coolify deployment.
+Merging to main does not activate or validate any Coolify deployment.
+The frontend adapters declare SERVICE_FQDN_FRONTEND_8080 to request the
+auto-generated domain. Verify the actual parser-generated domain, TLS,
+frontend health, /api routing and /sub access policy on a DEV resource.
 
 ## Source-controlled Compose variants
 

@@ -6,20 +6,22 @@ on:
       - docker-compose.yaml
       - docker-compose.coolify.yaml
       - "deploy/compose/**"
+      - "deploy/backend-postgres/**"
       - "services/backend/docker-compose*.yaml"
       - "services/backend/compose_db_entrypoint.py"
       - "services/frontend/docker-compose*.yaml"
-      - "services/node/docker-compose.coolify.yaml"
+      - "services/node/docker-compose*.yaml"
       - ".github/workflows/compose.yml"
   pull_request:
     paths:
       - docker-compose.yaml
       - docker-compose.coolify.yaml
       - "deploy/compose/**"
+      - "deploy/backend-postgres/**"
       - "services/backend/docker-compose*.yaml"
       - "services/backend/compose_db_entrypoint.py"
       - "services/frontend/docker-compose*.yaml"
-      - "services/node/docker-compose.coolify.yaml"
+      - "services/node/docker-compose*.yaml"
       - ".github/workflows/compose.yml"
 
 permissions:
@@ -29,10 +31,11 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     env:
-      POSTGRES_USER: ci_waylane
-      POSTGRES_PASSWORD: synthetic-compose-ci-only
-      POSTGRES_DB: waylane_test
+      WAYLANE_POSTGRES_USERNAME: ci_waylane
+      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
+      WAYLANE_POSTGRES_DATABASE: waylane_test
       SQLALCHEMY_DATABASE_URL: postgresql+asyncpg://ci_waylane:synthetic-compose-ci-only@db.invalid:5432/waylane_test
+      API_KEY: 9c509f4c-d643-4f16-83e7-b1615a9ee2da
     steps:
       - uses: actions/checkout@v4
       - name: Verify Docker Compose files and extensions
@@ -41,6 +44,10 @@ jobs:
           docker compose version
           docker compose -f docker-compose.yaml config --quiet
           docker compose -f docker-compose.coolify.yaml config --quiet
+          docker compose -f deploy/backend-postgres/docker-compose.yaml config --quiet
+          docker compose -f deploy/backend-postgres/docker-compose.coolify.yaml config --quiet
+          docker compose -f services/node/docker-compose.yaml config --quiet
+          docker compose -f services/node/docker-compose.coolify.yaml config --quiet
           docker compose -f services/backend/docker-compose.yaml config --quiet
           docker compose -f services/backend/docker-compose.coolify.yaml config --quiet
           docker compose -f services/frontend/docker-compose.yaml config --quiet
@@ -48,12 +55,17 @@ jobs:
       - name: Verify required DB variable enforcement
         run: |
           set -euo pipefail
-          if env -u POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then
-            echo "Missing PostgreSQL password was accepted" >&2
+          if env -u WAYLANE_POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing WayLane PostgreSQL password was accepted" >&2
             exit 1
           fi
-          if env -u POSTGRES_USER docker compose -f docker-compose.coolify.yaml config --quiet >/dev/null 2>&1; then
-            echo "Missing PostgreSQL user was accepted" >&2
+          env -u WAYLANE_POSTGRES_USERNAME -u WAYLANE_POSTGRES_DATABASE \
+            docker compose -f docker-compose.coolify.yaml config --format json | \
+            python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all(s[x]["environment"]["POSTGRES_USER"]=="waylane" and s[x]["environment"]["POSTGRES_DB"]=="waylane" for x in ("postgres","backend"))'
+          docker compose -f docker-compose.yaml config --format json | \
+            python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all(s[x]["environment"]["POSTGRES_USER"]=="ci_waylane" and s[x]["environment"]["POSTGRES_DB"]=="waylane_test" for x in ("postgres","backend"))'
+          if env -u API_KEY docker compose -f services/node/docker-compose.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing node API_KEY was accepted" >&2
             exit 1
           fi
           if env -u SQLALCHEMY_DATABASE_URL docker compose -f services/backend/docker-compose.yaml config --quiet >/dev/null 2>&1; then
@@ -71,9 +83,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      POSTGRES_USER: waylane_ci
-      POSTGRES_PASSWORD: synthetic-compose-ci-only
-      POSTGRES_DB: waylane_ci
+      WAYLANE_POSTGRES_USERNAME: waylane_ci
+      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
+      WAYLANE_POSTGRES_DATABASE: waylane_ci
     steps:
       - uses: actions/checkout@v4
       - name: Build and start bundled management stack
@@ -95,8 +107,51 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker-compose.yaml ps
-          docker compose -f docker-compose.yaml logs --no-color --tail=65 postgres backend frontend |
+          docker compose -f docker-compose.yaml logs --no-color --tail=65 postgres pgbouncer backend frontend |
             sed -E 's#(postgresql\+asyncpg://)[^@[:space:]]+@#\1[REDACTED]@#g'
       - name: Remove synthetic test stack
         if: always()
         run: docker compose -f docker-compose.yaml down -v --remove-orphans
+
+  backend-pooler-smoke:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      WAYLANE_POSTGRES_USERNAME: ci_pooler
+      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
+      WAYLANE_POSTGRES_DATABASE: ci_pooler
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run isolated backend plus PostgreSQL and PgBouncer
+        run: docker compose -f deploy/backend-postgres/docker-compose.yaml up -d --build --wait --wait-timeout 240
+      - name: Exercise backend through session pooler
+        run: |
+          set -euo pipefail
+          curl --fail --retry 5 --retry-delay 3 http://127.0.0.1:8000/health
+          cat <<'PYSQL' | docker compose -f deploy/backend-postgres/docker-compose.yaml exec -T backend python -
+          import asyncio
+          import os
+          import asyncpg
+
+          async def check():
+              connection = await asyncpg.connect(
+                  host=os.environ["POSTGRES_HOST"],
+                  port=5432,
+                  user=os.environ["POSTGRES_USER"],
+                  password=os.environ["POSTGRES_PASSWORD"],
+                  database=os.environ["POSTGRES_DB"],
+              )
+              try:
+                  assert await connection.fetchval("SELECT 1") == 1
+              finally:
+                  await connection.close()
+
+          asyncio.run(check())
+          PYSQL
+      - name: Diagnostics (only on failure)
+        if: failure()
+        run: docker compose -f deploy/backend-postgres/docker-compose.yaml ps
+      - name: Remove disposable pooler stack
+        if: always()
+        run: docker compose -f deploy/backend-postgres/docker-compose.yaml down -v --remove-orphans
