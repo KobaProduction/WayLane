@@ -13,7 +13,7 @@ else
   changed=$'services/backend/\nservices/frontend/\nservices/node/'
 fi
 for service in backend frontend node; do
-  if printf '%s\n' "$changed" | grep -q "^services/$service/"; then
+  if grep -q "^services/$service/" <<< "$changed"; then
     echo "[pre-push] verifying $service"
     (cd "services/$service" && ./scripts/verify.sh)
   fi

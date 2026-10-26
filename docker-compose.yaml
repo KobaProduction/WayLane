@@ -1,5 +1,5 @@
 # All-in-one CONTROL PLANE: PostgreSQL + backend + frontend.
-# Nodes run separately (they require privileged NET_ADMIN and enrollment).
+# Nodes are deployed separately; NET_ADMIN is currently required for their networking.
 # Start: docker compose up -d --build with untracked .env credentials.
 name: waylane
 services:
