@@ -1,7 +1,7 @@
 """Source-level contract tests for the additive agent registry."""
 import asyncio
 import secrets
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -14,6 +14,7 @@ from app.db.base import Base
 from app.db.models import node_agent_registrations
 from app.routers.node_discovery import (
     DirectAgentInput, Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_direct_agent,
+    XrayDesiredInput, XrayReport, set_desired_xray, get_desired_xray, agent_xray_desired, agent_xray_report,
     enroll, heartbeat, list_registrations, list_invitations, revoke, revoke_invitation,
 )
 
@@ -210,6 +211,70 @@ def test_direct_agent_token_registration_and_revocation(tmp_path):
                     node_agent_registrations.c.node_uuid == direct_uuid))).mappings().one()
                 assert stored["invitation_id"] is None
                 assert stored["secret_hash"] != direct["agent_token"]
+        finally:
+            await engine.dispose()
+    asyncio.run(run())
+
+
+def test_xray_desired_generation_and_authentication(tmp_path):
+    """Admin sets desired Xray; only approved Agent may retrieve and report."""
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///" + str(tmp_path / "xray.db"))
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with factory() as db:
+                agent = await create_direct_agent(DirectAgentInput(display_name="xray-qa"),
+                                                  db=db, _=object())
+                node_uuid = UUID(agent["node_uuid"])
+                config = {"inbounds": [{"listen": "127.0.0.1", "port": 18443,
+                                       "protocol": "socks", "settings": {"auth": "password",
+                                       "accounts": [{"user": "qa", "pass": "synthetic"}]}}],
+                          "outbounds": [{"protocol": "freedom"}]}
+                initial = await get_desired_xray(node_uuid, db=db, _=object())
+                assert initial == {"configured": False}
+                desired = await set_desired_xray(
+                    node_uuid, XrayDesiredInput(action="deploy", config=config, region="test"),
+                    db=db, _=object())
+                assert desired["generation"] == 1 and desired["image_version"] == "26.10.21"
+                with pytest.raises(HTTPException) as missing_auth:
+                    await agent_xray_desired(node_uuid, x_agent_secret="wrong", db=db)
+                assert missing_auth.value.status_code == 401
+                fetched = await agent_xray_desired(
+                    node_uuid, x_agent_secret=agent["agent_token"], db=db)
+                assert fetched["config"] == config
+                assert fetched["action"] == "deploy"
+                reported = await agent_xray_report(
+                    XrayReport(node_uuid=node_uuid, generation=1, status="running"),
+                    x_agent_secret=agent["agent_token"], db=db)
+                assert reported["accepted"]
+                panel = await get_desired_xray(node_uuid, db=db, _=object())
+                assert panel["runtime_status"] == "running"
+                assert panel["applied_generation"] == 1
+                assert "config" not in panel
+
+                update = await set_desired_xray(
+                    node_uuid, XrayDesiredInput(action="update", image_version="26.10.21",
+                                                region="test-2"), db=db, _=object())
+                assert update["generation"] == 2
+                with pytest.raises(HTTPException) as stale:
+                    await agent_xray_report(
+                        XrayReport(node_uuid=node_uuid, generation=1, status="running"),
+                        x_agent_secret=agent["agent_token"], db=db)
+                assert stale.value.status_code == 409
+                with pytest.raises(ValidationError):
+                    XrayDesiredInput(action="deploy", image_version="latest", config=config)
+                with pytest.raises(ValidationError):
+                    XrayDesiredInput(action="deploy", image_version="26.10.21;rm", config=config)
+                await revoke(node_uuid, db=db, _=object())
+                with pytest.raises(HTTPException) as denied:
+                    await agent_xray_desired(node_uuid, x_agent_secret=agent["agent_token"], db=db)
+                assert denied.value.status_code == 403
+                with pytest.raises(HTTPException) as no_update:
+                    await set_desired_xray(node_uuid, XrayDesiredInput(action="restart"),
+                                           db=db, _=object())
+                assert no_update.value.status_code == 409
         finally:
             await engine.dispose()
     asyncio.run(run())
