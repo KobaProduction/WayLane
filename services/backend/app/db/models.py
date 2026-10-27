@@ -693,6 +693,7 @@ node_discovery_invitations = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("expires_at", DateTime(timezone=True)),
     Column("revoked", String(1), server_default="0", nullable=False),
+    Column("auto_approve", String(1), server_default="0", nullable=False),
 )
 
 node_agent_registrations = Table(

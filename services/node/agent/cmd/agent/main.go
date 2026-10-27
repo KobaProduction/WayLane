@@ -246,6 +246,8 @@ func run(ctx context.Context) error {
 		// Never forward discovery/agent credentials to a redirected origin.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+	var lastPublicIPv4, lastPublicIPv6 string
+	var nextIPRefresh time.Time
 	syncPanel := func() error {
 		if !ident.Registered {
 			reply, err := post(ctx, client, origin, "/api/agent/enroll", "X-Discovery-Token", token, map[string]any{
@@ -261,10 +263,19 @@ func run(ctx context.Context) error {
 			}
 			log.Printf("registered node=%s status=%s", ident.UUID, reply.Status)
 		}
-		v4, v6 := reportIP()
+		if !time.Now().Before(nextIPRefresh) {
+			v4, v6 := reportPublicIP(ctx, client)
+			if v4 != "" {
+				lastPublicIPv4 = v4
+			}
+			if v6 != "" {
+				lastPublicIPv6 = v6
+			}
+			nextIPRefresh = time.Now().Add(time.Minute)
+		}
 		reply, err := post(ctx, client, origin, "/api/agent/heartbeat", "X-Agent-Secret", ident.Secret, map[string]any{
 			"node_uuid": ident.UUID, "agent_version": version,
-			"reported_ipv4": optionalIP(v4), "reported_ipv6": optionalIP(v6),
+			"reported_ipv4": optionalIP(lastPublicIPv4), "reported_ipv6": optionalIP(lastPublicIPv6),
 			"capabilities": []string{"docker.rootless.inspect"},
 		})
 		if err != nil {

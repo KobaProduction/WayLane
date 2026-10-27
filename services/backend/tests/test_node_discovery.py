@@ -44,16 +44,18 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
                 assert invitations["invitations"][0]["id"] == invitation["id"]
                 assert "token_hash" not in invitations["invitations"][0]
                 assert invitation["expires_at"] is None
+                assert invitation["auto_approve"] is True
+                assert invitations["invitations"][0]["auto_approve"] == "1"
                 body = Enrollment(node_uuid=uuid, agent_secret=credential,
                                   display_name="test-node", agent_version="0.1.0")
                 with pytest.raises(HTTPException) as wrong:
                     await enroll(body, client_request(), x_discovery_token="bogus", db=db)
                 assert wrong.value.status_code == 401
 
-                pending = await enroll(body, client_request(), x_discovery_token=token, db=db)
-                assert pending["status"] == "pending"
+                connected = await enroll(body, client_request(), x_discovery_token=token, db=db)
+                assert connected["status"] == "approved"
                 repeat = await enroll(body, client_request(), x_discovery_token=token, db=db)
-                assert repeat["status"] == "pending"
+                assert repeat["status"] == "approved"
 
                 with pytest.raises(HTTPException) as takeover:
                     await enroll(body.model_copy(update={"agent_secret":secrets.token_urlsafe(32)}),
@@ -67,7 +69,7 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
                 assert invalid.value.status_code == 401
 
                 first = await heartbeat(update, client_request(), x_agent_secret=credential, db=db)
-                assert first == {"status":"pending", "allowed_operations":[]}
+                assert first == {"status":"approved", "allowed_operations":[]}
                 rows = await list_registrations(db=db, _=object())
                 assert len(rows["registrations"]) == 1
                 assert rows["registrations"][0]["observed_ip"] == "203.0.113.19"
@@ -111,3 +113,45 @@ def test_agent_ip_and_input_validation():
         Heartbeat(node_uuid=uuid4(), agent_version="0.1.0", capabilities=["a", "a"])
     with pytest.raises(ValidationError):
         Enrollment(node_uuid=uuid4(), display_name="node", agent_version="0.1.0", agent_secret="predictable")
+
+
+def test_manual_discovery_and_ip_preserved_on_temporary_lookup_failure(tmp_path):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///" + str(tmp_path / "manual.db"))
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        uuid, credential = uuid4(), secrets.token_urlsafe(32)
+        try:
+            async with factory() as db:
+                invitation = await create_invitation(
+                    InvitationInput(label="explicit-approval", auto_approve=False),
+                    db=db, _=object(),
+                )
+                assert invitation["auto_approve"] is False
+                invitations = await list_invitations(db=db, _=object())
+                assert invitations["invitations"][0]["auto_approve"] == "0"
+                body = Enrollment(node_uuid=uuid, display_name="manual-node",
+                                  agent_version="0.1.0", agent_secret=credential)
+                first = await enroll(body, client_request(),
+                                     x_discovery_token=invitation["discovery_token"], db=db)
+                assert first["status"] == "pending"
+                valid = Heartbeat(node_uuid=uuid, agent_version="0.1.0",
+                                  reported_ipv4="8.8.8.8")
+                await heartbeat(valid, client_request(), x_agent_secret=credential, db=db)
+                missing = Heartbeat(node_uuid=uuid, agent_version="0.1.0")
+                result = await heartbeat(missing, client_request(), x_agent_secret=credential, db=db)
+                assert result == {"status": "pending", "allowed_operations": []}
+                row = (await db.execute(select(node_agent_registrations))).mappings().one()
+                assert row["reported_ipv4"] == "8.8.8.8"
+                changed = Heartbeat(node_uuid=uuid, agent_version="0.1.0",
+                                    reported_ipv4="1.1.1.1")
+                await heartbeat(changed, client_request(), x_agent_secret=credential, db=db)
+                row = (await db.execute(select(node_agent_registrations))).mappings().one()
+                assert row["reported_ipv4"] == "1.1.1.1"
+                await approve(uuid, db=db, _=object())
+                result = await heartbeat(missing, client_request(), x_agent_secret=credential, db=db)
+                assert result == {"status": "approved", "allowed_operations": []}
+        finally:
+            await engine.dispose()
+    asyncio.run(run())

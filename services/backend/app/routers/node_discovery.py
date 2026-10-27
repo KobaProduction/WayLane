@@ -38,6 +38,7 @@ def observed_ip(request: Request) -> str | None:
 class InvitationInput(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     lifetime_hours: int | None = Field(default=None, ge=1, le=8760)
+    auto_approve: bool = True
 
 
 class Enrollment(BaseModel):
@@ -96,10 +97,12 @@ async def create_invitation(body: InvitationInput, db: AsyncSession = Depends(ge
     now = datetime.now(UTC)
     expires = now + timedelta(hours=body.lifetime_hours) if body.lifetime_hours else None
     result = await db.execute(insert(node_discovery_invitations).values(
-        token_hash=digest(raw), label=body.label, created_at=now, expires_at=expires, revoked="0"))
+        token_hash=digest(raw), label=body.label, created_at=now, expires_at=expires,
+        revoked="0", auto_approve="1" if body.auto_approve else "0"))
     await db.commit()
     # Token is returned exactly once to an authorized admin; only hash is stored.
-    return {"id": result.inserted_primary_key[0], "discovery_token": raw, "expires_at": expires}
+    return {"id": result.inserted_primary_key[0], "discovery_token": raw,
+            "expires_at": expires, "auto_approve": body.auto_approve}
 
 
 @router.get("/invitations")
@@ -108,7 +111,7 @@ async def list_invitations(db: AsyncSession = Depends(get_db),
     data = await db.execute(select(
         node_discovery_invitations.c.id, node_discovery_invitations.c.label,
         node_discovery_invitations.c.created_at, node_discovery_invitations.c.expires_at,
-        node_discovery_invitations.c.revoked,
+        node_discovery_invitations.c.revoked, node_discovery_invitations.c.auto_approve,
     ).order_by(node_discovery_invitations.c.id.desc()))
     return {"invitations": [dict(row) for row in data.mappings()]}
 
@@ -195,13 +198,15 @@ async def enroll(body: Enrollment, request: Request, x_discovery_token: str = He
         await db.execute(insert(node_agent_registrations).values(
             node_uuid=str(body.node_uuid), secret_hash=digest(body.agent_secret),
             invitation_id=invitation["id"], display_name=body.display_name,
-            agent_version=body.agent_version, status="pending",
+            agent_version=body.agent_version,
+            status="approved" if invitation["auto_approve"] == "1" else "pending",
             observed_ip=observed_ip(request), capabilities=[], created_at=now, last_seen_at=now))
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(409, "Registration collision") from exc
-    return {"node_uuid": str(body.node_uuid), "status": "pending"}
+    return {"node_uuid": str(body.node_uuid),
+            "status": "approved" if invitation["auto_approve"] == "1" else "pending"}
 
 
 @agent_router.post("/heartbeat")
@@ -215,11 +220,20 @@ async def heartbeat(body: Heartbeat, request: Request, x_agent_secret: str = Hea
         raise HTTPException(401, "Invalid agent credentials")
     if row["status"] == "revoked":
         raise HTTPException(403, "Agent revoked")
+    # A transient IP lookup failure is NOT evidence that the prior public
+    # address disappeared. Keep last-known values until a new valid IP arrives.
+    changes = {
+        "agent_version": body.agent_version,
+        "observed_ip": observed_ip(request),
+        "capabilities": body.capabilities,
+        "last_seen_at": datetime.now(UTC),
+    }
+    if body.reported_ipv4 is not None:
+        changes["reported_ipv4"] = body.reported_ipv4
+    if body.reported_ipv6 is not None:
+        changes["reported_ipv6"] = body.reported_ipv6
     await db.execute(update(node_agent_registrations).where(
-        node_agent_registrations.c.node_uuid == str(body.node_uuid)).values(
-        agent_version=body.agent_version, observed_ip=observed_ip(request),
-        reported_ipv4=body.reported_ipv4, reported_ipv6=body.reported_ipv6,
-        capabilities=body.capabilities, last_seen_at=datetime.now(UTC)))
+        node_agent_registrations.c.node_uuid == str(body.node_uuid)).values(**changes))
     await db.commit()
     # No VPN core management or host-IP rewrite until acceptance.
     return {"status": row["status"], "allowed_operations": []}

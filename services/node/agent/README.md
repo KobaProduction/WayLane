@@ -30,8 +30,10 @@ spawned as an **agent child process** is *not* another Compose service.
 The panel speaks to **WayLane Agent**, not directly to child VPN engines or
 the internal Docker daemon. The agent is the sole orchestrator for its node.
 Today it supports HTTPS discovery enrollment, durable UUID/per-agent secret,
-manual admin approval/revocation, authenticated heartbeat, reported IP and
-local rootless Docker readiness inspection. Approval does **not** yet grant
+automatic registry connection for **new opt-in auto-approve invitations** (or
+manual confirmation for older/manual invitations), admin revocation,
+authenticated heartbeat, observed public egress IP and local rootless Docker
+readiness inspection. Approval does **not** yet grant
 container-operation commands; enrollment is not production activation.
 
 **Deferred engine plugin/runtime contract (design, NOT implemented):**
@@ -79,3 +81,32 @@ Current Docker Desktop evidence of a running rootless daemon and a disposable
 nested container is a partial runtime probe, not acceptance of the full stack
 or of any VPN protocol. The linked source task is WayLane Issue #11 and draft
 PR #12; keep those descriptions synchronized with this document.
+
+## Discovery token, automatic enrollment and address changes
+
+The panel creates an invitation with a permanent, copy-once discovery token.
+For **new invitations**, auto-connect defaults to enabled; the operator may
+disable it per invitation. Existing invitations created before the additive
+`b7e10d623aa8` migration retain manual approval. Enrollment is idempotent
+for the same node UUID + private secret. Revoked nodes are never automatically
+reconnected. In either mode, `allowed_operations` remains empty; discovery
+approval NEVER authorizes engine management.
+
+The agent sends an authenticated heartbeat every 15 seconds. At most once a
+minute it determines public outbound IP via HTTPS (`api.ipify.org` for IPv4,
+`api6.ipify.org` for IPv6) with strict validation and a bounded timeout; a
+globally-routable local interface is the fallback. The registry updates IP
+automatically when a valid new address arrives. If lookup fails, the
+backend **preserves the previous address** instead of clearing it.
+
+**IP caveat:** these are *outbound egress observations*, not proof that a
+VPN listener is reachable from the Internet. NAT/CGNAT, an ingress proxy,
+local `192.168.x.x` address or port forwarding can make them differ from a
+valid public VPN endpoint. Do NOT automatically rewrite existing legacy
+`nodes.address`, host allocations, DNS or subscription endpoints from
+an unverified heartbeat. Future per-engine endpoint publication requires
+approved node binding plus network reachability acceptance.
+
+The agent requires a CA-verified HTTPS panel origin. Plain HTTP on a LAN IP
+(e.g. `192.168.1.11`) is intentionally rejected; use a test TLS origin with
+a trusted CA instead of bypassing TLS verification.

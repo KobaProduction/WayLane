@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 
 type Invitation = {
   id: number
@@ -14,6 +15,7 @@ type Invitation = {
   revoked: '0' | '1'
   created_at: string
   expires_at: string | null
+  auto_approve: '0' | '1'
 }
 
 type Registration = {
@@ -37,6 +39,7 @@ export default function NodeDiscoveryPanel() {
   const [entries, setEntries] = useState<Registration[]>([])
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [label, setLabel] = useState('')
+  const [autoApprove, setAutoApprove] = useState(true)
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -55,7 +58,15 @@ export default function NodeDiscoveryPanel() {
     }
   }
 
-  useEffect(() => { if (canRead) void refresh() }, [canRead])
+  useEffect(() => {
+    if (!canRead) return
+    void refresh()
+    // Discovery is a live node registry. Keep it fresh while this view exists.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh()
+    }, 30000)
+    return () => window.clearInterval(timer)
+  }, [canRead])
 
   const invite = async () => {
     if (!label.trim() || !canCreate) return
@@ -63,7 +74,7 @@ export default function NodeDiscoveryPanel() {
     setToken('')
     try {
       const response = await $fetch<{ discovery_token: string }>('/api/node-discovery/invitations', {
-        method: 'POST', body: { label: label.trim() },
+        method: 'POST', body: { label: label.trim(), auto_approve: autoApprove },
       })
       setToken(response.discovery_token)
       setLabel('')
@@ -105,8 +116,8 @@ export default function NodeDiscoveryPanel() {
       <CardHeader>
         <CardTitle>Node Discovery — подготовка</CardTitle>
         <CardDescription>
-          Новый агент регистрируется по постоянному токену, но не получает права запускать VPN-ядра до подтверждения.
-          Текущие ноды, сертификаты, адреса хостов и подписки не изменяются.
+          Агент подключается по постоянному Discovery-токену и обновляет обнаруженные внешние IP.
+          Управление VPN-ядрами пока не включено, существующие хосты и подписки не изменяются.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -125,6 +136,12 @@ export default function NodeDiscoveryPanel() {
             </Button>
           </div>
         )}
+        {canCreate && (
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox checked={autoApprove} onCheckedChange={checked => setAutoApprove(checked === true)} />
+            <span>Автоматически подключать новые агенты с этим токеном (без разрешения на управление VPN-ядрами)</span>
+          </label>
+        )}
         {token && (
           <div className="min-w-0 space-y-2 rounded-md border p-3">
             <p className="text-sm">Скопируйте токен сейчас. В панели хранится только его хеш; повторно показать значение нельзя.</p>
@@ -142,7 +159,7 @@ export default function NodeDiscoveryPanel() {
               <div key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border p-3">
                 <div className="min-w-0 space-y-1">
                   <span className="break-words text-sm">{item.label}</span>
-                  <p className="text-muted-foreground text-xs">{item.revoked === '1' ? 'Отозван' : item.expires_at ? 'Ограничен по времени' : 'Постоянный'}</p>
+                  <p className="text-muted-foreground text-xs">{item.revoked === '1' ? 'Отозван' : item.expires_at ? 'Ограничен по времени' : 'Постоянный'} · {item.auto_approve === '1' ? 'Автоподключение' : 'Ручное подтверждение'}</p>
                 </div>
                 {canApprove && item.revoked !== '1' && (
                   <Button type="button" size="sm" variant="outline" disabled={loading}
@@ -153,7 +170,7 @@ export default function NodeDiscoveryPanel() {
           </div>
         )}
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium">Заявки агентов ({entries.length})</span>
+          <span className="text-sm font-medium">Подключённые и обнаруженные агенты ({entries.length})</span>
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>Обновить</Button>
         </div>
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
@@ -168,7 +185,7 @@ export default function NodeDiscoveryPanel() {
                 </div>
                 <p className="text-muted-foreground break-all font-mono text-xs">{node.node_uuid}</p>
                 <p className="text-muted-foreground break-words text-xs">
-                  Agent {node.agent_version} · observed {node.observed_ip ?? 'unknown'} · reported {node.reported_ipv4 ?? node.reported_ipv6 ?? 'unknown'}
+                  Agent {node.agent_version} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
                 </p>
               </div>
               {canApprove && node.status !== 'revoked' && (
