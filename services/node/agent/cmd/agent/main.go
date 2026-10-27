@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -312,6 +313,7 @@ func run(ctx context.Context) error {
 	}
 	var lastPublicIPv4, lastPublicIPv6 string
 	var nextIPRefresh time.Time
+	var xrayActionActive atomic.Bool
 	syncPanel := func() error {
 		if !ident.Registered {
 			reply, err := post(ctx, client, origin, "/api/agent/enroll", "X-Discovery-Token", token, map[string]any{
@@ -345,10 +347,16 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if reply.Status == "approved" {
-			if err := synchronizeXray(ctx, client, origin, ident, state, socket); err != nil {
-				log.Printf("Xray desired-state synchronization failed: %v", err)
-			}
+		if reply.Status == "approved" && xrayActionActive.CompareAndSwap(false, true) {
+			// Pulling a core image may take minutes. Keep heartbeats responsive.
+			go func() {
+				defer xrayActionActive.Store(false)
+				workCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+				defer cancel()
+				if err := synchronizeXray(workCtx, client, origin, ident, state, socket); err != nil {
+					log.Printf("Xray desired-state synchronization failed: %v", err)
+				}
+			}()
 		}
 		log.Printf("node=%s status=%s", ident.UUID, reply.Status)
 		return nil

@@ -164,6 +164,28 @@ func applyXrayDesired(ctx context.Context,socket,dir string,current xrayLocalSta
         }
         return next,err
     }
+    // The Docker API returning a container ID does not prove Xray booted.
+    // Require it to remain running briefly before accepting the generation.
+    select {
+    case <-time.After(2*time.Second):
+    case <-ctx.Done(): return next,ctx.Err()
+    }
+    checkCtx,cancel:=context.WithTimeout(ctx,6*time.Second)
+    defer cancel()
+    check:=exec.CommandContext(checkCtx,"docker","--host","unix://"+socket,
+        "inspect","--format","{{.State.Running}}",xrayChildName)
+    output,checkErr:=check.Output()
+    if checkErr!=nil || strings.TrimSpace(string(output))!="true" {
+        _=dockerXray(ctx,socket,15*time.Second,"rm","-f",xrayChildName)
+        if current.ImageVersion!="" && len(current.Config)>0 {
+            oldImage,valid:=xrayImage(current.ImageVersion)
+            if valid==nil {
+                _=writePrivateFile(configFile,current.Config)
+                _=startXrayContainer(ctx,socket,oldImage,configFile)
+            }
+        }
+        return next,errors.New("Xray failed its post-start readiness check")
+    }
     next.Status="running"
     next.ImageVersion=desired.ImageVersion
     next.Config=append(json.RawMessage(nil),desired.Config...)
