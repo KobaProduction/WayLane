@@ -4,17 +4,18 @@ import hashlib
 import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import begin_immediate_if_sqlite, get_db
-from app.db.models import node_agent_registrations, node_discovery_invitations
+from app.db.models import node_agent_registrations, node_discovery_invitations, node_agent_xray_desired
 from app.models.admin import AdminDetails
 from .authentication import require_permission
 
@@ -263,3 +264,139 @@ async def heartbeat(body: Heartbeat, request: Request, x_agent_secret: str = Hea
     await db.commit()
     # No VPN core management or host-IP rewrite until acceptance.
     return {"status": row["status"], "allowed_operations": []}
+
+
+# The desired-state protocol is intentionally independent of legacy PasarGuard
+# nodes/cores. One monotonically increasing generation prevents replaying stale
+# updates and retains the last desired state after Agent reconnection.
+class XrayDesiredInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["deploy", "update", "restart", "stop"]
+    image_version: str | None = None
+    config: dict[str, Any] | None = None
+    region: str | None = Field(default=None, max_length=64)
+
+    @field_validator("image_version")
+    @classmethod
+    def official_version(cls, value: str | None) -> str | None:
+        import re
+        if value is not None and not re.fullmatch(r"\d{2}\.\d{1,2}\.\d{1,2}", value):
+            raise ValueError("Xray image version must be a pinned official release tag")
+        return value
+
+    @field_validator("config")
+    @classmethod
+    def xray_json(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        import json
+        if value is not None and (len(json.dumps(value)) > 512_000
+                                  or not isinstance(value.get("inbounds"), list)
+                                  or not isinstance(value.get("outbounds"), list)):
+            raise ValueError("Xray config must contain inbounds/outbounds and be <= 500 KiB")
+        return value
+
+
+class XrayReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    node_uuid: UUID
+    generation: int = Field(ge=1)
+    status: Literal["running", "stopped", "error"]
+    error: str | None = Field(default=None, max_length=300)
+
+
+async def valid_agent(db: AsyncSession, node_uuid: UUID, agent_secret: str):
+    if not agent_secret or len(agent_secret) > 128:
+        raise HTTPException(401, "Invalid Agent credential")
+    row = (await db.execute(select(node_agent_registrations).where(
+        node_agent_registrations.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if row is None or not hmac.compare_digest(row["secret_hash"], digest(agent_secret)):
+        raise HTTPException(401, "Invalid Agent credential")
+    if row["status"] != "approved":
+        raise HTTPException(403, "Agent not approved")
+    return row
+
+
+@router.put("/registrations/{node_uuid}/xray")
+async def set_desired_xray(
+    node_uuid: UUID, body: XrayDesiredInput, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update_core")),
+):
+    await begin_immediate_if_sqlite(db)
+    node = (await db.execute(select(node_agent_registrations.c.status).where(
+        node_agent_registrations.c.node_uuid == str(node_uuid)))).scalar_one_or_none()
+    if node != "approved":
+        raise HTTPException(409, "Only approved autonomous Agents accept Xray changes")
+    previous = (await db.execute(select(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    config = body.config if body.config is not None else (previous["config"] if previous else None)
+    if body.action in {"deploy", "update"} and not config:
+        raise HTTPException(422, "Xray configuration required on first deployment")
+    if body.action in {"restart", "stop"} and previous is None:
+        raise HTTPException(409, "Xray has not been configured")
+    version = body.image_version or (previous["image_version"] if previous else "26.10.21")
+    generation = int(previous["generation"]) + 1 if previous else 1
+    region = body.region if body.region is not None else (previous["region"] if previous else None)
+    now = datetime.now(UTC)
+    values = dict(generation=generation, action=body.action, image_version=version,
+                  config=config, region=region, runtime_status="pending",
+                  last_error=None, updated_at=now)
+    if previous:
+        await db.execute(update(node_agent_xray_desired).where(
+            node_agent_xray_desired.c.node_uuid == str(node_uuid)).values(**values))
+    else:
+        await db.execute(insert(node_agent_xray_desired).values(node_uuid=str(node_uuid), **values))
+    await db.commit()
+    return {"generation": generation, "status": "pending", "action": body.action,
+            "image_version": version, "region": region}
+
+
+@router.get("/registrations/{node_uuid}/xray")
+async def get_desired_xray(
+    node_uuid: UUID, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    entry = (await db.execute(select(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if entry is None:
+        return {"configured": False}
+    return {"configured": True, "generation": entry["generation"], "action": entry["action"],
+            "image_version": entry["image_version"], "region": entry["region"],
+            "applied_generation": entry["applied_generation"],
+            "runtime_status": entry["runtime_status"], "last_error": entry["last_error"],
+            "reported_at": entry["reported_at"]}
+
+
+@agent_router.get("/xray/desired")
+async def agent_xray_desired(
+    node_uuid: UUID, x_agent_secret: str = Header(),
+    db: AsyncSession = Depends(get_db),
+):
+    await valid_agent(db, node_uuid, x_agent_secret)
+    entry = (await db.execute(select(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if entry is None:
+        return {"configured": False}
+    # Only an authenticated Agent receives the raw Xray config.
+    return {"configured": True, "generation": entry["generation"], "action": entry["action"],
+            "image_version": entry["image_version"], "config": entry["config"],
+            "region": entry["region"], "applied_generation": entry["applied_generation"]}
+
+
+@agent_router.post("/xray/report")
+async def agent_xray_report(
+    body: XrayReport, x_agent_secret: str = Header(),
+    db: AsyncSession = Depends(get_db),
+):
+    await valid_agent(db, body.node_uuid, x_agent_secret)
+    await begin_immediate_if_sqlite(db)
+    entry = (await db.execute(select(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(body.node_uuid)))).mappings().one_or_none()
+    if entry is None or entry["generation"] != body.generation:
+        raise HTTPException(409, "Stale Xray desired generation")
+    now = datetime.now(UTC)
+    await db.execute(update(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(body.node_uuid)).values(
+            applied_generation=body.generation if body.status != "error" else entry["applied_generation"],
+            runtime_status=body.status, last_error=body.error if body.status == "error" else None,
+            reported_at=now))
+    await db.commit()
+    return {"accepted": True, "generation": body.generation}
