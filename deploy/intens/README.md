@@ -15,7 +15,7 @@
 
 ## Database and secrets
 
-Infrastructure provisions a dedicated database/role for WayLane and configures the third PgBouncer database entry. Use WAYLANE_POSTGRES_USERNAME (default waylane), required secret WAYLANE_POSTGRES_PASSWORD, and WAYLANE_POSTGRES_DATABASE (default waylane). The backend maps those to upstream POSTGRES_* and constructs SQLALCHEMY_DATABASE_URL using the existing SQLAlchemy helper (no duplicate manually maintained DSN). PgBouncer is reachable as database:5432, not via host ports. Passwords embedded in its configuration URI must be URL-safe. Never reuse VPN Core or ZITADEL logical databases.
+Infrastructure provisions a dedicated database/role for WayLane and configures the third PgBouncer database entry. Role and database are fixed as waylane in Compose/bootstrap; the only WayLane DB operator input is required secret WAYLANE_POSTGRES_PASSWORD. The backend maps those to upstream POSTGRES_* and constructs SQLALCHEMY_DATABASE_URL using the existing SQLAlchemy helper (no duplicate manually maintained DSN). PgBouncer is reachable as database:5432, not via host ports. Passwords embedded in its configuration URI must be URL-safe. Never reuse VPN Core or ZITADEL logical databases.
 
 Persistent waylane-data is **application-local** (not a second PostgreSQL volume); back it up and verify its purpose before resetting. Backend runs Alembic migrations at startup. Do not connect an old production panel database without an explicit migration and backup.
 

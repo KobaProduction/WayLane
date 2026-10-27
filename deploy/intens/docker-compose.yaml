@@ -11,9 +11,9 @@ services:
     - /code/.venv/bin/python
     - /code/compose_db_entrypoint.py
     environment:
-      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_USER: waylane
       POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
-      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_DB: waylane
       POSTGRES_HOST: database
       ROLE: all-in-one
       UVICORN_HOST: waylane-api
