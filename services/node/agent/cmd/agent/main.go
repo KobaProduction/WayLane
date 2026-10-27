@@ -15,8 +15,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -215,7 +217,11 @@ func run(ctx context.Context) error {
 		return errors.New("state directory required")
 	}
 	socket := os.Getenv("WAYLANE_ROOTLESS_SOCKET")
-	if err := checkRootlessDocker(ctx, socket); err != nil {
+	engineExit, err := startRootlessEngine(ctx, socket)
+	if err != nil {
+		return err
+	}
+	if err := awaitRootlessEngine(ctx, socket, engineExit); err != nil {
 		return err
 	}
 	ident, exists, err := loadIdentity(state)
@@ -240,24 +246,26 @@ func run(ctx context.Context) error {
 		// Never forward discovery/agent credentials to a redirected origin.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	if !ident.Registered {
-		reply, err := post(ctx, client, origin, "/api/agent/enroll", "X-Discovery-Token", token, map[string]any{
-			"node_uuid": ident.UUID, "agent_secret": ident.Secret, "display_name": name, "agent_version": version,
-		})
-		if err != nil {
-			return err
+	syncPanel := func() error {
+		if !ident.Registered {
+			reply, err := post(ctx, client, origin, "/api/agent/enroll", "X-Discovery-Token", token, map[string]any{
+				"node_uuid": ident.UUID, "agent_secret": ident.Secret,
+				"display_name": name, "agent_version": version,
+			})
+			if err != nil {
+				return err
+			}
+			ident.Registered = true
+			if err := writeIdentity(state, ident); err != nil {
+				return err
+			}
+			log.Printf("registered node=%s status=%s", ident.UUID, reply.Status)
 		}
-		ident.Registered = true
-		if err = writeIdentity(state, ident); err != nil {
-			return err
-		}
-		log.Printf("registered node=%s status=%s", ident.UUID, reply.Status)
-	}
-	heartbeat := func() error {
 		v4, v6 := reportIP()
 		reply, err := post(ctx, client, origin, "/api/agent/heartbeat", "X-Agent-Secret", ident.Secret, map[string]any{
-			"node_uuid": ident.UUID, "agent_version": version, "reported_ipv4": optionalIP(v4),
-			"reported_ipv6": optionalIP(v6), "capabilities": []string{"docker.rootless.inspect"},
+			"node_uuid": ident.UUID, "agent_version": version,
+			"reported_ipv4": optionalIP(v4), "reported_ipv6": optionalIP(v6),
+			"capabilities": []string{"docker.rootless.inspect"},
 		})
 		if err != nil {
 			return err
@@ -265,28 +273,32 @@ func run(ctx context.Context) error {
 		log.Printf("node=%s status=%s", ident.UUID, reply.Status)
 		return nil
 	}
-	if err := heartbeat(); err != nil {
-		return err
+	if err := syncPanel(); err != nil {
+		log.Printf("panel currently unavailable: %v", err)
 	}
-	ticker := time.NewTicker(60 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case err := <-engineExit:
+			return fmt.Errorf("embedded rootless Docker exited: %w", err)
 		case <-ticker.C:
 			if err := checkRootlessDocker(ctx, socket); err != nil {
 				return err
 			}
-			if err := heartbeat(); err != nil {
-				return err
+			if err := syncPanel(); err != nil {
+				log.Printf("panel currently unavailable: %v", err)
 			}
 		}
 	}
 }
 
 func main() {
-	if err := run(context.Background()); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatalf("WayLane Agent stopped: %v", err)
 	}
 }

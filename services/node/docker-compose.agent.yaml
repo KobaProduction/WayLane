@@ -1,81 +1,61 @@
-# Opt-in Compose-owned rootless runtime. Legacy node unaffected.
+# Portable WayLane Node Agent v2: ONLY bootstrap and agent.
+# Bootstrap prepares private volumes; Go Agent supervises rootless Docker.
 name: waylane-agent
 services:
   bootstrap:
     build:
       context: ../..
       dockerfile: services/node/bootstrap/Dockerfile
-    restart: "no"
     user: "0:0"
-    cap_drop: [ALL]
-    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
-    security_opt: [no-new-privileges:true]
+    privileged: true
+    restart: "no"
     network_mode: none
+    read_only: true
     volumes:
+      - agent-state:/bootstrap/agent-state
       - rootless-data:/bootstrap/docker-data
       - rootless-run:/bootstrap/docker-run
-      - agent-state:/bootstrap/agent-state
-
-  docker:
-    image: docker:29.5-dind-rootless
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    user: "1000:1000"
-    cap_drop: [ALL]
-    cap_add: [SETUID, SETGID]
-    security_opt:
-      - seccomp:unconfined
-      - apparmor:unconfined
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    environment:
-      DOCKER_TLS_CERTDIR: ""
-      XDG_RUNTIME_DIR: /run/user/1000
-    command:
-      - dockerd
-      - --host=unix:///run/user/1000/docker.sock
-      - --iptables=false
-      - --ip6tables=false
-      - --bridge=none
-      - --tls=false
-    volumes:
-      - rootless-data:/home/rootless/.local/share/docker
-      - rootless-run:/run/user/1000
-    healthcheck:
-      test: ["CMD-SHELL", "docker --host unix:///run/user/1000/docker.sock info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless"]
-      interval: 5s
-      timeout: 5s
-      start_period: 45s
-      retries: 12
-    pids_limit: 512
-
   agent:
     build:
       context: ../..
       dockerfile: services/node/agent/Dockerfile
     depends_on:
-      docker:
-        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
+    init: true
     user: "1000:1000"
     read_only: true
     cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    cap_add: [SETUID, SETGID]
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    devices:
+      - /dev/net/tun:/dev/net/tun
     environment:
+      HOME: /home/rootless
+      XDG_RUNTIME_DIR: /run/user/1000
+      DOCKER_TLS_CERTDIR: ""
       WAYLANE_PANEL_URL: ${WAYLANE_PANEL_URL:?HTTPS panel URL required}
       WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:?discovery token required}
       WAYLANE_AGENT_NAME: ${WAYLANE_AGENT_NAME:-waylane-node}
       WAYLANE_AGENT_STATE_DIR: /var/lib/waylane-agent
-      WAYLANE_ROOTLESS_SOCKET: /run/waylane/docker.sock
+      WAYLANE_ROOTLESS_SOCKET: /run/user/1000/docker.sock
     volumes:
       - agent-state:/var/lib/waylane-agent
-      - rootless-run:/run/waylane
+      - rootless-data:/home/rootless/.local/share/docker
+      - rootless-run:/run/user/1000
     tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=16m
-    pids_limit: 64
+      - /tmp:rw,nosuid,nodev,size=32m
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "docker -H unix:///run/user/1000/docker.sock info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless"]
+      interval: 10s
+      timeout: 5s
+      start_period: 45s
+      retries: 5
 volumes:
+  agent-state: {}
   rootless-data: {}
   rootless-run: {}
-  agent-state: {}

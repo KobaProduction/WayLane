@@ -6,7 +6,8 @@ COPY services/node/agent/go.mod ./go.mod
 COPY services/node/agent/cmd ./cmd
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/waylane-agent ./cmd/agent
 
-FROM alpine:3.23
-RUN apk add --no-cache ca-certificates docker-cli
-COPY --from=build /out/waylane-agent /usr/local/bin/waylane-agent
+# Official RootlessKit + dockerd + CLI IN SAME agent container.
+FROM docker:29.5-dind-rootless
+COPY --from=build --chown=1000:1000 /out/waylane-agent /usr/local/bin/waylane-agent
+USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/waylane-agent"]

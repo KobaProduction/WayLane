@@ -1,26 +1,23 @@
-# WayLane Agent v2 — opt-in rootless Docker Compose
+# WayLane Node Agent v2: two services
 
-No host systemd. No privileged long-lived services. No host Docker socket.
+This optional deployment leaves legacy nodes, core bindings, TLS, user traffic
+and the rootful Coolify/Docker Desktop socket unchanged.
 
-- One-shot root bootstrap initializes three private named volumes and exits.
-  It has CHOWN/FOWNER/DAC_OVERRIDE capabilities, no privileged flag, no
-  host namespace access and no network.
-- Official docker:29.5-dind-rootless runs as UID 1000 inside a separate
-  Compose service and owns child containers. Its API is a private Unix
-  socket on a volume shared only with the agent.
-- Agent runs as UID 1000 with all capabilities dropped, read-only rootfs
-  and persistent identity.
+1. bootstrap: the ONLY privileged container. It verifies/initializes three
+   private persistent named volumes owned by UID/GID 1000, then exits.
+   No systemd, host namespaces, host account provisioning or second daemon.
+2. agent: a single autonomous Go application running as UID/GID 1000.
+   It starts and supervises official RootlessKit/dockerd inside its OWN
+   container. Its private Docker Unix socket never leaves that container.
+   Rootless Docker data and agent identity persist across recreation.
 
-Nested user namespaces on tested Docker Desktop require SETUID/SETGID,
-device /dev/net/tun, and disabled outer seccomp/AppArmor profiles. This
-weakens isolation substantially despite absence of privileged mode.
-Restrict nested Docker to trusted images, networks and volumes.
+Agent is not privileged and has no host Docker socket. To create user and
+network namespaces in Docker Desktop, RootlessKit needs SETUID/SETGID,
+seccomp/AppArmor unconfined and /dev/net/tun. These runtime exceptions remain
+security-sensitive and must be tested on every supported host.
 
-Compose owns lifecycle, restart and readiness; neither systemd nor a
-custom process supervisor is required. No Docker API TCP port is exposed.
-Volumes retain private agent credentials and nested image storage.
-
-Currently the agent performs discovery/auth/IP reporting only, and does
-not yet manage VPN core containers. Existing node services and TLS are
-unaffected. Kernel VPN networking and core updates remain unverified.
-See Issue #11.
+Currently implemented: discovery registration, manual approval, private
+identity and heartbeat, Docker daemon verification and lifetime supervision.
+NOT implemented or accepted: installing/updating VPN cores, host-side
+WireGuard/AmneziaWG NET_ADMIN and routing, rollback, subscription IP cutover.
+Do not deploy production VPN traffic before those acceptance checks.
