@@ -10,6 +10,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 
+type XrayInboundInfo = {
+  tag: string
+  protocol: string
+  port: number
+  user_count: number
+  identities: string[]
+}
+
 type XrayStatus = {
   configured: boolean
   generation?: number
@@ -65,6 +73,10 @@ export default function NodeDiscoveryPanel() {
   const [xrayRegion, setXrayRegion] = useState('')
   const [xrayConfig, setXrayConfig] = useState('')
   const [xrayBusy, setXrayBusy] = useState(false)
+  const [xrayInboundTag, setXrayInboundTag] = useState('waylane-socks5-qa')
+  const [xrayInboundStates, setXrayInboundStates] = useState<Record<string, XrayInboundInfo[]>>({})
+  const [xrayUsersJSON, setXrayUsersJSON] = useState('')
+
 
 
   const refresh = async () => {
@@ -159,6 +171,16 @@ export default function NodeDiscoveryPanel() {
     }
   }
 
+  const readXrayInbounds = async (uuid: string) => {
+    try {
+      const response = await $fetch<{ inbounds: XrayInboundInfo[] }>(
+        '/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray/inbounds')
+      setXrayInboundStates(previous => ({ ...previous, [uuid]: response.inbounds }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось прочитать Xray inbounds')
+    }
+  }
+
   const demoXray = () => {
     // Generated only when requested. Never commit a reusable proxy password.
     const random = crypto.getRandomValues(new Uint8Array(24))
@@ -192,6 +214,30 @@ export default function NodeDiscoveryPanel() {
       await readXray(uuid)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось отправить команду Xray')
+    } finally { setXrayBusy(false) }
+  }
+
+  const synchronizeInboundUsers = async (uuid: string) => {
+    if (!canManageXray) return
+    setXrayBusy(true)
+    try {
+      const expectedGeneration = xrayStates[uuid]?.generation
+      if (!expectedGeneration) throw new Error('Сначала обновите статус Xray')
+      const users: unknown = JSON.parse(xrayUsersJSON)
+      if (!Array.isArray(users) || users.some(user => !user || typeof user !== 'object' || Array.isArray(user))) {
+        throw new Error('Нужен JSON-массив пользователей')
+      }
+      if (!xrayInboundTag.trim()) throw new Error('Укажите tag inbound')
+      if (users.length === 0 && !window.confirm('Удалить всех пользователей из выбранного inbound?')) return
+      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) +
+        '/xray/inbounds/' + encodeURIComponent(xrayInboundTag.trim()) + '/users', {
+        method: 'PUT', body: { expected_generation: expectedGeneration, users },
+      })
+      toast.success('Синхронизация пользователей Xray запланирована')
+      await readXray(uuid)
+      await readXrayInbounds(uuid)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Ошибка синхронизации пользователей Xray')
     } finally { setXrayBusy(false) }
   }
 
@@ -313,6 +359,7 @@ export default function NodeDiscoveryPanel() {
                     <Button size="sm" variant="outline" onClick={() => {
                       setXrayTarget(xrayTarget === node.node_uuid ? null : node.node_uuid)
                       void readXray(node.node_uuid)
+                      void readXrayInbounds(node.node_uuid)
                     }}>Xray: управление</Button>
                     <span className="text-muted-foreground text-xs">
                       {xrayStates[node.node_uuid]?.configured
@@ -345,6 +392,29 @@ export default function NodeDiscoveryPanel() {
                           onClick={() => void changeXray(node.node_uuid, 'stop')}>Остановить</Button>
                         <Button variant="outline" size="sm" disabled={xrayBusy}
                           onClick={() => void readXray(node.node_uuid)}>Статус</Button>
+                      </div>
+                      <div className="space-y-2 border-t pt-3">
+                        <p className="text-sm font-medium">Пользователи inbound (синхронизация)</p>
+                        <p className="text-muted-foreground text-xs">Заменяет аккаунты выбранного inbound, остальные inbounds и outbounds сохраняет. Пароли передаются только авторизованному Agent через API. Пустой массив удаляет всех пользователей выбранного inbound.</p>
+                        <div className="space-y-1 text-xs text-muted-foreground">
+                          {(xrayInboundStates[node.node_uuid] || []).map(inbound => (
+                            <p key={inbound.tag} className="break-all">
+                              {inbound.tag} · {inbound.protocol} · {inbound.user_count} пользователей
+                              {inbound.identities.length ? ': ' + inbound.identities.join(', ') : ''}
+                            </p>
+                          ))}
+                        </div>
+                        <Input aria-label="Xray inbound tag" placeholder="Tag inbound"
+                          value={xrayInboundTag} onChange={e => setXrayInboundTag(e.target.value)} maxLength={128} />
+                        <Textarea aria-label="Xray inbound users JSON" value={xrayUsersJSON}
+                          rows={5} className="font-mono text-xs"
+                          placeholder={'[{"user":"qa","pass":"strong-password"}]'}
+                          onChange={e => setXrayUsersJSON(e.target.value)} />
+                        <Button size="sm" variant="outline"
+                          disabled={xrayBusy || !xrayUsersJSON.trim() || !xrayStates[node.node_uuid]?.configured}
+                          onClick={() => void synchronizeInboundUsers(node.node_uuid)}>
+                          Синхронизировать пользователей
+                        </Button>
                       </div>
                       {xrayStates[node.node_uuid]?.last_error && (
                         <p role="alert" className="text-destructive text-xs">{xrayStates[node.node_uuid].last_error}</p>

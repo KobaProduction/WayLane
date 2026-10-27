@@ -17,8 +17,8 @@ current v2 development. Read root `AGENTS.md` and AI Agent Workflow task skills.
   Exactly two Compose services, one-shot privileged bootstrap and autonomous
   non-privileged Go agent supervising its private embedded rootless Docker.
   No host systemd, independent rootless-engine Compose service, or host Docker
-  socket. Panel-agent is the only intended management relationship. Future
-  pluggable VPN-core child containers are deferred, not implemented.
+  socket. Panel-agent is the only intended management relationship. Single Xray DEV child is implemented; legacy users/stats/routing and
+  additional plugin engines are deferred, not accepted.
 
 `common/service.proto` remains the compatibility contract;
 `scripts/verify.sh` runs source gates. Preserve provenance/licenses in

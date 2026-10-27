@@ -33,8 +33,9 @@ Today it supports HTTPS discovery enrollment, durable UUID/per-agent secret,
 automatic registry connection for **new opt-in auto-approve invitations** (or
 manual confirmation for older/manual invitations), admin revocation,
 authenticated heartbeat, observed public egress IP and local rootless Docker
-readiness inspection. Approval does **not** yet grant
-container-operation commands; enrollment is not production activation.
+readiness inspection. DEV now has a single pinned Xray child desired-state
+contract (deploy/pull/update/restart/stop and per-inbound user replacement).
+Enrollment alone does not authorize Docker operations or production activation.
 
 **Deferred engine plugin/runtime contract (design, NOT implemented):**
 The agent will use its private rootless Docker to create, configure, update,
@@ -185,3 +186,18 @@ distinct existing implementation, not by adding a version suffix to this
 agent. Do not carry old experimental Compose project names into deployments.
 Real panel enrollment requires a reachable trusted HTTPS origin and a real
 Discovery token: synthetic `.invalid` credentials test only daemon startup.
+
+## Xray DEV user synchronization
+
+Admin `PUT /api/node-discovery/registrations/{uuid}/xray/inbounds/{tag}/users`
+replaces accounts only in the named inbound using `expected_generation` for
+optimistic concurrency; an unauthorized/revoked Agent, stale generation,
+pending update, missing tag or duplicate/invalid user is rejected. Currently
+supported layouts: SOCKS `settings.accounts`; VLESS, VMess and Trojan
+`settings.clients`. Admin `GET .../xray/inbounds` returns names/counts
+without passwords. The Agent validates the updated entire Xray configuration
+and replaces the single Xray core; last running core survives invalid input.
+This still lacks PasarGuard live SyncUsers, Shadowsocks 2022, statistics,
+real region switching, multi-core drivers and accepted public UDP ingress.
+See Issue #13 for full parity. Local DEV verified authenticated TCP SOCKS5
+end-to-end; public VPN traffic is not accepted.

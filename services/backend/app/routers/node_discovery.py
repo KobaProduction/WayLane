@@ -18,6 +18,7 @@ from app.db.base import begin_immediate_if_sqlite, get_db
 from app.db.models import node_agent_registrations, node_discovery_invitations, node_agent_xray_desired
 from app.models.admin import AdminDetails
 from .authentication import require_permission
+from .xray_inbound_users import replace_inbound_users
 
 router = APIRouter(prefix="/api/node-discovery", tags=["Node discovery"])
 agent_router = APIRouter(prefix="/api/agent", tags=["Node agent"])
@@ -347,6 +348,80 @@ async def set_desired_xray(
     await db.commit()
     return {"generation": generation, "status": "pending", "action": body.action,
             "image_version": version, "region": region}
+
+
+@router.get("/registrations/{node_uuid}/xray/inbounds")
+async def list_xray_inbounds(
+    node_uuid: UUID, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    """Return sanitized inbound account identities, never raw user secrets."""
+    entry = (await db.execute(select(node_agent_xray_desired.c.config).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)))).scalar_one_or_none()
+    if not isinstance(entry, dict):
+        return {"inbounds": []}
+    result = []
+    for inbound in entry.get("inbounds", []):
+        if not isinstance(inbound, dict):
+            continue
+        protocol = inbound.get("protocol")
+        settings = inbound.get("settings") or {}
+        users = settings.get("accounts" if protocol == "socks" else "clients", [])
+        if not isinstance(users, list):
+            users = []
+        identities = [
+            user.get("user" if protocol == "socks" else "email") or (
+                user.get("id") if protocol in {"vless", "vmess"} else None)
+            for user in users if isinstance(user, dict)
+        ]
+        result.append({"tag": inbound.get("tag"), "protocol": protocol,
+                       "port": inbound.get("port"), "user_count": len(users),
+                       "identities": [name for name in identities if isinstance(name, str)]})
+    return {"inbounds": result}
+
+
+class XrayInboundUsersInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    users: list[dict[str, Any]] = Field(max_length=1024)
+    expected_generation: int = Field(ge=1)
+
+
+@router.put("/registrations/{node_uuid}/xray/inbounds/{inbound_tag}/users")
+async def sync_xray_inbound_users(
+    node_uuid: UUID, inbound_tag: str, body: XrayInboundUsersInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update_core")),
+):
+    """Replace one inbound's accounts, preserving the remaining Xray config.
+
+    A single desired-state generation is queued. The Agent validates the
+    entire resulting config and preserves the last running core on failure.
+    """
+    await begin_immediate_if_sqlite(db)
+    node_status = await db.scalar(select(node_agent_registrations.c.status).where(
+        node_agent_registrations.c.node_uuid == str(node_uuid)))
+    if node_status != "approved":
+        raise HTTPException(409, "Only approved Agents can synchronize Xray users")
+    previous = (await db.execute(select(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if previous is None or not previous["config"]:
+        raise HTTPException(409, "Xray must be deployed before synchronizing users")
+    if previous["generation"] != body.expected_generation:
+        raise HTTPException(409, "Stale Xray generation; reload status")
+    if previous["runtime_status"] == "pending":
+        raise HTTPException(409, "Previous Xray operation still pending")
+    try:
+        config = replace_inbound_users(previous["config"], inbound_tag, body.users)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    generation = int(previous["generation"]) + 1
+    await db.execute(update(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)).values(
+            generation=generation, action="update", config=config,
+            runtime_status="pending", last_error=None, updated_at=datetime.now(UTC)))
+    await db.commit()
+    return {"generation": generation, "status": "pending",
+            "inbound_tag": inbound_tag, "user_count": len(body.users)}
 
 
 @router.get("/registrations/{node_uuid}/xray")

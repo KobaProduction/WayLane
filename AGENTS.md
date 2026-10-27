@@ -35,6 +35,7 @@ non-privileged autonomous `agent`. The agent supervises its own embedded
 rootless Docker daemon through a private Unix socket. Neither host systemd,
 a separate Compose Docker sidecar, nor the host/system Docker socket belongs
 in this architecture. Only the agent communicates with the panel; the agent
-will eventually own child-container lifecycle for Xray, sing-box, WireGuard,
-AmneziaWG and plugin engines. That child lifecycle is **deferred**, not shipped.
+now owns a single DEV Xray child (deploy/pull/update/restart/stop,
+per-inbound account updates), while PasarGuard parity, multi-engine drivers,
+public UDP/TCP ingress and production traffic are **not** shipped.
 The security/runtime pilot is not accepted by source CI alone.
