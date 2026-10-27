@@ -55,9 +55,16 @@ Compose explicitly grants `SETUID`/`SETGID`, mounts `/dev/net/tun` and
 sets `seccomp=unconfined` / `apparmor=unconfined`. These exceptions weaken
 isolation despite Docker reporting `rootless`; they are not a general proof
 of a safe production multi-tenant boundary. No automatic broadening of host
-privileges is authorized. The embedded daemon currently uses `vfs` storage,
-disables iptables and the default Docker bridge; therefore a basic nested
-container test **does not establish VPN routing, host ingress or core traffic**.
+privileges is authorized. The embedded daemon uses `vfs` storage and the **default rootless Docker bridge/NAT**;
+iptables and bridge setup must not be disabled, because future child containers
+need their own private network. Outer Compose uses its ordinary isolated bridge
+for outbound agent-to-panel HTTPS, rather than Docker Desktop host networking.
+A basic nested container test **does not establish VPN routing, host ingress or
+core traffic**: publishing a future VPN listener requires two separately
+verified mappings (child -> agent container -> Windows host), or an explicitly
+accepted host-network alternative on a capable host. Do not expose the private
+Docker API socket or invent unused Xray/WireGuard listener ports in the current
+node deployment.
 
 The experimental agent must fail rather than use a rootful/system Docker
 socket. Keep discovery credentials separate from node identity secrets. Store

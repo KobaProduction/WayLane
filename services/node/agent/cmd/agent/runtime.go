@@ -24,9 +24,6 @@ func startRootlessEngine(ctx context.Context, socket string) (<-chan error, erro
 		"dockerd",
 		"--host=unix://"+socket,
 		"--storage-driver=vfs",
-		"--iptables=false",
-		"--ip6tables=false",
-		"--bridge=none",
 		"--tls=false",
 	)
 	cmd.Stdout = os.Stdout
