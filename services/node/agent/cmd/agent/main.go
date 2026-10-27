@@ -345,6 +345,11 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if reply.Status == "approved" {
+			if err := synchronizeXray(ctx, client, origin, ident, state, socket); err != nil {
+				log.Printf("Xray desired-state synchronization failed: %v", err)
+			}
+		}
 		log.Printf("node=%s status=%s", ident.UUID, reply.Status)
 		return nil
 	}
