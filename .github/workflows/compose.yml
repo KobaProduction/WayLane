@@ -49,8 +49,7 @@ jobs:
           docker compose -f services/node/docker-compose.yaml config --quiet
           docker compose -f services/node/docker-compose.coolify.yaml config --quiet
           docker compose -f services/node/docker-compose.amnezia.coolify.yaml config --quiet
-          WAYLANE_NODE_UID=26000 WAYLANE_NODE_GID=26000 \
-            WAYLANE_PANEL_URL=https://panel.example.invalid \
+          WAYLANE_PANEL_URL=https://panel.example.invalid \
             WAYLANE_DISCOVERY_TOKEN=wl_disc_ci-synthetic-only \
             docker compose -f services/node/docker-compose.agent.yaml config --quiet
           docker compose -f services/node/docker-compose.yaml -f services/node/docker-compose.amnezia.yaml config --quiet

@@ -18,5 +18,5 @@ go build -o /dev/null ./cmd/node
   go vet ./...
   go build -o /dev/null ./cmd/agent
 )
-bash -n bootstrap/run-bootstrap.sh bootstrap/bootstrap-host.sh
+sh -n bootstrap/run-bootstrap.sh
 echo "WayLane node verification passed (legacy node, agent, bootstrap checks)."

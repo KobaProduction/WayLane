@@ -1,8 +1,13 @@
-#!/usr/bin/env bash
-set -euo pipefail
-[[ "$EUID" == 0 ]] || { echo "Root required for the ONE-SHOT bootstrap" >&2; exit 1; }
-: "$WAYLANE_NODE_USER" "$WAYLANE_NODE_UID" "$WAYLANE_NODE_GID"
-[[ -r /proc/1/ns/mnt ]] || exit 1
-# PID 1 is the host's due to pid: host. The script is passed over stdin so
-# file lookups, binaries and apt/systemctl operate on the host, not Alpine.
-exec nsenter -t 1 -m -u -i -n -p -r -w -- /bin/bash -s < /opt/waylane/bootstrap-host.sh
+#!/bin/sh
+set -eu
+# Portable one-shot volume preparation; no host namespaces or systemd.
+[ "$(id -u)" -eq 0 ] || { echo "container root required" >&2; exit 1; }
+for dir in /state/agent /state/rootless-data /state/rootless-run; do
+  [ -d "$dir" ] && [ ! -L "$dir" ] || { echo "Unsafe volume: $dir" >&2; exit 1; }
+  owner="$(stat -c %u:%g "$dir")"
+  if [ "$owner" = 0:0 ]; then chown 1000:1000 "$dir"
+  elif [ "$owner" != 1000:1000 ]; then echo "Unexpected owner $owner on $dir" >&2; exit 1
+  fi
+  chmod 0700 "$dir"
+done
+echo "WayLane rootless volumes prepared"
