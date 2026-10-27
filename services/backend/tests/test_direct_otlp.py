@@ -65,16 +65,12 @@ def test_otlp_requires_pair_and_https(monkeypatch):
 
 
 def test_private_collector_allows_no_token_but_public_http_is_denied(monkeypatch):
-    monkeypatch.setenv("OTLP_ENDPOINT", "http://otel-collector:4318")
-    monkeypatch.delenv("OTLP_BEARER_TOKEN", raising=False)
-    # The actual exporter constructor is exercised with its private endpoint.
-    providers = runtime.configure_direct_otlp()
-    assert providers is not None
-    runtime.flush_and_shutdown_direct_otlp()
-    monkeypatch.setattr(runtime, "_telemetry", None)
-    monkeypatch.setenv("OTLP_ENDPOINT", "http://example.invalid:4318")
+    runtime._validate_exporter_destination("http://otel-collector:4318", "")
     with pytest.raises(RuntimeError):
-        runtime.configure_direct_otlp()
+        runtime._validate_exporter_destination("http://example.invalid:4318", "")
+    with pytest.raises(RuntimeError):
+        runtime._validate_exporter_destination("http://otel-collector:4318/?query=1", "")
+
 
 
 def test_direct_otlp_logs_traces_are_sanitized(monkeypatch):

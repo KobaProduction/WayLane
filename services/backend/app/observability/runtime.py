@@ -64,6 +64,36 @@ class _MetadataOnlyOTLPHandler(logging.Handler):
         self._downstream.emit(safe)
 
 
+def _validate_exporter_destination(endpoint: str, token: str) -> None:
+    # Only this exact internal Docker DNS endpoint is allowed without Bearer/TLS.
+    # It is reachable solely on the environment-isolated application network.
+    parsed = urlparse(endpoint)
+    private_collector = (
+        parsed.scheme == "http"
+        and parsed.hostname == "otel-collector"
+        and parsed.port == 4318
+        and parsed.path in ("", "/")
+        and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
+    )
+    if not endpoint or (not token and not private_collector):
+        raise RuntimeError("OTLP_ENDPOINT and OTLP_BEARER_TOKEN must be configured together outside the private collector")
+    if not private_collector and (parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.query or parsed.fragment):
+        # Explicitly localhost-only endpoint for synthetic integration
+        # tests (no production downgrade to HTTP).
+        if not (
+            os.getenv("WAYLANE_OTLP_LOCAL_TEST") == "1"
+            and parsed.scheme == "http"
+            and parsed.hostname in ("127.0.0.1", "localhost")
+            and not parsed.username and not parsed.password
+            and not parsed.query and not parsed.fragment
+        ):
+            raise RuntimeError("OTLP endpoint must be a credential-free HTTPS origin")
+    if "/v1/" in parsed.path:
+        raise RuntimeError("OTLP_ENDPOINT must be a base URL, not a signal-specific path")
+
+
+
 def configure_direct_otlp():
     """Install SDK exporters once in this process.
 
@@ -79,32 +109,7 @@ def configure_direct_otlp():
         token = os.getenv("OTLP_BEARER_TOKEN", "").strip()
         if not endpoint and not token:
             return None
-        # Only this exact internal Docker DNS endpoint is allowed without Bearer/TLS.
-        # It is reachable solely on the environment-isolated application network.
-        parsed = urlparse(endpoint)
-        private_collector = (
-            parsed.scheme == "http"
-            and parsed.hostname == "otel-collector"
-            and parsed.port == 4318
-            and parsed.path in ("", "/")
-            and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
-        )
-        if not endpoint or (not token and not private_collector):
-            raise RuntimeError("OTLP_ENDPOINT and OTLP_BEARER_TOKEN must be configured together outside the private collector")
-        if not private_collector and (parsed.scheme != "https" or not parsed.hostname or parsed.username
-                or parsed.password or parsed.query or parsed.fragment):
-            # Explicitly localhost-only endpoint for synthetic integration
-            # tests (no production downgrade to HTTP).
-            if not (
-                os.getenv("WAYLANE_OTLP_LOCAL_TEST") == "1"
-                and parsed.scheme == "http"
-                and parsed.hostname in ("127.0.0.1", "localhost")
-                and not parsed.username and not parsed.password
-                and not parsed.query and not parsed.fragment
-            ):
-                raise RuntimeError("OTLP endpoint must be a credential-free HTTPS origin")
-        if "/v1/" in parsed.path:
-            raise RuntimeError("OTLP_ENDPOINT must be a base URL, not a signal-specific path")
+        _validate_exporter_destination(endpoint, token)
 
         # Lazy imports keep the normal local development runtime simple.
         from opentelemetry import trace
