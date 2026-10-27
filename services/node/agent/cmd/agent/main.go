@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -108,10 +109,16 @@ func loadIdentity(dir string) (identity, bool, error) {
 	return value, true, nil
 }
 
-func panelOrigin(s string) (string, error) {
+func panelOrigin(s string, devHTTP bool) (string, error) {
 	u, err := url.Parse(s)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return "", errors.New("panel must be an HTTPS origin with a trusted CA")
+	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return "", errors.New("panel must be a valid origin without credentials, query or path")
+	}
+	if u.Scheme != "https" {
+		allowedHost := u.Hostname() == "host.docker.internal" || u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+		if !devHTTP || u.Scheme != "http" || !allowedHost {
+			return "", errors.New("panel requires CA-verified HTTPS; HTTP is restricted to explicit Docker Desktop/loopback DEV")
+		}
 	}
 	return strings.TrimSuffix(u.String(), "/"), nil
 }
@@ -193,6 +200,74 @@ func post(ctx context.Context, client *http.Client, origin, path, header, creden
 	return answer, nil
 }
 
+var nodeUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func directTokenUUID(agentToken string) (string, error) {
+	if !strings.HasPrefix(agentToken, "wl_agent_") {
+		return "", errors.New("invalid direct Agent token prefix")
+	}
+	parts := strings.SplitN(strings.TrimPrefix(agentToken, "wl_agent_"), "_", 2)
+	if len(parts) != 2 || !nodeUUIDPattern.MatchString(parts[0]) {
+		return "", errors.New("invalid direct Agent token identity")
+	}
+	random, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || len(random) != 32 || len(parts[1]) != 43 {
+		return "", errors.New("direct Agent token must contain 32 random bytes")
+	}
+	return parts[0], nil
+}
+
+func prepareIdentity(dir, discovery, agentToken string) (identity, error) {
+	if discovery != "" && agentToken != "" {
+		return identity{}, errors.New("choose either discovery_token or agent_token, not both")
+	}
+	var tokenUUID string
+	if agentToken != "" {
+		var err error
+		tokenUUID, err = directTokenUUID(agentToken)
+		if err != nil {
+			return identity{}, err
+		}
+	}
+	ident, exists, err := loadIdentity(dir)
+	if err != nil {
+		return identity{}, err
+	}
+	if exists {
+		if agentToken != "" && !ident.Registered {
+			// Explicit direct credentials replace only a never-confirmed
+			// discovery identity. An already registered UUID is immutable.
+			direct := identity{UUID: tokenUUID, Secret: agentToken, Registered: true}
+			if err := writeIdentity(dir, direct); err != nil {
+				return identity{}, err
+			}
+			return direct, nil
+		}
+		if agentToken != "" && (ident.UUID != tokenUUID || ident.Secret != agentToken) {
+			return identity{}, errors.New("configured direct credentials conflict with persisted identity")
+		}
+		if !ident.Registered && (len(discovery) > 100 || !strings.HasPrefix(discovery, "wl_disc_")) {
+			return identity{}, errors.New("unregistered identity requires discovery token")
+		}
+		return ident, nil
+	}
+	if agentToken != "" {
+		ident = identity{UUID: tokenUUID, Secret: agentToken, Registered: true}
+	} else {
+		if len(discovery) > 100 || !strings.HasPrefix(discovery, "wl_disc_") {
+			return identity{}, errors.New("new identity requires discovery or direct agent credentials")
+		}
+		ident, err = newIdentity()
+		if err != nil {
+			return identity{}, err
+		}
+	}
+	if err := writeIdentity(dir, ident); err != nil {
+		return identity{}, err
+	}
+	return ident, nil
+}
+
 func optionalIP(s string) any {
 	if s == "" {
 		return nil
@@ -204,17 +279,19 @@ func run(ctx context.Context) error {
 	if os.Geteuid() == 0 {
 		return errors.New("WayLane Agent must never run as root")
 	}
-	origin, err := panelOrigin(os.Getenv("WAYLANE_PANEL_URL"))
+	origin, err := panelOrigin(os.Getenv("WAYLANE_PANEL_URL"), os.Getenv("WAYLANE_DEV_ALLOW_HTTP") == "true")
 	if err != nil {
 		return err
 	}
 	token := os.Getenv("WAYLANE_DISCOVERY_TOKEN")
-	if !strings.HasPrefix(token, "wl_disc_") || len(token) > 100 {
-		return errors.New("missing discovery token")
-	}
+	directToken := os.Getenv("WAYLANE_AGENT_TOKEN")
 	state := os.Getenv("WAYLANE_AGENT_STATE_DIR")
 	if state == "" {
 		return errors.New("state directory required")
+	}
+	ident, err := prepareIdentity(state, token, directToken)
+	if err != nil {
+		return err
 	}
 	socket := os.Getenv("WAYLANE_ROOTLESS_SOCKET")
 	engineExit, err := startRootlessEngine(ctx, socket)
@@ -223,19 +300,6 @@ func run(ctx context.Context) error {
 	}
 	if err := awaitRootlessEngine(ctx, socket, engineExit); err != nil {
 		return err
-	}
-	ident, exists, err := loadIdentity(state)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		ident, err = newIdentity()
-		if err != nil {
-			return err
-		}
-		if err = writeIdentity(state, ident); err != nil {
-			return err
-		}
 	}
 	name := os.Getenv("WAYLANE_AGENT_NAME")
 	if name == "" || len(name) > 128 {

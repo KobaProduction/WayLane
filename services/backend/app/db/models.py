@@ -701,7 +701,7 @@ node_agent_registrations = Table(
     Column("node_uuid", String(36), primary_key=True),
     Column("secret_hash", String(64), nullable=False),
     Column("invitation_id", SqliteCompatibleBigInteger,
-           ForeignKey("node_discovery_invitations.id", ondelete="RESTRICT"), nullable=False),
+           ForeignKey("node_discovery_invitations.id", ondelete="RESTRICT"), nullable=True),
     Column("legacy_node_id", SqliteCompatibleBigInteger, ForeignKey("nodes.id", ondelete="SET NULL"), unique=True),
     Column("display_name", String(128), nullable=False),
     Column("status", String(16), nullable=False),
@@ -711,7 +711,7 @@ node_agent_registrations = Table(
     Column("reported_ipv6", String(45)),
     Column("capabilities", JSON(), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    Column("last_seen_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True)),
 )
 Index("ix_node_agent_registrations_status", node_agent_registrations.c.status)
 

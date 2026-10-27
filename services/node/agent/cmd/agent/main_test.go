@@ -48,11 +48,11 @@ func TestIdentitySurvivesRestartAndPrivatePermissions(t *testing.T) {
 func TestPanelOriginRequiresVerifiedHTTPS(t *testing.T) {
 	for _, s := range []string{"http://panel.example", "https://user:secret@panel.example",
 		"https://panel.example/path", "https://panel.example?key=value", "https://panel.example#fragment", ""} {
-		if _, err := panelOrigin(s); err == nil {
+		if _, err := panelOrigin(s, false); err == nil {
 			t.Fatalf("accepted %q", s)
 		}
 	}
-	if s, err := panelOrigin("https://panel.example/"); err != nil || s != "https://panel.example" {
+	if s, err := panelOrigin("https://panel.example/", false); err != nil || s != "https://panel.example" {
 		t.Fatalf("expected HTTPS origin, got %s %v", s, err)
 	}
 }
@@ -113,5 +113,87 @@ func TestRootlessDaemonRejectsRootfulUnixSocket(t *testing.T) {
 	}
 	if err := checkRootlessDocker(context.Background(), sock); err != nil {
 		t.Fatalf("rootless denied: %v", err)
+	}
+}
+
+func TestDirectAgentTokenIdentityAndModeSelection(t *testing.T) {
+	const uuid = "0192b532-184f-41bc-9952-78e15b14cc55"
+	const directToken = "wl_agent_" + uuid + "_0123456789012345678901234567890123456789012"
+	dir := filepath.Join(t.TempDir(), "direct")
+	ident, err := prepareIdentity(dir, "", directToken)
+	if err != nil || ident.UUID != uuid || ident.Secret != directToken || !ident.Registered {
+		t.Fatalf("direct registration identity: %+v %v", ident, err)
+	}
+	if _, err := prepareIdentity(dir, "", ""); err != nil {
+		t.Fatalf("direct identity must survive restart with no environment secrets: %v", err)
+	}
+	for _, bad := range []struct{ discovery, token string }{
+		{"wl_disc_abc", directToken},
+		{"", "invalid"},
+		{"", "wl_agent_" + uuid + "_bad"},
+		{"", "wl_agent_00000000-0000-0000-0000-000000000000_0123456789012345678901234567890123456789012"},
+	} {
+		if _, err := prepareIdentity(dir, bad.discovery, bad.token); err == nil {
+			t.Errorf("bad mode accepted: %+v", bad)
+		}
+	}
+	freshDir := filepath.Join(t.TempDir(), "discovery")
+	discovery, err := prepareIdentity(freshDir, "wl_disc_synthetic", "")
+	if err != nil || discovery.Registered || discovery.UUID == "" {
+		t.Fatalf("discovery identity: %+v %v", discovery, err)
+	}
+	if _, err := prepareIdentity(freshDir, "", ""); err == nil {
+		t.Fatal("unregistered discovery identity must require discovery token")
+	}
+	switched, err := prepareIdentity(freshDir, "", directToken)
+	if err != nil || switched.UUID != uuid || !switched.Registered {
+		t.Fatalf("explicit direct credentials did not replace unregistered identity: %+v %v", switched, err)
+	}
+	if persisted, _, err := loadIdentity(freshDir); err != nil || persisted != switched {
+		t.Fatalf("direct identity not persisted: %+v %v", persisted, err)
+	}
+	if _, err := prepareIdentity(freshDir, "wl_disc_synthetic", ""); err != nil {
+		t.Fatalf("registered direct identity should survive restart: %v", err)
+	}
+	if err := os.Remove(filepath.Join(freshDir, "identity.json")); err != nil {
+		t.Fatal(err)
+	}
+	discovery, err = prepareIdentity(freshDir, "wl_disc_synthetic", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery.Registered = true
+	if err := writeIdentity(freshDir, discovery); err != nil {
+		t.Fatal(err)
+	}
+	if resumed, err := prepareIdentity(freshDir, "", ""); err != nil || resumed != discovery {
+		t.Fatalf("discovery identity should survive without original invitation: %+v %v", resumed, err)
+	}
+}
+
+func TestLocalHTTPOnlyWithExplicitDevelopmentGate(t *testing.T) {
+	for _, good := range []string{
+		"http://host.docker.internal:18117",
+		"http://127.0.0.1:18117",
+		"http://localhost:18117",
+		"http://[::1]:18117",
+	} {
+		if _, err := panelOrigin(good, true); err != nil {
+			t.Errorf("allowed DEV address rejected %s: %v", good, err)
+		}
+		if _, err := panelOrigin(good, false); err == nil {
+			t.Errorf("DEV HTTP accepted without opt-in: %s", good)
+		}
+	}
+	for _, bad := range []string{
+		"http://192.168.1.11:18117", "http://10.0.0.5:18117",
+		"http://panel.example.com", "http://evil.internal",
+		"http://user:pass@host.docker.internal:18117",
+		"http://host.docker.internal:18117/path",
+		"https://panel.example.com/subpath",
+	} {
+		if _, err := panelOrigin(bad, true); err == nil {
+			t.Errorf("unsafe DEV endpoint accepted: %s", bad)
+		}
 	}
 }

@@ -39,7 +39,11 @@ services:
       XDG_RUNTIME_DIR: /run/user/1000
       DOCKER_TLS_CERTDIR: ""
       WAYLANE_PANEL_URL: ${WAYLANE_PANEL_URL:?HTTPS panel URL required}
-      WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:?discovery token required}
+      # Choose ONE of Discovery or direct Agent token; leave both empty only
+      # after a registered identity is safely persisted in agent-state.
+      WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:-}
+      WAYLANE_AGENT_TOKEN: ${WAYLANE_AGENT_TOKEN:-}
+      WAYLANE_DEV_ALLOW_HTTP: ${WAYLANE_DEV_ALLOW_HTTP:-false}
       WAYLANE_AGENT_NAME: ${WAYLANE_AGENT_NAME:-waylane-node}
       WAYLANE_AGENT_STATE_DIR: /var/lib/waylane-agent
       WAYLANE_ROOTLESS_SOCKET: /run/user/1000/docker.sock

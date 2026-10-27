@@ -5,7 +5,7 @@ import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv6Address, ip_address
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -39,6 +39,26 @@ class InvitationInput(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     lifetime_hours: int | None = Field(default=None, ge=1, le=8760)
     auto_approve: bool = True
+
+
+class DirectAgentInput(BaseModel):
+    display_name: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/registrations/direct", status_code=201)
+async def create_direct_agent(body: DirectAgentInput, db: AsyncSession = Depends(get_db),
+                              _: AdminDetails = Depends(require_permission("nodes", "create"))):
+    """Create an explicitly approved node with its own one-time agent token."""
+    now = datetime.now(UTC)
+    node_uuid = uuid4()
+    raw = "wl_agent_" + str(node_uuid) + "_" + secrets.token_urlsafe(32)
+    await db.execute(insert(node_agent_registrations).values(
+        node_uuid=str(node_uuid), secret_hash=digest(raw),
+        invitation_id=None, display_name=body.display_name,
+        agent_version="unknown", status="approved",
+        capabilities=[], created_at=now, last_seen_at=None))
+    await db.commit()
+    return {"node_uuid": str(node_uuid), "agent_token": raw, "status": "approved"}
 
 
 class Enrollment(BaseModel):
@@ -136,9 +156,15 @@ async def list_registrations(db: AsyncSession = Depends(get_db),
         node_agent_registrations.c.legacy_node_id, node_agent_registrations.c.last_seen_at,
         node_agent_registrations.c.observed_ip, node_agent_registrations.c.reported_ipv4,
         node_agent_registrations.c.reported_ipv6, node_agent_registrations.c.capabilities,
+        node_agent_registrations.c.invitation_id,
     ]
     rows = (await db.execute(select(*columns).order_by(node_agent_registrations.c.created_at.desc()))).mappings()
-    return {"registrations": [dict(row) for row in rows]}
+    result = []
+    for row in rows:
+        entry = dict(row)
+        entry["enrollment_mode"] = "direct" if entry.pop("invitation_id") is None else "discovery"
+        result.append(entry)
+    return {"registrations": result}
 
 
 @router.post("/registrations/{node_uuid}/approve")

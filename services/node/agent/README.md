@@ -95,6 +95,57 @@ nested container is a partial runtime probe, not acceptance of the full stack
 or of any VPN protocol. The linked source task is WayLane Issue #11 and draft
 PR #12; keep those descriptions synchronized with this document.
 
+## Agent authentication: two connection modes
+
+The panel supports **two exclusive ways** to connect exactly the same WayLane
+Agent. This follows the OpenFlare distinction between a shared discovery
+invitation and a dedicated agent credential, without inheriting its VPN
+runtime or WebSocket transport.
+
+1. **Discovery:** create a reusable `wl_disc_...` token in the Nodes dashboard.
+   Set `WAYLANE_DISCOVERY_TOKEN` on a new Agent. The Agent creates its UUID and
+   private identity in `agent-state/identity.json`, enrolls once via
+   `POST /api/agent/enroll`, then uses only its individual identity on
+   authenticated heartbeat. Admin chooses auto-connect or manual approval.
+2. **Direct Agent token:** in Nodes, create a named direct agent. An
+   authorized admin receives **once** a `wl_agent_<uuid>_<random>` credential.
+   Copy **only** `WAYLANE_AGENT_TOKEN` into Agent settings; the Agent extracts
+   the UUID, saves token/UUID in its private persistent identity file and
+   immediately begins authenticated heartbeat. No Discovery invitation or
+   enrollment API call is needed. Admin may revoke the node, after which
+   heartbeats return 403. Only the token hash is persisted server-side.
+
+The two variables must **not** be provided simultaneously. Once an identity
+has been registered and safely persisted, neither initial token is required
+on a normal restart: a read-only/re-created container can reconnect from
+the persistent volume. Existing persisted identities must not silently switch
+to new credentials; an explicit identity migration/reset is required when
+changing from one registration to a different node UUID. This protects a
+valid registered agent from accidental takeover or duplicate registration.
+An **unconfirmed** Discovery identity (`Registered=false`) may be replaced by
+an explicitly supplied direct Agent token to transition an initial DEV trial
+without deleting the entire Docker state volume. An already registered
+identity cannot be rebound by changing environment variables.
+
+Every registration is only a **control-plane identity**:
+`allowed_operations: []`. Neither token activates VPN cores, grants
+Docker management rights, writes legacy host/subscription IP addresses, nor
+makes the remote panel reachable.
+
+### DEV-only local HTTP
+
+Production Agent endpoints require HTTPS with verified CA chains and reject
+redirects carrying tokens. To test a panel **on the same development computer**
+under Docker Desktop only, the opt-in combination
+`WAYLANE_PANEL_URL=http://host.docker.internal:<port>` and
+`WAYLANE_DEV_ALLOW_HTTP=true` is available. It accepts HTTP only to
+`host.docker.internal` or literal loopback hosts; arbitrary LAN/Internet
+HTTP addresses are always rejected. Never enable this mode on public,
+untrusted or production networks, because credentials are transported without
+TLS within the local Docker Desktop host link. The test panel must really
+listen on a host-accessible port: an isolated Koba Terminal loopback address
+cannot be reached from a laptop container by changing the token.
+
 ## Discovery token, automatic enrollment and address changes
 
 The panel creates an invitation with a permanent, copy-once discovery token.

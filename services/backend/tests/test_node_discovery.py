@@ -13,7 +13,7 @@ from starlette.requests import Request
 from app.db.base import Base
 from app.db.models import node_agent_registrations
 from app.routers.node_discovery import (
-    Enrollment, Heartbeat, InvitationInput, approve, create_invitation,
+    DirectAgentInput, Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_direct_agent,
     enroll, heartbeat, list_registrations, list_invitations, revoke, revoke_invitation,
 )
 
@@ -152,6 +152,64 @@ def test_manual_discovery_and_ip_preserved_on_temporary_lookup_failure(tmp_path)
                 await approve(uuid, db=db, _=object())
                 result = await heartbeat(missing, client_request(), x_agent_secret=credential, db=db)
                 assert result == {"status": "approved", "allowed_operations": []}
+        finally:
+            await engine.dispose()
+    asyncio.run(run())
+
+
+
+def test_direct_agent_token_registration_and_revocation(tmp_path):
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///" + str(tmp_path / "direct.db"))
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with factory() as db:
+                direct = await create_direct_agent(DirectAgentInput(display_name="direct-qa-node"),
+                                                   db=db, _=object())
+                assert direct["status"] == "approved"
+                assert direct["agent_token"].startswith("wl_agent_")
+                assert len(direct["agent_token"]) == 89
+                assert direct["agent_token"].startswith("wl_agent_" + direct["node_uuid"] + "_")
+                preheartbeat = (await db.execute(select(node_agent_registrations).where(
+                    node_agent_registrations.c.node_uuid == direct["node_uuid"]))).mappings().one()
+                assert preheartbeat["last_seen_at"] is None
+                assert not direct["node_uuid"].startswith("wl_disc_")
+                direct_uuid = direct["node_uuid"]
+
+                status = await heartbeat(
+                    Heartbeat(node_uuid=direct_uuid, agent_version="0.1.0",
+                              reported_ipv4="8.8.4.4", capabilities=["docker.rootless.inspect"]),
+                    client_request(), x_agent_secret=direct["agent_token"], db=db)
+                assert status == {"status": "approved", "allowed_operations": []}
+                listing = await list_registrations(db=db, _=object())
+                assert len(listing["registrations"]) == 1
+                assert listing["registrations"][0]["enrollment_mode"] == "direct"
+                assert listing["registrations"][0]["reported_ipv4"] == "8.8.4.4"
+                assert "agent_token" not in listing["registrations"][0]
+                assert "secret_hash" not in listing["registrations"][0]
+
+                with pytest.raises(HTTPException) as bad:
+                    await heartbeat(Heartbeat(node_uuid=direct_uuid, agent_version="0.1.0"),
+                                    client_request(), x_agent_secret="invalid", db=db)
+                assert bad.value.status_code == 401
+
+                await revoke(direct_uuid, db=db, _=object())
+                with pytest.raises(HTTPException) as revoked:
+                    await heartbeat(Heartbeat(node_uuid=direct_uuid, agent_version="0.1.0"),
+                                    client_request(), x_agent_secret=direct["agent_token"], db=db)
+                assert revoked.value.status_code == 403
+
+                other = await create_direct_agent(DirectAgentInput(display_name="direct-qa-node"),
+                                                  db=db, _=object())
+                assert other["node_uuid"] != direct_uuid
+                assert other["agent_token"] != direct["agent_token"]
+                assert (await list_registrations(db=db, _=object()))["registrations"][0]["enrollment_mode"] == "direct"
+                stored = (await db.execute(select(node_agent_registrations).where(
+                    node_agent_registrations.c.node_uuid == direct_uuid))).mappings().one()
+                assert stored["invitation_id"] is None
+                assert stored["secret_hash"] != direct["agent_token"]
         finally:
             await engine.dispose()
     asyncio.run(run())
