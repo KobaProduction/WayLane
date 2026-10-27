@@ -9,7 +9,7 @@ runtime cutover are verified.
 | --- | --- | --- |
 | services/backend/ | Python 3.14, FastAPI, scheduler, node RPC | independent Coolify backend |
 | services/frontend/ | React/Bun, static Nginx | independent Coolify frontend |
-| services/node/ | Legacy Go node (Xray, WireGuard, opt-in AWG 3.1) + separate Agent v2 prototype | independently deployed; experimental agent owns embedded rootless Docker, not VPN cores yet |
+| services/node/ | Legacy Go node (Xray, WireGuard, opt-in AWG 3.1) + separate WayLane Agent prototype | independently deployed; experimental agent owns embedded rootless Docker, not VPN cores yet |
 | services/external/ | managed PostgreSQL, ingress, API balancer, OTLP | separately owned infrastructure |
 | shared/contracts/ | narrowly shared wire DTOs | docs / protocol checks |
 
@@ -36,7 +36,7 @@ backend/frontend with external DB and API ingress. The deployment inputs,
 credentials, smoke commands and security constraints are documented at
 [deploy/compose/README.md](deploy/compose/README.md).
 
-## Node Agent v2 (opt-in, not a production replacement)
+## WayLane Node Agent (opt-in, not a production replacement)
 
 The experimental node uses one Compose resource with only `bootstrap` and
 `agent`. The agent manages an embedded rootless Docker daemon; the panel

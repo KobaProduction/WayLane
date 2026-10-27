@@ -684,7 +684,7 @@ class NodeStatus(str, Enum):
     limited = "limited"
 
 
-# Additive node-agent v2 identity; no mutation of the existing Node model.
+# Additive WayLane Agent identity; no mutation of the existing Node model.
 node_discovery_invitations = Table(
     "node_discovery_invitations", Base.metadata,
     Column("id", SqliteCompatibleBigInteger, primary_key=True, autoincrement=True),

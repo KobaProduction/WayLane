@@ -14,9 +14,9 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: separately deployed legacy Go VPN node plus an opt-in Node Agent v2 prototype.
+- services/node/: separately deployed legacy Go VPN node plus an opt-in WayLane Node Agent prototype.
   The legacy node remains host-network/NET_ADMIN dependent; do not ascribe those
-  privileges or its single-core lifecycle to Node Agent v2.
+  privileges or its single-core lifecycle to WayLane Node Agent.
 - services/external/: approved contracts for separate PostgreSQL,
   API load balancer/ingress, external SigNoz OTLP endpoints.
 - shared/contracts/: narrowly scoped protocol DTOs, no ORM imports.
@@ -26,10 +26,10 @@ CI and Coolify Watch Paths must scope independently to each module.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
 
-## Node Agent v2 architecture authority
+## WayLane Node Agent architecture authority
 
 Read `services/node/AGENTS.md` and `services/node/agent/README.md` before
-changing the v2 node. Its single Compose entrypoint has **exactly two services**:
+changing the autonomous agent-based node. Its single Compose entrypoint has **exactly two services**:
 a one-shot privileged `bootstrap` preparing private volumes, then one
 non-privileged autonomous `agent`. The agent supervises its own embedded
 rootless Docker daemon through a private Unix socket. Neither host systemd,

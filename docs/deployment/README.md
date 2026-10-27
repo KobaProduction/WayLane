@@ -57,11 +57,11 @@ Exact external variable contract, commands, security and source ownership:
 deploy/compose/README.md. Actual Coolify parser resolution, Shared secrets,
 domain generation and persistence must be verified before live deployment.
 
-## Experimental Node Agent v2 (not the legacy node)
+## Experimental WayLane Node Agent (not the legacy node)
 
 The existing Node row above describes **legacy** `services/node/Dockerfile`
 and host-network node deployment. Do not apply those assumptions to Node
-Agent v2. The optional `services/node/docker-compose.agent.yaml` is one
+WayLane Agent. The optional `services/node/docker-compose.agent.yaml` is one
 independent **two-service** deployment: an exited privileged bootstrap plus
 an autonomous non-privileged agent that supervises its own embedded rootless
 Docker daemon. It has **no systemd, extra Compose rootless-engine service or

@@ -3,9 +3,9 @@
 **Two different deployment generations coexist.** The generic
 `docker-compose.yaml` and `docker-compose.coolify.yaml` below are for the
 **legacy single-process node**. Do not transfer their root/NET_ADMIN,
-host networking, certificates, or core lifecycle to Node Agent v2.
+host networking, certificates, or core lifecycle to WayLane Node Agent.
 
-Node Agent v2 is an **opt-in experiment** deployed with
+WayLane Node Agent is an **opt-in experiment** deployed with
 `docker-compose.agent.yaml`. It contains only a one-shot privileged bootstrap
 plus one autonomous, non-privileged Go agent with an embedded rootless Docker
 engine. No host systemd, no rootful host socket, no third rootless-engine service.

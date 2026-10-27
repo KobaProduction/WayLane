@@ -28,7 +28,7 @@ Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft
 
 Tests: `./scripts/verify.sh` provisions a pinned checksum-verified Xray executable and disposable TLS certs in ignored local directories before executing the existing integration tests. No production credentials are used.
 
-## Experimental Node Agent v2
+## Experimental WayLane Node Agent
 
 An independent opt-in two-service deployment adds a privileged one-shot
 `bootstrap` and an autonomous non-privileged `agent`. The agent starts and

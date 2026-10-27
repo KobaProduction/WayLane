@@ -1,7 +1,7 @@
-# Experimental WayLane Node Agent v2: EXACTLY bootstrap and agent.
+# Experimental WayLane Node Agent: EXACTLY bootstrap and agent.
 # Bootstrap prepares private volumes; Go Agent supervises embedded rootless Docker.
 # This profile grants nested namespace exceptions; production security and VPN traffic are NOT accepted.
-name: waylane-agent
+name: waylane-node
 services:
   bootstrap:
     build:

@@ -12,7 +12,7 @@ current v2 development. Read root `AGENTS.md` and AI Agent Workflow task skills.
   Kernel WireGuard remains the default; AmneziaWG 3.1 is opt-in and requires
   separate real-traffic verification (Issue #7).
 - New `bootstrap/`, `agent/`, `docker-compose.agent.yaml`: experimental
-  Node Agent v2. **Read the complete `agent/README.md` as its authoritative
+  WayLane Node Agent. **Read the complete `agent/README.md` as its authoritative
   lifecycle and topology contract before changing any of these files.**
   Exactly two Compose services, one-shot privileged bootstrap and autonomous
   non-privileged Go agent supervising its private embedded rootless Docker.

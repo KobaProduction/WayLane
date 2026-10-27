@@ -30,7 +30,7 @@ type Registration = {
   last_seen_at: string
 }
 
-/** Optional v2 registry, separate from the existing legacy node cards. */
+/** Optional Agent registry, separate from the existing legacy node cards. */
 export default function NodeDiscoveryPanel() {
   const { admin } = useAdmin()
   const canRead = hasPermission(admin, 'nodes', 'read')

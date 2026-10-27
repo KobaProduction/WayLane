@@ -16,6 +16,6 @@ Read the upstream workflow AGENTS.md and load only task-relevant skills.
 
 Preserve API and migration compatibility; do not change production without authorization.
 
-Node Agent v2 discovery API, migrations and IP observation registry belong to
+WayLane Node Agent discovery API, migrations and IP observation registry belong to
 `app/routers/node_discovery.py`. Registration must not silently mutate
 legacy `nodes`, hosts, certificates or subscription endpoints.

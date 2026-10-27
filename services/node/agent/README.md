@@ -1,4 +1,4 @@
-# WayLane Node Agent v2 — authoritative architecture and rollout gate
+# WayLane Node Agent — authoritative architecture and rollout gate
 
 This **experimental, opt-in** replacement is separate from the currently
 working legacy PasarGuard-compatible VPN node. It must never silently change
@@ -55,16 +55,22 @@ Compose explicitly grants `SETUID`/`SETGID`, mounts `/dev/net/tun` and
 sets `seccomp=unconfined` / `apparmor=unconfined`. These exceptions weaken
 isolation despite Docker reporting `rootless`; they are not a general proof
 of a safe production multi-tenant boundary. No automatic broadening of host
-privileges is authorized. The embedded daemon uses `vfs` storage and the **default rootless Docker bridge/NAT**;
-iptables and bridge setup must not be disabled, because future child containers
-need their own private network. Outer Compose uses its ordinary isolated bridge
-for outbound agent-to-panel HTTPS, rather than Docker Desktop host networking.
-A basic nested container test **does not establish VPN routing, host ingress or
-core traffic**: publishing a future VPN listener requires two separately
-verified mappings (child -> agent container -> Windows host), or an explicitly
-accepted host-network alternative on a capable host. Do not expose the private
-Docker API socket or invent unused Xray/WireGuard listener ports in the current
-node deployment.
+privileges is authorized. The embedded daemon uses `vfs` storage. Its Docker bridge exists,
+but Docker Desktop **does not yet support running a child container on that
+bridge in this nested sandbox**: interface initialization fails while trying
+to disable IPv6 on `eth0`; creating an IPv6-enabled bridge also fails
+because `/proc/sys/net/ipv6/conf/default/forwarding` is read-only.
+The standalone agent has working outbound HTTPS through the outer Compose
+bridge. A disposable child Alpine container was able to use the inner
+`--network host` (RootlessKit private network namespace) for outbound HTTPS,
+but this is a **QA-only fallback**, not accepted isolation or VPN ingress.
+
+Do not introduce host systemd, a separate Docker daemon service or a bind of
+the host's rootful Docker socket to work around these constraints. Future VPN
+engine publishing requires a reviewed network/privilege solution and actual
+TCP/UDP connectivity checks (child → agent → host). Resource limits are also
+not yet enforced for inner containers because the current nested rootless
+daemon operates without cgroups.
 
 The experimental agent must fail rather than use a rootful/system Docker
 socket. Keep discovery credentials separate from node identity secrets. Store
@@ -117,3 +123,14 @@ approved node binding plus network reachability acceptance.
 The agent requires a CA-verified HTTPS panel origin. Plain HTTP on a LAN IP
 (e.g. `192.168.1.11`) is intentionally rejected; use a test TLS origin with
 a trusted CA instead of bypassing TLS verification.
+
+## Development deployment identity
+
+This is **WayLane Node Agent**, not a separately versioned product.
+The generic Compose project is `waylane-node`. For isolated development use
+`waylane-node-dev` as the Compose project name; keep only the two service
+names `bootstrap` and `agent`. Legacy node compatibility is tracked as a
+distinct existing implementation, not by adding a version suffix to this
+agent. Do not carry old experimental Compose project names into deployments.
+Real panel enrollment requires a reachable trusted HTTPS origin and a real
+Discovery token: synthetic `.invalid` credentials test only daemon startup.

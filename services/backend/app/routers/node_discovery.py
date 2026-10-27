@@ -1,4 +1,4 @@
-"""Optional Node Agent v2 enrollment. No production core/host changes are made."""
+"""Optional WayLane Node Agent enrollment. No production core/host changes are made."""
 import base64
 import hashlib
 import hmac
