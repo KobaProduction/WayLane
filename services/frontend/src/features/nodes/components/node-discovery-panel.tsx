@@ -6,8 +6,20 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
+
+type XrayStatus = {
+  configured: boolean
+  generation?: number
+  image_version?: string
+  action?: string
+  region?: string | null
+  runtime_status?: string
+  applied_generation?: number
+  last_error?: string | null
+}
 
 type Invitation = {
   id: number
@@ -46,6 +58,14 @@ export default function NodeDiscoveryPanel() {
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const canManageXray = hasPermission(admin, 'nodes', 'update_core')
+  const [xrayTarget, setXrayTarget] = useState<string | null>(null)
+  const [xrayStates, setXrayStates] = useState<Record<string, XrayStatus>>({})
+  const [xrayVersion, setXrayVersion] = useState('26.10.21')
+  const [xrayRegion, setXrayRegion] = useState('')
+  const [xrayConfig, setXrayConfig] = useState('')
+  const [xrayBusy, setXrayBusy] = useState(false)
+
 
   const refresh = async () => {
     try {
@@ -127,6 +147,52 @@ export default function NodeDiscoveryPanel() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update agent')
     } finally { setLoading(false) }
+  }
+
+
+  const readXray = async (uuid: string) => {
+    try {
+      const state = await $fetch<XrayStatus>('/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray')
+      setXrayStates(prev => ({ ...prev, [uuid]: state }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось получить статус Xray')
+    }
+  }
+
+  const demoXray = () => {
+    // Generated only when requested. Never commit a reusable proxy password.
+    const random = crypto.getRandomValues(new Uint8Array(24))
+    const password = Array.from(random, value => value.toString(16).padStart(2, '0')).join('')
+    setXrayConfig(JSON.stringify({
+      log: { loglevel: 'warning' },
+      inbounds: [{ tag: 'waylane-socks-qa', listen: '0.0.0.0', port: 18443,
+        protocol: 'socks', settings: { auth: 'password', accounts: [{ user: 'waylane-qa', pass: password }], udp: false } }],
+      outbounds: [{ tag: 'direct', protocol: 'freedom' }],
+    }, null, 2))
+  }
+
+  const changeXray = async (uuid: string, action: 'deploy' | 'update' | 'restart' | 'stop') => {
+    if (!canManageXray) return
+    setXrayBusy(true)
+    try {
+      const payload: { action: string; image_version: string; region: string | null; config?: Record<string, unknown> } = {
+        action, image_version: xrayVersion.trim(), region: xrayRegion.trim() || null,
+      }
+      if (action === 'deploy' || action === 'update') {
+        if (xrayConfig.trim()) {
+          const parsed: unknown = JSON.parse(xrayConfig)
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Требуется объект JSON')
+          payload.config = parsed as Record<string, unknown>
+        }
+      }
+      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray', {
+        method: 'PUT', body: payload,
+      })
+      toast.success('Операция поставлена в желаемое состояние Agent')
+      await readXray(uuid)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось отправить команду Xray')
+    } finally { setXrayBusy(false) }
   }
 
   if (!canRead) return null
@@ -241,6 +307,52 @@ export default function NodeDiscoveryPanel() {
                   Agent {node.agent_version} · {node.last_seen_at ? 'Был на связи' : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
                 </p>
               </div>
+              {canManageXray && node.status === 'approved' && (
+                <div className="min-w-0 w-full space-y-2 border-t pt-2 sm:basis-full">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => {
+                      setXrayTarget(xrayTarget === node.node_uuid ? null : node.node_uuid)
+                      void readXray(node.node_uuid)
+                    }}>Xray: управление</Button>
+                    <span className="text-muted-foreground text-xs">
+                      {xrayStates[node.node_uuid]?.configured
+                        ? `Версия: ${xrayStates[node.node_uuid].image_version} · ${xrayStates[node.node_uuid].runtime_status} · поколение ${xrayStates[node.node_uuid].applied_generation}/${xrayStates[node.node_uuid].generation}`
+                        : 'Xray не настроен'}
+                    </span>
+                  </div>
+                  {xrayTarget === node.node_uuid && (
+                    <div className="space-y-2">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Input aria-label="Xray image version" value={xrayVersion}
+                          onChange={e => setXrayVersion(e.target.value)} placeholder="Версия Xray, например 26.10.21" />
+                        <Input aria-label="Xray region label" value={xrayRegion}
+                          onChange={e => setXrayRegion(e.target.value)} maxLength={64}
+                          placeholder="Регион / метка маршрута" />
+                      </div>
+                      <p className="text-muted-foreground text-xs">Метка региона не перемещает сервер и не меняет IP. Маршрут и сервер назначения задаются через JSON-конфигурацию Xray.</p>
+                      <Textarea aria-label="Xray configuration JSON" value={xrayConfig} rows={8}
+                        className="font-mono text-xs" onChange={e => setXrayConfig(e.target.value)}
+                        placeholder="JSON-конфигурация Xray: inbounds, outbounds, routing" />
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={demoXray}>Тестовый SOCKS5 с новым паролем</Button>
+                        <Button size="sm" disabled={xrayBusy || !xrayConfig.trim()}
+                          onClick={() => void changeXray(node.node_uuid, 'deploy')}>Развернуть</Button>
+                        <Button variant="outline" size="sm" disabled={xrayBusy}
+                          onClick={() => void changeXray(node.node_uuid, 'update')}>Скачать и обновить</Button>
+                        <Button variant="outline" size="sm" disabled={xrayBusy}
+                          onClick={() => void changeXray(node.node_uuid, 'restart')}>Перезапустить</Button>
+                        <Button variant="destructive" size="sm" disabled={xrayBusy}
+                          onClick={() => void changeXray(node.node_uuid, 'stop')}>Остановить</Button>
+                        <Button variant="outline" size="sm" disabled={xrayBusy}
+                          onClick={() => void readXray(node.node_uuid)}>Статус</Button>
+                      </div>
+                      {xrayStates[node.node_uuid]?.last_error && (
+                        <p role="alert" className="text-destructive text-xs">{xrayStates[node.node_uuid].last_error}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {canApprove && node.status !== 'revoked' && (
                 <div className="flex shrink-0 gap-2">
                   {node.status === 'pending' && <Button size="sm" disabled={loading} onClick={() => void decide(node.node_uuid, 'approve')}>Подтвердить</Button>}
