@@ -66,19 +66,26 @@ jobs:
       WAYLANE_DISCOVERY_TOKEN: wl_disc_ci-only
     steps:
       - uses: actions/checkout@v4
-      - name: Bootstrap and rootless engine readiness
+      - name: Enforce two-service bootstrap-agent contract
         run: |
           set -euo pipefail
-          docker compose -f services/node/docker-compose.agent.yaml up -d --build rootless-engine
-          docker compose -f services/node/docker-compose.agent.yaml ps -a
-          for n in $(seq 1 25); do
-            if docker compose -f services/node/docker-compose.agent.yaml exec -T rootless-engine               docker -H unix:///run/user/1000/docker.sock info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless; then
-              echo 'Rootless Docker is operational'; exit 0
+          docker compose -p waylane-agent-ci -f services/node/docker-compose.agent.yaml config --format json |
+            python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert set(s)=={"bootstrap","agent"}, set(s); assert s["bootstrap"]["privileged"] is True; assert not s["agent"].get("privileged",False); assert all("/var/run/docker.sock" not in str(m) and "/run/docker.sock" not in str(m) for c in s.values() for m in c.get("volumes",[]))'
+      - name: Bootstrap and verify embedded rootless Docker
+        run: |
+          set -euo pipefail
+          docker compose -p waylane-agent-ci -f services/node/docker-compose.agent.yaml up -d --build agent
+          docker compose -p waylane-agent-ci -f services/node/docker-compose.agent.yaml ps -a
+          for n in $(seq 1 40); do
+            if docker compose -p waylane-agent-ci -f services/node/docker-compose.agent.yaml exec -T agent \
+              docker -H unix:///run/user/1000/docker.sock info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+              echo 'Agent-owned rootless Docker is operational'
+              exit 0
             fi
             sleep 2
           done
-          docker compose -f services/node/docker-compose.agent.yaml logs --no-color --tail=80
+          docker compose -p waylane-agent-ci -f services/node/docker-compose.agent.yaml logs --no-color --tail=80 bootstrap agent
           exit 1
-      - name: Remove disposable test engine
+      - name: Remove disposable CI test stack
         if: always()
-        run: docker compose -f services/node/docker-compose.agent.yaml down -v --remove-orphans
+        run: docker compose -p waylane-agent-ci -f services/node/docker-compose.agent.yaml down -v

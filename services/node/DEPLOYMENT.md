@@ -1,5 +1,22 @@
 # VPN node — separate deployment, NEVER All-in-One
 
+**Two different deployment generations coexist.** The generic
+`docker-compose.yaml` and `docker-compose.coolify.yaml` below are for the
+**legacy single-process node**. Do not transfer their root/NET_ADMIN,
+host networking, certificates, or core lifecycle to Node Agent v2.
+
+Node Agent v2 is an **opt-in experiment** deployed with
+`docker-compose.agent.yaml`. It contains only a one-shot privileged bootstrap
+plus one autonomous, non-privileged Go agent with an embedded rootless Docker
+engine. No host systemd, no rootful host socket, no third rootless-engine service.
+The panel talks only to the agent. Future independent Xray/sing-box/WireGuard/
+AmneziaWG plugin containers are controlled only by that agent; their creation,
+updates, networking and rollback are not yet implemented. See
+`agent/README.md` for the canonical v2 contract and current acceptance gates.
+
+## Legacy single-process node
+
+
 Use `docker-compose.yaml` for generic Compose and
 `docker-compose.coolify.yaml` (Base Directory `/services/node`,
 Compose Location `/docker-compose.coolify.yaml`) for a Git-backed Coolify

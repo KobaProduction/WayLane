@@ -9,7 +9,7 @@ runtime cutover are verified.
 | --- | --- | --- |
 | services/backend/ | Python 3.14, FastAPI, scheduler, node RPC | independent Coolify backend |
 | services/frontend/ | React/Bun, static Nginx | independent Coolify frontend |
-| services/node/ | Go, Xray, kernel WireGuard and opt-in AmneziaWG 3.1 | independently deployed VPN nodes; rootless hardening pending |
+| services/node/ | Legacy Go node (Xray, WireGuard, opt-in AWG 3.1) + separate Agent v2 prototype | independently deployed; experimental agent owns embedded rootless Docker, not VPN cores yet |
 | services/external/ | managed PostgreSQL, ingress, API balancer, OTLP | separately owned infrastructure |
 | shared/contracts/ | narrowly shared wire DTOs | docs / protocol checks |
 
@@ -35,3 +35,12 @@ PostgreSQL/backend/frontend management stack or separately deployed
 backend/frontend with external DB and API ingress. The deployment inputs,
 credentials, smoke commands and security constraints are documented at
 [deploy/compose/README.md](deploy/compose/README.md).
+
+## Node Agent v2 (opt-in, not a production replacement)
+
+The experimental node uses one Compose resource with only `bootstrap` and
+`agent`. The agent manages an embedded rootless Docker daemon; the panel
+will control future pluggable VPN-engine containers **through that agent**, never
+directly. Deployment, upgrade and rollback of child VPN cores remain unimplemented.
+The legacy node remains separate until a deliberate migration and runtime acceptance.
+Canonical contract: [services/node/agent/README.md](services/node/agent/README.md).

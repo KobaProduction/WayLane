@@ -6,7 +6,7 @@ WayLane Node is the Go-based VPN node agent for WayLane Backend. This starting s
 
 **Available today:** Xray-core, WireGuard, gRPC/REST node control, node/user synchronization, health reporting and statistics.
 
-**Planned:** sing-box, AmneziaWG, custom cores and enhanced failover. These features are not yet implemented.
+**Existing legacy code:** opt-in AmneziaWG-Go 3.1 UAPI integration and frontend preset are present; real Linux TUN/UDP traffic acceptance remains open (Issue #7). **Planned:** sing-box, custom engines, enhanced failover and pluggable child-container orchestration.
 
 Build: `make build`, or use `docker build -t waylane-node:dev .`. Existing data directories and `PG_NODE_*` settings are temporarily retained to preserve backward compatibility.
 
@@ -27,3 +27,15 @@ deployment compatibility, or complete the eventual Vue/HA migration.
 Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft license applicable to derived code. See `LICENSING.md` and `LICENSE.UPSTREAM`.
 
 Tests: `./scripts/verify.sh` provisions a pinned checksum-verified Xray executable and disposable TLS certs in ignored local directories before executing the existing integration tests. No production credentials are used.
+
+## Experimental Node Agent v2
+
+An independent opt-in two-service deployment adds a privileged one-shot
+`bootstrap` and an autonomous non-privileged `agent`. The agent starts and
+supervises its own rootless Docker and persists its private socket/state. The
+panel will eventually ask the agent to manage independently packaged Xray,
+sing-box, WireGuard, AmneziaWG and extension engines. Today it only provides
+discovery, authenticated heartbeat and daemon inspection; child-engine
+installation, configuration, upgrades and rollback are deliberately deferred.
+Canonical architectural contract: [agent/README.md](agent/README.md).
+The old node and its deployment are not replaced.
