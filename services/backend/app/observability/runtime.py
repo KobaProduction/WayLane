@@ -67,8 +67,9 @@ class _MetadataOnlyOTLPHandler(logging.Handler):
 def configure_direct_otlp():
     """Install SDK exporters once in this process.
 
-    No endpoint and token means local-dev telemetry remains disabled. Setting
-    one without the other fails closed. Browser events never receive the token.
+    A fixed private collector endpoint supports unauthenticated HTTP within
+    the environment network; all other endpoints require HTTPS and Bearer.
+    The browser never receives the token.
     """
     global _telemetry
     with _lock:
@@ -78,10 +79,19 @@ def configure_direct_otlp():
         token = os.getenv("OTLP_BEARER_TOKEN", "").strip()
         if not endpoint and not token:
             return None
-        if not endpoint or not token:
-            raise RuntimeError("OTLP_ENDPOINT and OTLP_BEARER_TOKEN must be configured together")
+        # Only this exact internal Docker DNS endpoint is allowed without Bearer/TLS.
+        # It is reachable solely on the environment-isolated application network.
         parsed = urlparse(endpoint)
-        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+        private_collector = (
+            parsed.scheme == "http"
+            and parsed.hostname == "otel-collector"
+            and parsed.port == 4318
+            and parsed.path in ("", "/")
+            and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
+        )
+        if not endpoint or (not token and not private_collector):
+            raise RuntimeError("OTLP_ENDPOINT and OTLP_BEARER_TOKEN must be configured together outside the private collector")
+        if not private_collector and (parsed.scheme != "https" or not parsed.hostname or parsed.username
                 or parsed.password or parsed.query or parsed.fragment):
             # Explicitly localhost-only endpoint for synthetic integration
             # tests (no production downgrade to HTTP).
@@ -114,7 +124,7 @@ def configure_direct_otlp():
             ),
         })
         base = endpoint.rstrip("/")
-        headers = {"Authorization": "Bearer " + token}
+        headers = {"Authorization": "Bearer " + token} if token else {}
         traces = TracerProvider(resource=res)
         traces.add_span_processor(BatchSpanProcessor(
             OTLPSpanExporter(endpoint=base + "/v1/traces", headers=headers, timeout=4),

@@ -1,4 +1,4 @@
-# Coolify HTTPS only on frontend; backend is private.
+# WayLane backend exports sanitized OTLP/HTTP telemetry only to the private collector.
 services:
   backend:
     extends:
@@ -13,8 +13,7 @@ services:
       UVICORN_HOST: waylane-api
       UVICORN_PORT: '8000'
       UVICORN_WORKERS: ${WAYLANE_WORKERS:-1}
-      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
-      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAMESPACE: waylane
       OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${DEPLOYMENT_ENVIRONMENT:?}
   frontend:

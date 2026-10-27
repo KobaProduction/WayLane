@@ -19,7 +19,7 @@ Infrastructure provisions a dedicated database/role for WayLane and configures t
 
 Persistent waylane-data is **application-local** (not a second PostgreSQL volume); back it up and verify its purpose before resetting. Backend runs Alembic migrations at startup. Do not connect an old production panel database without an explicit migration and backup.
 
-Optional backend-only telemetry: provide OTLP_ENDPOINT and OTLP_BEARER_TOKEN together when the approved OTLP/HTTP receiver needs it. Environment resource attributes derive from DEPLOYMENT_ENVIRONMENT. Never pass bearer, PostgreSQL credentials or private endpoints into the frontend bundle. WAYLANE_WORKERS defaults to 1; scaling worker count requires separate migration/scheduler locking review.
+Backend telemetry goes to the private collector on port 4318 without distributing a remote Bearer. Environment resource attributes derive from DEPLOYMENT_ENVIRONMENT. Never pass bearer, PostgreSQL credentials or private endpoints into the frontend bundle. WAYLANE_WORKERS defaults to 1; scaling worker count requires separate migration/scheduler locking review.
 
 DEV: WAYLANE_PULL_POLICY=build and default local image tags work with the Git-backed source. PROD: require verified GHCR image digests for frontend and backend and WAYLANE_PULL_POLICY=always. This Compose retains build metadata and is **not production approved** without a separate image/release acceptance review.
 
