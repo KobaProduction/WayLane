@@ -1,0 +1,76 @@
+# Dedicated panel consumes infrastructure-owned VPN dependencies.
+services:
+  backend:
+    build:
+      context: ../../services/backend
+      dockerfile: Dockerfile
+    image: ${WAYLANE_BACKEND_IMAGE:-waylane-backend:dev}
+    pull_policy: ${WAYLANE_PULL_POLICY:-build}
+    restart: unless-stopped
+    entrypoint:
+    - /code/.venv/bin/python
+    - /code/compose_db_entrypoint.py
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: database
+      ROLE: all-in-one
+      UVICORN_HOST: waylane-api
+      UVICORN_PORT: '8000'
+      UVICORN_WORKERS: ${WAYLANE_WORKERS:-1}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: waylane
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${DEPLOYMENT_ENVIRONMENT:?}
+    volumes:
+    - waylane-data:/var/lib/pasarguard
+    networks:
+      dependencies:
+        aliases:
+        - waylane-api
+      egress: {}
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - curl -fsS http://waylane-api:8000/health >/dev/null
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+  frontend:
+    build:
+      context: ../../services/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_API: /
+    image: ${WAYLANE_FRONTEND_IMAGE:-waylane-frontend:dev}
+    pull_policy: ${WAYLANE_PULL_POLICY:-build}
+    restart: unless-stopped
+    volumes:
+    - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    expose:
+    - '8080'
+    networks:
+    - dependencies
+    - egress
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - wget -q -O /dev/null http://127.0.0.1:8080/health
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+volumes:
+  waylane-data:
+    driver: local
+networks:
+  dependencies:
+    name: intens-vpn-${DEPLOYMENT_ENVIRONMENT:?}
+    external: true
+  egress:
+    driver: bridge

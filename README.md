@@ -35,3 +35,5 @@ PostgreSQL/backend/frontend management stack or separately deployed
 backend/frontend with external DB and API ingress. The deployment inputs,
 credentials, smoke commands and security constraints are documented at
 [deploy/compose/README.md](deploy/compose/README.md).
+
+For Intens VPN, use [deploy/intens/](deploy/intens/README.md) as a separate WayLane panel resource with an externally owned PostgreSQL/PgBouncer dependency, matched to the environment network. This is distinct from the customer Web App and VPN Core.

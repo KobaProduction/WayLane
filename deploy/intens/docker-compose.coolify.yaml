@@ -1,0 +1,37 @@
+# Coolify HTTPS only on frontend; backend is private.
+services:
+  backend:
+    extends:
+      file: ./docker-compose.yaml
+      service: backend
+    environment:
+      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: database
+      ROLE: all-in-one
+      UVICORN_HOST: waylane-api
+      UVICORN_PORT: '8000'
+      UVICORN_WORKERS: ${WAYLANE_WORKERS:-1}
+      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: waylane
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${DEPLOYMENT_ENVIRONMENT:?}
+  frontend:
+    extends:
+      file: ./docker-compose.yaml
+      service: frontend
+    environment:
+      SERVICE_FQDN_FRONTEND_8080: /
+    build:
+      args:
+        VITE_BASE_API: /
+volumes:
+  waylane-data:
+    driver: local
+networks:
+  dependencies:
+    name: intens-vpn-${DEPLOYMENT_ENVIRONMENT:?}
+    external: true
+  egress:
+    driver: bridge
