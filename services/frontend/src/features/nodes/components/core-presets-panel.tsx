@@ -160,15 +160,15 @@ export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
   }
 
   return <Card className="mb-5">
-    <CardHeader className="flex-row items-center justify-between gap-3">
-      <div>
+    <CardHeader className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 flex-1">
         <CardTitle>Пресеты Xray: REALITY, VLESS Encryption, маршрутизация</CardTitle>
         <p className="mt-1 text-sm text-muted-foreground">
           Ключи сохраняются в защищённом хранилище и подставляются только при запуске ноды.
           В конфигурации ядра остаются ссылки и публичные данные.
         </p>
       </div>
-      <Button variant="outline" onClick={() => setExpanded(value => !value)}>
+      <Button className="w-full shrink-0 sm:w-auto" variant="outline" onClick={() => setExpanded(value => !value)}>
         {expanded ? 'Свернуть' : 'Открыть пресеты'}
       </Button>
     </CardHeader>

@@ -85,8 +85,8 @@
     "certificateDescription": "To set up the node, you need to configure this certificate to establish a secure connection between the main server and the node",
     "selectNode": "Select a node",
     "noNodes": "No nodes configured",
-    "noNodesDescription": "Master Panel doesn't have any cores configured. You need to add and configure a node from",
-    "noNodesDescription2": "connect and configure it to the panel.",
+    "noNodesDescription": "No nodes have been added yet. Set up a node using",
+    "noNodesDescription2": "and connect it to this panel.",
     "noSearchResults": "No nodes match your search criteria. Try adjusting your search terms.",
     "noFilteredResults": "No nodes found",
     "logs": {
@@ -2504,7 +2504,24 @@
     "discardChangesDescription": "Your unsaved kernel configuration changes will be lost if you close this editor.",
     "scanRealityTarget": "Scan target"
   },
+  "dashboardOverview": {
+    "totalUsers": "Users",
+    "active": "Active",
+    "online": "Online",
+    "upload": "Upload",
+    "download": "Download"
+  },
   "coreEditor": {
+    "awg": {
+        "engine": "WireGuard transport",
+        "plain": "WireGuard (standard clients)",
+        "obfuscated": "AmneziaWG 3.1 (obfuscation)",
+        "compatibility": "Requires WayLane Node 0.6.0+ and an AmneziaWG-compatible client with matching settings. Standard WireGuard clients work only when obfuscation is disabled. Host VPN traffic is not yet acceptance-tested.",
+        "preset": "Apply AmneziaWG 3.1 preset",
+        "advanced": "Advanced AWG 3.1 options",
+        "headerKeyHint": "Base64, 32 bytes. All S1–S4 must be at least 12 when this is set."
+    },
+
     "nameRequired": "Name is required",
     "fixValidation": "Fix validation errors before saving",
     "validationErrors": "Validation errors",

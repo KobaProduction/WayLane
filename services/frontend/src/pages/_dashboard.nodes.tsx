@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useCommandCreate } from '@/hooks/use-command-create'
+import { getCoresListUseConfigModal } from '@/utils/userPreferenceStorage'
 
 interface Tab {
   id: string
@@ -50,8 +51,12 @@ const Settings = () => {
 
   const handleCreateCore = useCallback(() => {
     if (!canCreateCores) return
+    if (location.pathname === '/nodes/cores' && getCoresListUseConfigModal()) {
+      window.dispatchEvent(new CustomEvent('openCoreDialog'))
+      return
+    }
     navigate('/nodes/cores/new')
-  }, [canCreateCores, navigate])
+  }, [canCreateCores, location.pathname, navigate])
 
   useCommandCreate('node', handleCreateNode)
   useCommandCreate('core', handleCreateCore)
@@ -83,9 +88,7 @@ const Settings = () => {
         buttonIcon: canCreateCores ? Plus : undefined,
         buttonText: canCreateCores ? 'settings.cores.addCore' : undefined,
         onButtonClick: canCreateCores
-          ? () => {
-              navigate('/nodes/cores/new')
-            }
+          ? handleCreateCore
           : undefined,
       }
     }

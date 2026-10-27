@@ -2139,8 +2139,8 @@
     "certificateDescription": "برای تنظیم گره، باید این گواهینامه را برای برقراری ارتباط امن بین سرور اصلی و گره پیکربندی کنید",
     "selectNode": "یک گره انتخاب کنید",
     "noNodes": "هیچ گره ای پیکربندی نشده",
-    "noNodesDescription": "پنل اصلی هیچ هسته‌ای ندارد. شما باید یک گره از",
-    "noNodesDescription2": "پیکربندی کرده و آن را به پنل متصل کنید.",
+    "noNodesDescription": "هنوز گره‌ای اضافه نشده است. یک گره را با",
+    "noNodesDescription2": "راه‌اندازی و به پنل متصل کنید.",
     "noSearchResults": "هیچ گره‌ای با معیارهای جستجوی شما مطابقت ندارد. لطفاً عبارات جستجوی خود را تغییر دهید.",
     "noFilteredResults": "گره‌ای یافت نشد",
     "logs": {
@@ -2414,7 +2414,24 @@
     "discardChangesDescription": "اگر این ویرایشگر را ببندید، تغییرات ذخیره‌نشدهٔ پیکربندی هسته از بین خواهد رفت.",
     "scanRealityTarget": "اسکن هدف"
   },
+  "dashboardOverview": {
+    "totalUsers": "کاربران",
+    "active": "فعال",
+    "online": "آنلاین",
+    "upload": "ارسال",
+    "download": "دریافت"
+  },
   "coreEditor": {
+    "awg": {
+        "engine": "حالت انتقال WireGuard",
+        "plain": "WireGuard (کلاینت‌های استاندارد)",
+        "obfuscated": "AmneziaWG 3.1 (پنهان‌سازی)",
+        "compatibility": "به WayLane Node نسخه 0.6.0 یا جدیدتر و کلاینت AmneziaWG با تنظیمات یکسان نیاز دارد. کلاینت‌های استاندارد WireGuard فقط با غیرفعال بودن پنهان‌سازی سازگارند. ترافیک واقعی VPN هنوز آزمایش نشده است.",
+        "preset": "اعمال پیش‌تنظیم AmneziaWG 3.1",
+        "advanced": "گزینه‌های پیشرفته AWG 3.1",
+        "headerKeyHint": "کلید Base64 با طول ۳۲ بایت. با فعال‌سازی آن مقدار S1–S4 باید حداقل ۱۲ باشد."
+    },
+
     "nameRequired": "نام الزامی است",
     "fixValidation": "قبل از ذخیره خطاهای اعتبارسنجی را برطرف کنید",
     "validationErrors": "خطاهای اعتبارسنجی",
