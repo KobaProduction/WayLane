@@ -1,0 +1,48 @@
+# Opt-in Node Agent v2; services/node/docker-compose.yaml remains untouched.
+name: waylane-agent
+services:
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: services/node/bootstrap/Dockerfile
+    privileged: true
+    pid: host
+    userns_mode: host
+    network_mode: host
+    user: "0:0"
+    restart: "no"
+    environment:
+      WAYLANE_NODE_USER: ${WAYLANE_NODE_USER:-waylane}
+      WAYLANE_NODE_UID: ${WAYLANE_NODE_UID:?dedicated host UID required}
+      WAYLANE_NODE_GID: ${WAYLANE_NODE_GID:?dedicated host GID required}
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: services/node/agent/Dockerfile
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    user: "${WAYLANE_NODE_UID:?}:${WAYLANE_NODE_GID:?}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      WAYLANE_PANEL_URL: ${WAYLANE_PANEL_URL:?HTTPS panel URL required}
+      WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:?discovery token required}
+      WAYLANE_AGENT_NAME: ${WAYLANE_AGENT_NAME:-waylane-node}
+      WAYLANE_AGENT_STATE_DIR: /var/lib/waylane-agent
+      WAYLANE_ROOTLESS_SOCKET: /run/waylane/docker.sock
+    volumes:
+      - type: bind
+        source: /var/lib/waylane-agent
+        target: /var/lib/waylane-agent
+      - type: bind
+        source: /run/user/${WAYLANE_NODE_UID:?}/docker.sock
+        target: /run/waylane/docker.sock
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    pids_limit: 64

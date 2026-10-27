@@ -36,3 +36,23 @@ jobs:
           push: false
           platforms: linux/amd64
           tags: waylane-node:ci
+  agent-images:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./services/node/agent/Dockerfile
+          push: false
+          platforms: linux/amd64
+          tags: waylane-agent:ci
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./services/node/bootstrap/Dockerfile
+          push: false
+          platforms: linux/amd64
+          tags: waylane-bootstrap:ci

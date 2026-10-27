@@ -10,4 +10,13 @@ export XRAY_LOCATION_ASSET="$XRAY_ASSETS_PATH"
 go test -p 1 -parallel 1 ./...
 go vet ./...
 go build -o /dev/null ./cmd/node
-echo "WayLane node verification passed (tests/vet/build)."
+# Node Agent v2 is an intentionally separate Go module, shipped as a separate
+# image and never linked into the legacy VPN node.
+(
+  cd agent
+  go test -count=1 ./...
+  go vet ./...
+  go build -o /dev/null ./cmd/agent
+)
+bash -n bootstrap/run-bootstrap.sh bootstrap/bootstrap-host.sh
+echo "WayLane node verification passed (legacy node, agent, bootstrap checks)."
