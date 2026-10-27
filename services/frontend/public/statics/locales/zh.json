@@ -82,8 +82,8 @@
     "createdAt": "创建时间",
     "selectNode": "选择节点",
     "noNodes": "未配置节点",
-    "noNodesDescription": "主面板没有配置任何核心。您需要从",
-    "noNodesDescription2": "连接和配置节点，并将其连接到面板。",
+    "noNodesDescription": "尚未添加节点。请使用",
+    "noNodesDescription2": "配置节点并连接到控制面板。",
     "noSearchResults": "没有节点匹配您的搜索条件。请尝试调整搜索词。",
     "noFilteredResults": "未找到节点",
     "logs": {
@@ -2457,7 +2457,24 @@
     "discardChangesDescription": "如果关闭此编辑器，未保存的内核配置更改将会丢失。",
     "scanRealityTarget": "扫描目标"
   },
+  "dashboardOverview": {
+    "totalUsers": "用户",
+    "active": "活跃",
+    "online": "在线",
+    "upload": "上传",
+    "download": "下载"
+  },
   "coreEditor": {
+    "awg": {
+        "engine": "WireGuard 传输模式",
+        "plain": "WireGuard（标准客户端）",
+        "obfuscated": "AmneziaWG 3.1（混淆）",
+        "compatibility": "需要 WayLane Node 0.6.0+ 和参数匹配的 AmneziaWG 客户端。标准 WireGuard 客户端仅在禁用混淆时兼容。实际节点 VPN 流量尚未验证。",
+        "preset": "应用 AmneziaWG 3.1 预设",
+        "advanced": "高级 AWG 3.1 选项",
+        "headerKeyHint": "32 字节的 Base64 密钥。启用时 S1–S4 均必须至少为 12。"
+    },
+
     "nameRequired": "名称为必填项",
     "fixValidation": "保存前请修复校验错误",
     "validationErrors": "校验错误",

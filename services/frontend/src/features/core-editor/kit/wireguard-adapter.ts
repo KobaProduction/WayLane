@@ -8,6 +8,7 @@ import {
 } from '@pasarguard/wireguard-config-kit'
 import type { WireGuardCoreConfig, WireGuardCoreDraft, WireGuardValidationIssue } from '@pasarguard/wireguard-config-kit'
 import { validateCoreConfig } from '@pasarguard/core-kit'
+import { validateAmneziaSettings } from './amneziawg-settings'
 
 const knownConfigKeys = new Set(['interface_name', 'private_key', 'pre_shared_key', 'listen_port', 'address', 'peers'])
 
@@ -68,7 +69,7 @@ function draftGenerationIssue(error: unknown): WireGuardValidationIssue {
 }
 
 export function validateWireGuardDraftForSave(draft: WireGuardCoreDraft) {
-  const issues = [...validateWireGuardCoreDraft(draft), ...validateWireGuardMtu(draft.extra)]
+  const issues = [...validateWireGuardCoreDraft(draft), ...validateWireGuardMtu(draft.extra), ...validateAmneziaSettings(draft)]
   if (issues.length > 0) {
     return { ok: false as const, issues }
   }
@@ -83,7 +84,7 @@ export function validateWireGuardDraftForSave(draft: WireGuardCoreDraft) {
 
 /** Draft issues + core-kit validation in one step for saves. */
 export function getWireGuardPersistConfig(draft: WireGuardCoreDraft) {
-  const issues = [...validateWireGuardCoreDraft(draft), ...validateWireGuardMtu(draft.extra)]
+  const issues = [...validateWireGuardCoreDraft(draft), ...validateWireGuardMtu(draft.extra), ...validateAmneziaSettings(draft)]
   if (issues.length > 0) {
     return { ok: false as const, draftIssues: issues }
   }
