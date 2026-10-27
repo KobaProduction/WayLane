@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -49,10 +50,11 @@ export function AmneziaWGSettingsForm({
 
   const option = (field: AmneziaField, description?: string) => {
     const id = baseId + '-' + field
+    const OptionInput = field === 'header_protection_key' ? PasswordInput : Input
     return (
       <div key={field} className="min-w-0 space-y-1.5">
         <Label htmlFor={id}>{fieldLabels[field]}</Label>
-        <Input
+        <OptionInput
           id={id}
           aria-label={fieldLabels[field]}
           dir="ltr"
