@@ -1,13 +1,12 @@
 #!/bin/sh
 set -eu
-# Portable one-shot volume preparation; no host namespaces or systemd.
-[ "$(id -u)" -eq 0 ] || { echo "container root required" >&2; exit 1; }
-for dir in /state/agent /state/rootless-data /state/rootless-run; do
-  [ -d "$dir" ] && [ ! -L "$dir" ] || { echo "Unsafe volume: $dir" >&2; exit 1; }
-  owner="$(stat -c %u:%g "$dir")"
-  if [ "$owner" = 0:0 ]; then chown 1000:1000 "$dir"
-  elif [ "$owner" != 1000:1000 ]; then echo "Unexpected owner $owner on $dir" >&2; exit 1
-  fi
+test "$(id -u)" = 0 || exit 1
+for dir in /bootstrap/docker-data /bootstrap/docker-run /bootstrap/agent-state; do
+  test ! -L "$dir" || exit 1
+  mkdir -p "$dir"
+  chown 1000:1000 "$dir"
   chmod 0700 "$dir"
+  test "$(stat -c %u "$dir")" = 1000 || exit 1
+  test "$(stat -c %g "$dir")" = 1000 || exit 1
 done
-echo "WayLane rootless volumes prepared"
+echo "WayLane private volumes ready; no host systemd."
