@@ -44,6 +44,7 @@ jobs:
           tests/test_compose_contract.py
           tests/test_access_log_redaction.py
           tests/test_amneziawg_core.py
+          tests/test_node_discovery.py
           tests/test_pgbouncer_bootstrap.py
   image:
     needs: verify

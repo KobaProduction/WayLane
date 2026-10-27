@@ -684,6 +684,37 @@ class NodeStatus(str, Enum):
     limited = "limited"
 
 
+# Additive node-agent v2 identity; no mutation of the existing Node model.
+node_discovery_invitations = Table(
+    "node_discovery_invitations", Base.metadata,
+    Column("id", SqliteCompatibleBigInteger, primary_key=True, autoincrement=True),
+    Column("token_hash", String(64), unique=True, nullable=False),
+    Column("label", String(120), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True)),
+    Column("revoked", String(1), server_default="0", nullable=False),
+)
+
+node_agent_registrations = Table(
+    "node_agent_registrations", Base.metadata,
+    Column("node_uuid", String(36), primary_key=True),
+    Column("secret_hash", String(64), nullable=False),
+    Column("invitation_id", SqliteCompatibleBigInteger,
+           ForeignKey("node_discovery_invitations.id", ondelete="RESTRICT"), nullable=False),
+    Column("legacy_node_id", SqliteCompatibleBigInteger, ForeignKey("nodes.id", ondelete="SET NULL"), unique=True),
+    Column("display_name", String(128), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("agent_version", String(32), nullable=False),
+    Column("observed_ip", String(45)),
+    Column("reported_ipv4", String(45)),
+    Column("reported_ipv6", String(45)),
+    Column("capabilities", JSON(), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False),
+)
+Index("ix_node_agent_registrations_status", node_agent_registrations.c.status)
+
+
 class Node(Base, CreatedAtUTCMixin):
     __tablename__ = "nodes"
     name: Mapped[str] = mapped_column(CaseSensitiveString(256), unique=True)
