@@ -11,7 +11,7 @@
 - Build: DEV builds both images from their owner folders; PROD requires reviewed immutable image digests.
 - DEPLOYMENT_ENVIRONMENT=development uses network intens-vpn-development; production uses intens-vpn-production. Both Coolify resources must be on the same Docker host, and infrastructure must create the network before WayLane starts.
 - Coolify generates one public frontend route: SERVICE_URL_FRONTEND_8080, port 8080. The backend stays private as waylane-api:8000. Do not configure a second domain or manually supply a redundant canonical URL.
-- Enable Preserve repository if needed for the tracked nginx.conf bind mount. The nginx proxy sends /api/ and /sub/ to backend over the private Docker network. The /sub/ access log is suppressed because paths can contain bearer-like tokens.
+- The frontend image bakes the tracked `services/frontend/deploy/nginx.intens.conf` at build time using `NGINX_CONFIG=deploy/nginx.intens.conf`; there is **no runtime host file bind mount** to fail under Coolify. The generic standalone frontend still defaults to `services/frontend/deploy/nginx.conf`. The bundled Nginx proxy sends `/api/` and `/sub/` to backend over the private Docker network, suppressing `/sub/` access logs because paths can contain bearer-like tokens.
 
 ## Database and secrets
 
