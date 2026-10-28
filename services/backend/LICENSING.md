@@ -22,3 +22,12 @@ Existing upstream-derived code does **not** become MIT by renaming names,
 reformatting, relocating files, or deleting a license notice. Remove the
 upstream code and the corresponding copyleft obligations only once a
 verified clean replacement is available; maintain attribution until then.
+
+## Bundled Python node bridge
+
+The `waylane_node_bridge/` code is adapted from the GPL-3.0 upstream
+implementation of `pasarguard-node-bridge`. Its full `LICENSE` and
+`UPSTREAM.md` identify the original authors, source revision and changes.
+The original copyright remains valid and the root MIT license does not
+replace GPL-3.0 for this component. The Python runtime no longer installs
+the external PyPI package.

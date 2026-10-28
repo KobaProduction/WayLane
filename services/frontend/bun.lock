@@ -39,9 +39,9 @@
         "@tanstack/react-table": "^8.21.3",
         "@telegram-apps/sdk": "^3.11.8",
         "@vitejs/plugin-react": "^6.0.5",
-        "@waylane/core-kit": "npm:@pasarguard/core-kit@0.2.12",
-        "@waylane/wireguard-config-kit": "npm:@pasarguard/wireguard-config-kit@0.1.0",
-        "@waylane/xray-config-kit": "npm:@pasarguard/xray-config-kit@^0.4.1",
+        "@waylane/core-kit": "workspace:*",
+        "@waylane/wireguard-config-kit": "workspace:*",
+        "@waylane/xray-config-kit": "workspace:*",
         "ace-builds": "^1.44.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -110,6 +110,33 @@
         "vite-plugin-pwa": "^1.3.0",
         "vite-plugin-svgr": "^4.5.0",
         "wait-port": "^1.1.0",
+      },
+    },
+    "vendor/core-kit": {
+      "name": "@waylane/core-kit",
+      "version": "0.2.12",
+      "dependencies": {
+        "@waylane/wireguard-config-kit": "workspace:*",
+        "@waylane/xray-config-kit": "workspace:*",
+      },
+    },
+    "vendor/wireguard-config-kit": {
+      "name": "@waylane/wireguard-config-kit",
+      "version": "0.1.0",
+      "dependencies": {
+        "@stablelib/x25519": "^2.0.1",
+        "zod": "^3.25.76",
+      },
+    },
+    "vendor/xray-config-kit": {
+      "name": "@waylane/xray-config-kit",
+      "version": "0.4.1",
+      "dependencies": {
+        "@noble/post-quantum": "^0.5.4",
+        "@stablelib/x25519": "^2.0.1",
+        "mlkem": "^2.7.0",
+        "zod": "^3.23.8",
+        "zod-to-json-schema": "^3.25.2",
       },
     },
   },
@@ -473,10 +500,6 @@
     "@orval/zod": ["@orval/zod@8.22.0", "", { "dependencies": { "@orval/core": "8.22.0", "jsesc": "^3.0.0", "remeda": "^2.33.6" } }, "sha512-briHtUTz79fvCeIFfGW3IbmUIF9DOotUoWFa/sKUjRUG8PMGDWSjQzO8QdLzLoETVGo9g4TfGwp5Xjcs81GZTA=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.144.0", "", {}, "sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg=="],
-
-    "@pasarguard/wireguard-config-kit": ["@pasarguard/wireguard-config-kit@0.1.0", "", { "dependencies": { "@stablelib/x25519": "^2.0.1", "zod": "^3.25.76" } }, "sha512-vC4ULRfrgsN+W9mFLHFkr74G+6yPmMtxj1/1ZjIwulHPeQ5qHVGA0ed1vSMxL9f722rmV3jj/eMeRQCasGJsrw=="],
-
-    "@pasarguard/xray-config-kit": ["@pasarguard/xray-config-kit@0.4.1", "", { "dependencies": { "@noble/post-quantum": "^0.5.4", "@stablelib/x25519": "^2.0.1", "mlkem": "^2.7.0", "zod": "^3.23.8", "zod-to-json-schema": "^3.25.2" } }, "sha512-9RoZwB3z7IuvMvEHko/34YWbtixUQhA3IpHJtQmjNF2bf5rCuPvLxH/+CiKFYCbEF9byfoIyXmzi/129yEqnhg=="],
 
     "@radix-ui/number": ["@radix-ui/number@1.1.3", "", {}, "sha512-Road2bidD0uu/1BGDOWNdPI06g0lIRy6IF9GZcIrDK2KGItfor8IQwQa+yM2ERgHM1MmHxaxpTzk0/Jp42lNfA=="],
 
@@ -862,11 +885,11 @@
 
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.5", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-BOVzne/NL162sMdResB25mUv+vWMF5NoAjNf09TeGlE7ZpszZWSD3winycicLJw72yeVsoCn/2kOhEuCvEShMA=="],
 
-    "@waylane/core-kit": ["@pasarguard/core-kit@0.2.12", "", { "dependencies": { "@pasarguard/wireguard-config-kit": "0.1.0", "@pasarguard/xray-config-kit": "0.4.1" } }, "sha512-QsSPS6tKdE1RtAY+3aPb7sUH31FmO/KEkY+nyv32DRyjKvV75pv9B2CuPIrle8UBp6kJ6CvHUo3FgqogGaVmlA=="],
+    "@waylane/core-kit": ["@waylane/core-kit@workspace:vendor/core-kit"],
 
-    "@waylane/wireguard-config-kit": ["@pasarguard/wireguard-config-kit@0.1.0", "", { "dependencies": { "@stablelib/x25519": "^2.0.1", "zod": "^3.25.76" } }, "sha512-vC4ULRfrgsN+W9mFLHFkr74G+6yPmMtxj1/1ZjIwulHPeQ5qHVGA0ed1vSMxL9f722rmV3jj/eMeRQCasGJsrw=="],
+    "@waylane/wireguard-config-kit": ["@waylane/wireguard-config-kit@workspace:vendor/wireguard-config-kit"],
 
-    "@waylane/xray-config-kit": ["@pasarguard/xray-config-kit@0.4.1", "", { "dependencies": { "@noble/post-quantum": "^0.5.4", "@stablelib/x25519": "^2.0.1", "mlkem": "^2.7.0", "zod": "^3.23.8", "zod-to-json-schema": "^3.25.2" } }, "sha512-9RoZwB3z7IuvMvEHko/34YWbtixUQhA3IpHJtQmjNF2bf5rCuPvLxH/+CiKFYCbEF9byfoIyXmzi/129yEqnhg=="],
+    "@waylane/xray-config-kit": ["@waylane/xray-config-kit@workspace:vendor/xray-config-kit"],
 
     "ace-builds": ["ace-builds@1.44.0", "", {}, "sha512-PFNMSYqFdEUkul2Ntud0HvA09AgY+F1ag0UYdpMH60wNI/qOA8cB8tlTgoALMEwIdUPJK2CjrIQ7OnbiSS/ugQ=="],
 

@@ -1,0 +1,44 @@
+{
+  "name": "@waylane/core-kit",
+  "version": "0.2.12",
+  "description": "WayLane-maintained source module adapted from Browser-safe registry facade for PasarGuard core configuration kits.",
+  "type": "module",
+  "packageManager": "bun",
+  "license": "AGPL-3.0",
+  "author": "PasarGuard",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KobaProduction/waylane.git",
+    "directory": "services/frontend/vendor/core-kit"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./xray": {
+      "types": "./dist/xray.d.ts",
+      "default": "./dist/xray.js"
+    },
+    "./xray/generators": {
+      "types": "./dist/xray-generators.d.ts",
+      "default": "./dist/xray-generators.js"
+    },
+    "./wireguard": {
+      "types": "./dist/wireguard.d.ts",
+      "default": "./dist/wireguard.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@waylane/wireguard-config-kit": "workspace:*",
+    "@waylane/xray-config-kit": "workspace:*"
+  },
+  "private": true
+}

@@ -3,6 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v bun >/dev/null || { echo "Bun is required" >&2; exit 2; }
 bun install --frozen-lockfile
+bun run build:vendor-kits
+bun test vendor/core-kit/tests vendor/wireguard-config-kit/tests vendor/xray-config-kit/tests
 
 # The default gate runs the project's pinned TypeScript 5 compiler.
 # The low-memory native gate is intended for 2 GiB development containers;

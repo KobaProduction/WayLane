@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "gen:api": "orval",
     "wait-port": "wait-port http://localhost:$UVICORN_PORT/openapi.json",
-    "wait-port-gen-api": "bun run wait-port && bun run gen:api"
+    "wait-port-gen-api": "bun run wait-port && bun run gen:api",
+    "build:vendor-kits": "tsc -p vendor/wireguard-config-kit/tsconfig.json && tsc -p vendor/xray-config-kit/tsconfig.json && tsc -p vendor/core-kit/tsconfig.json"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -49,9 +50,9 @@
     "@tanstack/react-table": "^8.21.3",
     "@telegram-apps/sdk": "^3.11.8",
     "@vitejs/plugin-react": "^6.0.5",
-    "@waylane/core-kit": "npm:@pasarguard/core-kit@0.2.12",
-    "@waylane/wireguard-config-kit": "npm:@pasarguard/wireguard-config-kit@0.1.0",
-    "@waylane/xray-config-kit": "npm:@pasarguard/xray-config-kit@^0.4.1",
+    "@waylane/core-kit": "workspace:*",
+    "@waylane/wireguard-config-kit": "workspace:*",
+    "@waylane/xray-config-kit": "workspace:*",
     "ace-builds": "^1.44.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -121,5 +122,8 @@
     "vite-plugin-svgr": "^4.5.0",
     "wait-port": "^1.1.0"
   },
-  "packageManager": "bun@1.4.4"
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "vendor/*"
+  ]
 }

@@ -1,0 +1,974 @@
+import {
+  fieldDefinitions,
+  fieldFlags,
+  getGeneratedInboundFormMetadata,
+  getGeneratedOutboundFormMetadata,
+  getGeneratedRoutingRuleFields,
+  type XrayGeneratedFormField
+} from "../adapters/xray/form-metadata.js";
+import { getCapabilities } from "../adapters/xray/registry.js";
+import { validateProfile } from "./validate.js";
+import type {
+  Inbound,
+  InboundPort,
+  Issue,
+  JsonObject,
+  Outbound,
+  ProxyOutboundProtocol,
+  Profile,
+  RoutingBalancer,
+  RoutingRule,
+  Security,
+  Transport,
+  ValidateOptions,
+  FreedomOutbound,
+  BlackholeOutbound,
+  DnsOutbound,
+  ProxyOutbound,
+  FreedomOutboundSettings,
+  BlackholeOutboundSettings,
+  DnsOutboundSettings,
+  HttpOutboundSettings,
+  SocksOutboundSettings,
+  ShadowsocksOutboundSettings,
+  VmessOutboundSettings,
+  VlessOutboundSettings,
+  TrojanOutboundSettings,
+  WireGuardOutboundSettings,
+  LoopbackOutboundSettings,
+  MasqueOutboundSettings,
+  StreamSettings,
+  MuxSettings,
+  ProxySettings
+} from "./types.js";
+
+const placeholderUuid = "00000000-0000-4000-8000-000000000000";
+const placeholderKey32 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+type CreateDefaultInboundBaseOptions<Protocol extends Exclude<Inbound["protocol"], "unmanaged">> = {
+  readonly protocol: Protocol;
+  readonly tag?: string;
+  readonly listen?: string;
+  readonly port?: InboundPort;
+  readonly clientDefaults?: CreateDefaultInboundClientDefaults;
+};
+
+export type CreateDefaultInboundClientDefaults = "placeholder" | "empty";
+
+export type CreateDefaultInboundOptions =
+  | (CreateDefaultInboundBaseOptions<"vmess"> & {
+      readonly transport?: Transport["type"];
+      readonly security?: "none" | "tls";
+    })
+  | (CreateDefaultInboundBaseOptions<"vless"> & {
+      readonly transport?: Transport["type"];
+      readonly security?: Security["type"];
+    })
+  | (CreateDefaultInboundBaseOptions<"trojan"> & {
+      readonly transport?: Transport["type"];
+      readonly security?: Security["type"];
+    })
+  | (CreateDefaultInboundBaseOptions<"shadowsocks"> & {
+      readonly transport?: Transport["type"];
+      readonly security?: "none" | "tls";
+    })
+  | (CreateDefaultInboundBaseOptions<"hysteria"> & {
+      readonly security?: "none" | "tls";
+    })
+  | CreateDefaultInboundBaseOptions<"masque">
+  | CreateDefaultInboundBaseOptions<"http">
+  | CreateDefaultInboundBaseOptions<"mixed">
+  | CreateDefaultInboundBaseOptions<"socks">
+  | CreateDefaultInboundBaseOptions<"dokodemo-door">
+  | CreateDefaultInboundBaseOptions<"tunnel">
+  | CreateDefaultInboundBaseOptions<"tun">
+  | CreateDefaultInboundBaseOptions<"wireguard">;
+
+type UnsafeCreateDefaultInboundOptions = CreateDefaultInboundBaseOptions<Exclude<Inbound["protocol"], "unmanaged">> & {
+  readonly transport?: Transport["type"];
+  readonly security?: Security["type"];
+};
+
+type CreateDefaultInboundOptionsFor<Protocol extends Exclude<Inbound["protocol"], "unmanaged">> =
+  Extract<CreateDefaultInboundOptions, { readonly protocol: Protocol }>;
+
+type ExactCreateDefaultInboundOptions<Options extends CreateDefaultInboundOptions> =
+  Options & Record<Exclude<keyof Options, keyof CreateDefaultInboundOptionsFor<Options["protocol"]>>, never>;
+
+type InboundForProtocol<Protocol extends Exclude<Inbound["protocol"], "unmanaged">> =
+  Inbound extends infer Candidate
+    ? Candidate extends { readonly protocol: infer CandidateProtocol }
+      ? Protocol extends CandidateProtocol
+        ? Candidate
+        : never
+      : never
+    : never;
+
+export type InboundFormCapabilities = {
+  readonly protocols: Record<string, boolean>;
+  readonly protocolConfigs: Record<string, string>;
+  readonly protocolOrder: readonly string[];
+  readonly transports: Record<string, boolean>;
+  readonly securities: Record<string, boolean>;
+  /** Kit transport types each protocol in `protocolOrder` can use with the selected release, in picker order. */
+  readonly transportsByProtocol: Readonly<Record<string, readonly Transport["type"][]>>;
+  /** Kit security types each protocol in `protocolOrder` can use with the selected release, in picker order. */
+  readonly securitiesByProtocol: Readonly<Record<string, readonly Security["type"][]>>;
+  readonly securityFields: Record<string, Record<string, boolean>>;
+  readonly securityFieldDefinitions: Record<string, Record<string, XrayGeneratedFormField>>;
+  readonly securityFieldOrderByType: Readonly<Record<string, readonly string[]>>;
+  readonly transportSettingsFields: Record<string, Record<string, boolean>>;
+  readonly transportSettingsFieldDefinitions: Record<string, Record<string, XrayGeneratedFormField>>;
+  readonly transportSettingsFieldOrderByType: Readonly<Record<string, readonly string[]>>;
+  readonly settingsFields: Record<string, Record<string, boolean>>;
+  readonly settingsFieldDefinitions: Record<string, Record<string, XrayGeneratedFormField>>;
+  readonly settingsFieldOrderByProtocol: Readonly<Record<string, readonly string[]>>;
+  readonly clientLinks: Record<string, boolean>;
+};
+
+export type InboundFieldVisibility = {
+  readonly clients: boolean;
+  readonly accounts: boolean;
+  readonly wireguardPeers: boolean;
+  readonly tun: boolean;
+  readonly dokodemo: boolean;
+  readonly stream: boolean;
+  readonly tls: boolean;
+  readonly reality: boolean;
+  readonly shadowsocks: boolean;
+  readonly sniffing: boolean;
+  readonly advancedStream: boolean;
+  readonly masque: boolean;
+};
+
+export type RoutingRuleFieldKey = string;
+
+export type FormVersionOptions = {
+  readonly xrayVersion?: string;
+};
+
+export type ProfileTagSource = Pick<Profile, "inbounds" | "outbounds" | "routing">;
+
+export type RoutingRuleFormCapabilities = {
+  readonly fields: Record<string, boolean>;
+  readonly fieldDefinitions: Record<string, XrayGeneratedFormField>;
+  /** Parity order for stable form layout (JSON keys). */
+  readonly fieldOrder: readonly string[];
+  readonly networks: Record<string, boolean>;
+  readonly protocols: Record<string, boolean>;
+  readonly inboundTags: string[];
+  readonly outboundTags: string[];
+  readonly balancerTags: string[];
+};
+
+export type RoutingRuleFormCapabilitiesOptions = FormVersionOptions & {
+  readonly profile?: ProfileTagSource;
+};
+
+export type RoutingRuleFieldVisibility = Record<string, boolean>;
+
+export type OutboundFormCapabilities = {
+  readonly protocols: Record<string, boolean>;
+  readonly protocolConfigs: Record<string, string>;
+  readonly envelopeFields: Record<string, boolean>;
+  readonly envelopeFieldDefinitions: Record<string, XrayGeneratedFormField>;
+  /** JSON keys in parity order for envelope (e.g. sendThrough, streamSettings). */
+  readonly envelopeFieldOrder: readonly string[];
+  readonly settingsFields: Record<string, Record<string, boolean>>;
+  readonly settingsFieldDefinitions: Record<string, Record<string, XrayGeneratedFormField>>;
+  /** JSON keys per protocol in parity order for outbound `settings`. */
+  readonly settingsFieldOrderByProtocol: Readonly<Record<string, readonly string[]>>;
+  readonly streamFields: Record<string, boolean>;
+  readonly streamFieldDefinitions: Record<string, XrayGeneratedFormField>;
+  readonly streamFieldOrder: readonly string[];
+  readonly muxFields: Record<string, boolean>;
+  readonly muxFieldDefinitions: Record<string, XrayGeneratedFormField>;
+  readonly proxySettingsFields: Record<string, boolean>;
+  readonly proxySettingsFieldDefinitions: Record<string, XrayGeneratedFormField>;
+};
+
+export type OutboundFieldVisibility = {
+  readonly settings: boolean;
+  readonly streamSettings: boolean;
+  readonly mux: boolean;
+  readonly proxySettings: boolean;
+  readonly raw: boolean;
+};
+
+export type CreateDefaultRoutingRuleOptions = Omit<RoutingRule, "type"> & {
+  readonly type?: "field";
+};
+
+export type CreateDefaultRoutingBalancerOptions = Partial<RoutingBalancer>;
+
+// Type-safe outbound settings based on protocol
+type OutboundSettingsForProtocol<P extends Exclude<Outbound["protocol"], "unmanaged"> | "direct" | "block"> =
+  P extends "freedom" | "direct" ? FreedomOutboundSettings :
+  P extends "blackhole" | "block" ? BlackholeOutboundSettings :
+  P extends "dns" ? DnsOutboundSettings :
+  P extends "http" ? HttpOutboundSettings :
+  P extends "socks" ? SocksOutboundSettings :
+  P extends "shadowsocks" ? ShadowsocksOutboundSettings :
+  P extends "vmess" ? VmessOutboundSettings :
+  P extends "vless" ? VlessOutboundSettings :
+  P extends "trojan" ? TrojanOutboundSettings :
+  P extends "wireguard" ? WireGuardOutboundSettings :
+  P extends "loopback" ? LoopbackOutboundSettings :
+  P extends "masque" ? MasqueOutboundSettings :
+  JsonObject; // Fallback for any other protocols
+
+export type CreateDefaultOutboundOptions<P extends Exclude<Outbound["protocol"], "unmanaged"> | "direct" | "block" = Exclude<Outbound["protocol"], "unmanaged"> | "direct" | "block"> = {
+  readonly protocol: P;
+  readonly tag?: string;
+  readonly settings?: OutboundSettingsForProtocol<P>;
+  readonly streamSettings?: StreamSettings;
+  readonly mux?: MuxSettings;
+  readonly proxySettings?: ProxySettings;
+  readonly sendThrough?: string;
+  readonly targetStrategy?: string;
+};
+
+function defaultTransport(type: Transport["type"] = "tcp"): Transport {
+  if (type === "grpc") return { type: "grpc", serviceName: "" };
+  if (type === "xhttp") return { type: "xhttp", path: "/", mode: "auto" };
+  if (type === "ws") return { type: "ws", path: "/" };
+  if (type === "httpupgrade") return { type: "httpupgrade", path: "/" };
+  if (type === "kcp") return { type: "kcp" };
+  if (type === "hysteria") return { type: "hysteria", version: 2, udpIdleTimeout: 60 };
+  if (type === "masque") return { type: "masque" };
+  // "Google Drive" rather than "google-drive": older Xray clients know only that spelling, and newer Xray reads both.
+  if (type === "xdrive") return { type: "xdrive", service: "Google Drive", remoteFolder: "", secrets: ["", "", ""] };
+  return { type: "tcp", header: { type: "none" } };
+}
+
+function defaultSecurity(type: Security["type"] = "none"): Security {
+  if (type === "tls") return { type: "tls", serverName: "" };
+  if (type === "reality") {
+    return {
+      type: "reality",
+      serverNames: ["example.com"],
+      privateKey: placeholderKey32,
+      publicKey: placeholderKey32,
+      shortIds: ["a1b2c3d4"],
+      target: "example.com:443",
+      fingerprint: "chrome",
+      spiderX: "/"
+    };
+  }
+  return { type: "none" };
+}
+
+function defaultNonRealitySecurity(type: "none" | "tls" = "none"): Extract<Security, { type: "none" | "tls" }> {
+  if (type === "tls") return { type: "tls", serverName: "" };
+  return { type: "none" };
+}
+
+function assertCreateDefaultInboundOptions(options: CreateDefaultInboundOptions): void {
+  const unsafe = options as UnsafeCreateDefaultInboundOptions;
+  const protocol = unsafe.protocol;
+  const hasStreamSecurity = unsafe.security !== undefined;
+  const hasTransport = unsafe.transport !== undefined;
+
+  if (
+    protocol === "http" ||
+    protocol === "mixed" ||
+    protocol === "socks" ||
+    protocol === "dokodemo-door" ||
+    protocol === "tunnel" ||
+    protocol === "tun" ||
+    protocol === "wireguard"
+  ) {
+    if (hasStreamSecurity) throw new TypeError(`${protocol} default inbound does not support stream security options.`);
+    if (hasTransport) throw new TypeError(`${protocol} default inbound does not support transport options.`);
+  }
+
+  if (protocol === "vmess" && unsafe.security === "reality") {
+    throw new TypeError("VMess default inbound supports only none or TLS security.");
+  }
+
+  if ((protocol === "shadowsocks" || protocol === "hysteria") && unsafe.security === "reality") {
+    throw new TypeError(`${protocol} default inbound supports only none or TLS security.`);
+  }
+
+  if (protocol === "hysteria" && hasTransport) {
+    throw new TypeError("Hysteria default inbound uses the hysteria transport and does not accept a transport option.");
+  }
+
+  if (protocol === "masque" && (hasStreamSecurity || hasTransport)) {
+    throw new TypeError("masque default inbound always uses TLS and the masque transport.");
+  }
+
+  if (protocol !== "masque" && unsafe.transport === "masque") {
+    throw new TypeError("The masque transport can only be used by the masque inbound.");
+  }
+
+  if (protocol !== "vless" && unsafe.transport === "xdrive") {
+    throw new TypeError("The xdrive transport can only be used by the VLESS inbound.");
+  }
+}
+
+function normalizeDefaultInboundListen(listen: string | undefined): { listen?: string } {
+  if (listen === undefined) return {};
+  const t = listen.trim();
+  if (t === "" || t === "0.0.0.0" || t === "::" || t === "[::]") return {};
+  return { listen: t };
+}
+
+function defaultInboundPort(port: InboundPort | undefined): { port?: InboundPort } {
+  if (port === undefined) return {};
+  return { port };
+}
+
+const defaultInboundProtocols = [
+  "vmess",
+  "vless",
+  "trojan",
+  "shadowsocks",
+  "hysteria",
+  "masque",
+  "http",
+  "mixed",
+  "socks",
+  "dokodemo-door",
+  "tunnel",
+  "tun",
+  "wireguard"
+] as const satisfies readonly Exclude<Inbound["protocol"], "unmanaged">[];
+
+function isDefaultInboundProtocol(protocol: string): protocol is Exclude<Inbound["protocol"], "unmanaged"> {
+  return (defaultInboundProtocols as readonly string[]).includes(protocol);
+}
+
+const inboundSecurityFieldKeysByType = {
+  tls: [
+    "serverName",
+    "alpn",
+    "fingerprint",
+    "allowInsecure",
+    "enableSessionResumption",
+    "disableSystemRoot",
+    "minVersion",
+    "maxVersion",
+    "cipherSuites",
+    "rejectUnknownSni",
+    "curvePreferences",
+    "masterKeyLog",
+    "pinnedPeerCertSha256",
+    "verifyPeerCertByName",
+    "echServerKeys",
+    "echConfigList",
+    "echForceQuery",
+    "echSockopt"
+  ],
+  reality: [
+    "serverNames",
+    "privateKey",
+    "publicKey",
+    "shortIds",
+    "target",
+    "fingerprint",
+    "spiderX",
+    "mldsa65Seed",
+    "mldsa65Verify",
+    "maxTimeDiff",
+    "show"
+  ]
+} as const satisfies Readonly<Record<"tls" | "reality", readonly string[]>>;
+
+function inboundSecurityFields(type: "tls" | "reality", rows: readonly XrayGeneratedFormField[]): readonly XrayGeneratedFormField[] {
+  const byKey = new Map(rows.map((row) => [row.json, row]));
+  return inboundSecurityFieldKeysByType[type].flatMap((key) => {
+    if (key === "target") return [{ json: "target", go: "Target", type: "string" }];
+    const field = byKey.get(key);
+    return field ? [field] : [];
+  });
+}
+
+/** Xray transport names (including aliases) from the release capabilities mapped to kit `Transport.type`. */
+const kitTransportByXrayTransport: Readonly<Record<string, Transport["type"]>> = {
+  tcp: "tcp",
+  raw: "tcp",
+  grpc: "grpc",
+  xhttp: "xhttp",
+  splithttp: "xhttp",
+  ws: "ws",
+  websocket: "ws",
+  httpupgrade: "httpupgrade",
+  kcp: "kcp",
+  mkcp: "kcp",
+  hysteria: "hysteria",
+  masque: "masque",
+  xdrive: "xdrive"
+};
+
+function inboundTransportsForProtocol(protocol: string): readonly Transport["type"][] {
+  const streamTransports = ["tcp", "grpc", "xhttp", "ws", "httpupgrade", "kcp"] as const;
+  // Xray runs the xdrive transport only under VLESS (XCK_SEMANTIC_XDRIVE_PROTOCOL).
+  if (protocol === "vless") return [...streamTransports, "xdrive"];
+  if (protocol === "vmess" || protocol === "trojan" || protocol === "shadowsocks") return streamTransports;
+  if (protocol === "hysteria") return ["hysteria"];
+  if (protocol === "masque") return ["masque"];
+  return [];
+}
+
+function inboundSecuritiesForProtocol(protocol: string): readonly Security["type"][] {
+  if (protocol === "vless" || protocol === "trojan") return ["none", "tls", "reality"];
+  if (protocol === "vmess" || protocol === "shadowsocks") return ["none", "tls"];
+  if (protocol === "hysteria" || protocol === "masque") return ["tls"];
+  return [];
+}
+
+export type CreateDefaultInboundForProtocolOptions = {
+  readonly protocol: Exclude<Inbound["protocol"], "unmanaged">;
+  readonly tag?: string;
+  readonly listen?: string;
+  readonly port?: InboundPort;
+  readonly transport?: Transport["type"];
+  readonly security?: Security["type"];
+  readonly clientDefaults?: CreateDefaultInboundClientDefaults;
+};
+
+export function createDefaultInboundForProtocol(options: CreateDefaultInboundForProtocolOptions): Exclude<Inbound, { protocol: "unmanaged" }> {
+  const base = {
+    tag: options.tag,
+    listen: options.listen,
+    port: options.port,
+    clientDefaults: options.clientDefaults
+  };
+  // Only the masque protocol can carry the masque transport and only VLESS the xdrive transport; other protocols
+  // fall back to their default transport (createDefaultInbound throws for both instead).
+  const transport = options.transport === "masque" || (options.transport === "xdrive" && options.protocol !== "vless")
+    ? undefined
+    : options.transport;
+
+  if (options.protocol === "vmess") {
+    return createDefaultInbound({
+      protocol: "vmess",
+      ...base,
+      transport,
+      security: options.security === "tls" ? "tls" : "none"
+    });
+  }
+
+  if (options.protocol === "vless") {
+    return createDefaultInbound({
+      protocol: "vless",
+      ...base,
+      transport,
+      security: options.security
+    });
+  }
+
+  if (options.protocol === "trojan") {
+    return createDefaultInbound({
+      protocol: "trojan",
+      ...base,
+      transport,
+      security: options.security
+    });
+  }
+
+  if (options.protocol === "shadowsocks") {
+    return createDefaultInbound({
+      protocol: "shadowsocks",
+      ...base,
+      transport,
+      security: options.security === "tls" ? "tls" : "none"
+    });
+  }
+
+  if (options.protocol === "hysteria") {
+    return createDefaultInbound({
+      protocol: "hysteria",
+      ...base,
+      security: options.security === "none" ? "none" : "tls"
+    });
+  }
+
+  if (options.protocol === "masque") {
+    return createDefaultInbound({ protocol: "masque", ...base });
+  }
+
+  return createDefaultInbound({
+    protocol: options.protocol as "http" | "mixed" | "socks" | "dokodemo-door" | "tunnel" | "tun" | "wireguard",
+    ...base
+  });
+}
+
+export function createDefaultInbound<const Options extends CreateDefaultInboundOptions>(
+  options: ExactCreateDefaultInboundOptions<Options>
+): InboundForProtocol<Options["protocol"]> {
+  const typedOptions = options as CreateDefaultInboundOptions;
+  assertCreateDefaultInboundOptions(typedOptions);
+
+  const tag = typedOptions.tag ?? "";
+  const listenFields = normalizeDefaultInboundListen(typedOptions.listen);
+  const portFields = defaultInboundPort(typedOptions.port);
+
+  if (typedOptions.protocol === "vmess") {
+    return {
+      kind: "inbound",
+      protocol: "vmess",
+      tag,
+      ...listenFields,
+      ...portFields,
+      clients: typedOptions.clientDefaults === "empty"
+        ? []
+        : [{ protocol: "vmess", id: placeholderUuid, security: "auto", email: "user" }],
+      security: typedOptions.security === "tls" ? { type: "tls", serverName: "" } : { type: "none" },
+      transport: defaultTransport(typedOptions.transport)
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "vless") {
+    return {
+      kind: "inbound",
+      protocol: "vless",
+      tag,
+      ...listenFields,
+      ...portFields,
+      clients: typedOptions.clientDefaults === "empty"
+        ? []
+        : [{ protocol: "vless", id: placeholderUuid, email: "user" }],
+      security: defaultSecurity(typedOptions.security),
+      transport: defaultTransport(typedOptions.transport),
+      decryption: "none"
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "trojan") {
+    return {
+      kind: "inbound",
+      protocol: "trojan",
+      tag,
+      ...listenFields,
+      ...portFields,
+      clients: typedOptions.clientDefaults === "empty"
+        ? []
+        : [{ protocol: "trojan", password: "change-me-trojan-password", email: "user" }],
+      security: defaultSecurity(typedOptions.security === "reality" ? "reality" : typedOptions.security ?? "tls"),
+      transport: defaultTransport(typedOptions.transport)
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "shadowsocks") {
+    const usesStreamSettings = typedOptions.security !== undefined || typedOptions.transport !== undefined;
+    const useEmptyClients = typedOptions.clientDefaults === "empty";
+    const inbound: Extract<Inbound, { protocol: "shadowsocks" }> = {
+      kind: "inbound",
+      protocol: "shadowsocks",
+      tag,
+      ...listenFields,
+      ...portFields,
+      method: useEmptyClients ? undefined : "chacha20-poly1305",
+      password: undefined,
+      network: "tcp,udp",
+      clients: useEmptyClients ? [] : [{ protocol: "shadowsocks", password: "change-me-client-password", email: "user" }]
+    };
+    if (!usesStreamSettings) return inbound as InboundForProtocol<Options["protocol"]>;
+    return {
+      ...inbound,
+      security: defaultNonRealitySecurity(typedOptions.security),
+      transport: defaultTransport(typedOptions.transport)
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "hysteria") {
+    return {
+      kind: "inbound",
+      protocol: "hysteria",
+      tag,
+      ...listenFields,
+      ...portFields,
+      version: 2,
+      clients: typedOptions.clientDefaults === "empty"
+        ? []
+        : [{ protocol: "hysteria", auth: "change-me-hysteria-auth", email: "user" }],
+      security: typedOptions.security === "none" ? { type: "none" } : { type: "tls", serverName: "" },
+      transport: { type: "hysteria", version: 2, udpIdleTimeout: 60 }
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "masque") {
+    return {
+      kind: "inbound",
+      protocol: "masque",
+      tag,
+      ...listenFields,
+      ...portFields,
+      clients: typedOptions.clientDefaults === "empty"
+        ? []
+        : [{ protocol: "masque", email: "user", pass: "change-me-masque-password" }],
+      address: ["10.14.0.1/16", "fd14::1/64"],
+      security: { type: "tls", serverName: "", alpn: ["h3", "h2"] },
+      transport: { type: "masque" }
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "http") {
+    return {
+      kind: "inbound",
+      protocol: "http",
+      tag,
+      ...listenFields,
+      ...portFields,
+      accounts: [{ user: "user", pass: "change-me-http-password" }]
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "mixed" || typedOptions.protocol === "socks") {
+    return {
+      kind: "inbound",
+      protocol: typedOptions.protocol,
+      tag,
+      ...listenFields,
+      ...portFields,
+      auth: "password",
+      accounts: [{ user: "user", pass: "change-me-socks-password" }],
+      udp: true,
+      ip: "127.0.0.1"
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "dokodemo-door" || typedOptions.protocol === "tunnel") {
+    return {
+      kind: "inbound",
+      protocol: typedOptions.protocol,
+      tag,
+      ...listenFields,
+      ...portFields,
+      network: "tcp"
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  if (typedOptions.protocol === "tun") {
+    return {
+      kind: "inbound",
+      protocol: "tun",
+      tag,
+      ...listenFields,
+      name: "xray0",
+      mtu: 1500,
+      gateway: ["198.18.0.1/15"],
+      dns: ["1.1.1.1"],
+      autoOutboundsInterface: "auto"
+    } as InboundForProtocol<Options["protocol"]>;
+  }
+
+  return {
+    kind: "inbound",
+    protocol: "wireguard",
+    tag,
+    ...listenFields,
+    ...portFields,
+    secretKey: placeholderKey32,
+    publicKey: placeholderKey32,
+    address: ["10.0.0.1/24"],
+    peers: [
+      {
+        publicKey: placeholderKey32,
+        allowedIPs: ["10.0.0.2/32"],
+        keepAlive: 25
+      }
+    ],
+    mtu: 1420,
+    noKernelTun: false
+  } as InboundForProtocol<Options["protocol"]>;
+}
+
+export function getInboundFormCapabilities(options: { readonly xrayVersion?: string } = {}): InboundFormCapabilities {
+  const capabilities = getCapabilities(options);
+  const metadata = getGeneratedInboundFormMetadata(options);
+  const protocolRows = metadata.protocols.filter((entry) => isDefaultInboundProtocol(entry.protocol));
+  const securityFieldRowsByType = Object.fromEntries(
+    Object.entries(metadata.securityFieldsByType).map(([type, rows]) => [
+      type,
+      type === "tls" || type === "reality" ? inboundSecurityFields(type, rows) : rows
+    ])
+  );
+  const settingsFieldOrderByProtocol = Object.fromEntries(
+    Object.entries(metadata.settingsFieldsByProtocol).map(([protocol, rows]) => [protocol, rows.map((row) => row.json)])
+  );
+  const securityFieldOrderByType = Object.fromEntries(
+    Object.entries(securityFieldRowsByType).map(([type, rows]) => [type, rows.map((row) => row.json)])
+  );
+  const transportFieldRowsByType = metadata.transportSettingsByType;
+  const transportSettingsFieldOrderByType = Object.fromEntries(
+    Object.entries(transportFieldRowsByType).map(([type, rows]) => [type, rows.map((row) => row.json)])
+  );
+  const protocolOrder = protocolRows.map((entry) => entry.protocol);
+  const availableTransports = new Set(capabilities.transports.flatMap((item) => kitTransportByXrayTransport[item] ?? []));
+  const availableSecurities = new Set<string>(capabilities.securities);
+  return {
+    protocols: Object.fromEntries(protocolRows.map((entry) => [entry.protocol, true])),
+    protocolConfigs: Object.fromEntries(protocolRows.map((entry) => [entry.protocol, entry.config])),
+    protocolOrder,
+    transports: Object.fromEntries(capabilities.transports.map((item) => [item, true])),
+    securities: Object.fromEntries(capabilities.securities.map((item) => [item, true])),
+    transportsByProtocol: Object.fromEntries(protocolOrder.map((protocol) => [
+      protocol,
+      inboundTransportsForProtocol(protocol).filter((type) => availableTransports.has(type))
+    ])),
+    securitiesByProtocol: Object.fromEntries(protocolOrder.map((protocol) => [
+      protocol,
+      inboundSecuritiesForProtocol(protocol).filter((type) => availableSecurities.has(type))
+    ])),
+    securityFields: Object.fromEntries(Object.entries(securityFieldRowsByType).map(([type, rows]) => [
+      type,
+      fieldFlags(rows)
+    ])),
+    securityFieldDefinitions: Object.fromEntries(Object.entries(securityFieldRowsByType).map(([type, rows]) => [
+      type,
+      fieldDefinitions(rows)
+    ])),
+    securityFieldOrderByType,
+    transportSettingsFields: Object.fromEntries(Object.entries(transportFieldRowsByType).map(([type, rows]) => [
+      type,
+      fieldFlags(rows)
+    ])),
+    transportSettingsFieldDefinitions: Object.fromEntries(Object.entries(transportFieldRowsByType).map(([type, rows]) => [
+      type,
+      fieldDefinitions(rows)
+    ])),
+    transportSettingsFieldOrderByType,
+    settingsFields: Object.fromEntries(Object.entries(metadata.settingsFieldsByProtocol).map(([protocol, rows]) => [
+      protocol,
+      fieldFlags(rows)
+    ])),
+    settingsFieldDefinitions: Object.fromEntries(Object.entries(metadata.settingsFieldsByProtocol).map(([protocol, rows]) => [
+      protocol,
+      fieldDefinitions(rows)
+    ])),
+    settingsFieldOrderByProtocol,
+    clientLinks: {
+      vmess: capabilities.protocols.includes("vmess"),
+      vless: capabilities.protocols.includes("vless"),
+      trojan: capabilities.protocols.includes("trojan"),
+      shadowsocks: capabilities.protocols.includes("shadowsocks"),
+      hysteria: false,
+      masque: false,
+      wireguard: capabilities.protocols.includes("wireguard")
+    }
+  };
+}
+
+const streamInboundProtocols: ReadonlySet<Inbound["protocol"]> = new Set(["vmess", "vless", "trojan", "shadowsocks", "hysteria", "masque"]);
+
+export function getInboundFieldVisibility(draft: Inbound, _capabilities: InboundFormCapabilities = getInboundFormCapabilities()): InboundFieldVisibility {
+  const stream = streamInboundProtocols.has(draft.protocol);
+  const security = "security" in draft ? draft.security : undefined;
+  return {
+    clients: "clients" in draft,
+    accounts: draft.protocol === "http" || draft.protocol === "mixed" || draft.protocol === "socks",
+    wireguardPeers: draft.protocol === "wireguard",
+    tun: draft.protocol === "tun",
+    dokodemo: draft.protocol === "dokodemo-door" || draft.protocol === "tunnel",
+    stream,
+    tls: security?.type === "tls",
+    reality: security?.type === "reality",
+    shadowsocks: draft.protocol === "shadowsocks",
+    sniffing: draft.protocol !== "wireguard",
+    advancedStream: stream,
+    masque: draft.protocol === "masque"
+  };
+}
+
+function uniqueStrings(values: readonly (string | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
+}
+
+function resolveRoutingCapabilityInput(input?: ProfileTagSource | RoutingRuleFormCapabilitiesOptions): RoutingRuleFormCapabilitiesOptions {
+  if (!input) return {};
+  if ("profile" in input || "xrayVersion" in input) return input as RoutingRuleFormCapabilitiesOptions;
+  return { profile: input as ProfileTagSource };
+}
+
+export function createDefaultRoutingRule(options: CreateDefaultRoutingRuleOptions = {}): RoutingRule {
+  const rule: RoutingRule = {
+    type: "field",
+    ...options
+  };
+  if (rule.outboundTag === undefined && rule.balancerTag === undefined) {
+    return { ...rule, outboundTag: "direct" };
+  }
+  return rule;
+}
+
+export function createDefaultRoutingBalancer(options: CreateDefaultRoutingBalancerOptions = {}): RoutingBalancer {
+  return {
+    tag: options.tag ?? "balanced",
+    selector: options.selector ?? ["proxy-"],
+    strategy: options.strategy,
+    fallbackTag: options.fallbackTag
+  };
+}
+
+export function getRoutingRuleFormCapabilities(input?: ProfileTagSource | RoutingRuleFormCapabilitiesOptions): RoutingRuleFormCapabilities {
+  const options = resolveRoutingCapabilityInput(input);
+  const fields = getGeneratedRoutingRuleFields(options);
+  const profile = options.profile;
+  return {
+    fields: fieldFlags(fields),
+    fieldDefinitions: fieldDefinitions(fields),
+    fieldOrder: fields.map((field) => field.json),
+    networks: {
+      tcp: true,
+      udp: true,
+      unix: true,
+      "tcp,udp": true
+    },
+    protocols: {
+      http: true,
+      tls: true,
+      bittorrent: true
+    },
+    inboundTags: uniqueStrings(profile?.inbounds?.map((inbound) => inbound.tag) ?? []),
+    outboundTags: uniqueStrings(profile?.outbounds?.map((outbound) => outbound.tag) ?? []),
+    balancerTags: uniqueStrings(profile?.routing?.balancers?.map((balancer) => balancer.tag) ?? [])
+  };
+}
+
+export function getRoutingRuleFieldVisibility(_draft: RoutingRule, capabilities: RoutingRuleFormCapabilities = getRoutingRuleFormCapabilities()): RoutingRuleFieldVisibility {
+  return capabilities.fields;
+}
+
+export function createDefaultOutbound<P extends Exclude<Outbound["protocol"], "unmanaged"> | "direct" | "block">(options: CreateDefaultOutboundOptions<P>): Exclude<Outbound, { protocol: "unmanaged" }> {
+  const protocol = options.protocol === "direct"
+    ? "freedom"
+    : options.protocol === "block"
+      ? "blackhole"
+      : options.protocol;
+  const tag = options.tag ?? (protocol === "freedom" ? "direct" : protocol === "blackhole" ? "block" : `${protocol}-outbound`);
+  const streamSettings = protocol === "masque"
+    ? options.streamSettings ?? { network: "masque", security: "tls", tlsSettings: {}, masqueSettings: {} }
+    : options.streamSettings;
+  const envelope = {
+    sendThrough: options.sendThrough,
+    streamSettings,
+    proxySettings: options.proxySettings,
+    mux: options.mux,
+    targetStrategy: options.targetStrategy
+  };
+
+  if (protocol === "freedom") {
+    return {
+      protocol,
+      tag,
+      settings: options.settings,
+      ...envelope
+    } as FreedomOutbound;
+  }
+
+  if (protocol === "blackhole") {
+    return {
+      protocol,
+      tag,
+      settings: options.settings,
+      ...envelope
+    } as BlackholeOutbound;
+  }
+
+  if (protocol === "dns") {
+    return {
+      protocol,
+      tag,
+      settings: options.settings,
+      ...envelope
+    } as DnsOutbound;
+  }
+
+  return {
+    protocol: protocol as ProxyOutboundProtocol,
+    tag,
+    settings: options.settings ?? {},
+    raw: [],
+    ...envelope
+  } as ProxyOutbound;
+}
+
+export function getOutboundFormCapabilities(options: FormVersionOptions = {}): OutboundFormCapabilities {
+  const metadata = getGeneratedOutboundFormMetadata(options);
+  const settingsFieldOrderByProtocol = Object.fromEntries(
+    Object.entries(metadata.settingsFieldsByProtocol).map(([protocol, rows]) => [protocol, rows.map((row) => row.json)])
+  );
+
+  return {
+    protocols: Object.fromEntries(metadata.protocols.map((entry) => [entry.protocol, true])),
+    protocolConfigs: Object.fromEntries(metadata.protocols.map((entry) => [entry.protocol, entry.config])),
+    envelopeFields: fieldFlags(metadata.envelopeFields),
+    envelopeFieldDefinitions: fieldDefinitions(metadata.envelopeFields),
+    envelopeFieldOrder: metadata.envelopeFields.map((field) => field.json),
+    settingsFields: Object.fromEntries(Object.entries(metadata.settingsFieldsByProtocol).map(([protocol, rows]) => [
+      protocol,
+      fieldFlags(rows)
+    ])),
+    settingsFieldDefinitions: Object.fromEntries(Object.entries(metadata.settingsFieldsByProtocol).map(([protocol, rows]) => [
+      protocol,
+      fieldDefinitions(rows)
+    ])),
+    settingsFieldOrderByProtocol,
+    streamFields: fieldFlags(metadata.streamFields),
+    streamFieldDefinitions: fieldDefinitions(metadata.streamFields),
+    streamFieldOrder: metadata.streamFields.map((field) => field.json),
+    muxFields: fieldFlags(metadata.muxFields),
+    muxFieldDefinitions: fieldDefinitions(metadata.muxFields),
+    proxySettingsFields: fieldFlags(metadata.proxySettingsFields),
+    proxySettingsFieldDefinitions: fieldDefinitions(metadata.proxySettingsFields)
+  };
+}
+
+export function getOutboundFieldVisibility(draft: Outbound, capabilities: OutboundFormCapabilities = getOutboundFormCapabilities()): OutboundFieldVisibility {
+  if (draft.protocol === "unmanaged") {
+    return {
+      settings: false,
+      streamSettings: false,
+      mux: false,
+      proxySettings: false,
+      raw: true
+    };
+  }
+
+  return {
+    settings: Object.keys(capabilities.settingsFields[draft.protocol] ?? {}).length > 0 || "settings" in draft,
+    streamSettings: capabilities.envelopeFields.streamSettings === true,
+    // Mux stays hidden by default for MASQUE outbounds: Xray releases before v26.10.17 refuse it and v26.10.17 was withdrawn
+    // (XCK_SEMANTIC_MASQUE_MUX_UNSUPPORTED warns and names the release to install).
+    mux: capabilities.envelopeFields.mux === true && draft.protocol !== "masque",
+    proxySettings: capabilities.envelopeFields.proxySettings === true,
+    raw: true
+  };
+}
+
+export function validateInboundDraft(draft: Inbound, options: ValidateOptions = {}): Issue[] {
+  return validateProfile({
+    schemaVersion: "xck.v1",
+    inbounds: [draft]
+  }, options).issues.map((issue) => ({
+    ...issue,
+    path: issue.path.replace(/^\/inbounds\/1/, "")
+  }));
+}
+
+export function validateRoutingRuleDraft(draft: RoutingRule, options: ValidateOptions = {}): Issue[] {
+  return validateProfile({
+    schemaVersion: "xck.v1",
+    inbounds: [],
+    routing: {
+      rules: [draft]
+    }
+  }, options).issues.map((issue) => ({
+    ...issue,
+    path: issue.path.replace(/^\/routing\/rules\/0/, "")
+  }));
+}
+
+export function validateOutboundDraft(draft: Outbound, options: ValidateOptions = {}): Issue[] {
+  return validateProfile({
+    schemaVersion: "xck.v1",
+    inbounds: [],
+    outbounds: [draft]
+  }, options).issues.map((issue) => ({
+    ...issue,
+    path: issue.path.replace(/^\/outbounds\/1/, "")
+  }));
+}

@@ -3,8 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v uv >/dev/null || { echo "uv is required" >&2; exit 2; }
 uv lock --check
-uv run --no-project --python 3.14 python -m compileall -q app cli dashboard/__init__.py main.py waylane-cli.py
+uv run --no-project --python 3.14 python -m compileall -q app cli waylane_node_bridge dashboard/__init__.py main.py waylane-cli.py
 test -f LICENSE
+test -f waylane_node_bridge/LICENSE
 test -f app/templates/subscription/index.html
 test -f dashboard/__init__.py
 # Retain the exact historical PasarGuard revision lineage for in-place upgrades.
@@ -87,4 +88,4 @@ assert len(defaults["client_templates"]) == 5
 assert isinstance(defaults["settings"][0]["notification_settings"], dict)
 assert "jwt" not in defaults and "admins" not in defaults
 PYTHON
-echo "WayLane backend bootstrap verification passed (syntax/lock/assets and PasarGuard lineage)."
+echo "WayLane backend verification passed (vendor bridge, syntax, lock, assets, migration lineage)."

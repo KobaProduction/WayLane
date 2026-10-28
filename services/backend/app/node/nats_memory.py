@@ -1,4 +1,4 @@
-"""NATS JetStream KV backends for pasarguard-node-bridge shared memory."""
+"""NATS JetStream KV backends for WayLane node bridge shared memory."""
 
 from __future__ import annotations
 

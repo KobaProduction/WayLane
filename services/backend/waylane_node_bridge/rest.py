@@ -1,2 +1,696 @@
-"""REST transport implementation shared with the existing node."""
-from PasarGuardNodeBridge.rest import Node
+import asyncio
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import TypeVar, overload
+
+import aiohttp
+from google.protobuf.message import DecodeError, Message
+
+from waylane_node_bridge.abstract_node import WayLaneNode
+from waylane_node_bridge.aiohttp_compat import BufferedStatusError, LazyClientSession, buffer_response, make_timeout
+from waylane_node_bridge.common import service_pb2 as service
+from waylane_node_bridge.controller import FailedUsers, Health, NodeAPIError
+from waylane_node_bridge.storage import LifecycleOperation, LifecycleStatus
+from waylane_node_bridge.utils import format_host_for_url
+
+ProtoMessageT = TypeVar("ProtoMessageT", bound=Message)
+
+
+class Node(WayLaneNode):
+    def __init__(
+        self,
+        address: str,
+        port: int,
+        api_port: int,
+        server_ca: str,
+        api_key: str,
+        name: str = "default",
+        extra: dict | None = None,
+        logger: logging.Logger | None = None,
+        default_timeout: int = 10,
+        internal_timeout: int = 15,
+        proxy: str | None = None,
+        **kwargs,
+    ):
+        host_for_url = format_host_for_url(address)
+        service_url = f"https://{host_for_url}:{api_port}/"
+        super().__init__(
+            server_ca,
+            api_key,
+            service_url,
+            name,
+            extra,
+            logger,
+            default_timeout,
+            internal_timeout,
+            proxy,
+            **kwargs,
+        )
+
+        url = f"https://{host_for_url}:{port}/"
+        self._client = LazyClientSession(
+            ssl_context=self.ctx,
+            headers={"Content-Type": "application/x-protobuf", "x-api-key": api_key},
+            base_url=url,
+            timeout=make_timeout(None),
+            connector_factory=None if self._proxy is None else self._proxy.aiohttp_connector_factory,
+            proxy=None if self._proxy is None else self._proxy.aiohttp_proxy_url,
+            proxy_auth=None if self._proxy is None else self._proxy.aiohttp_proxy_auth,
+        )
+
+        self._node_lock = asyncio.Lock()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.stop()
+        await self._client.close()
+        await self._json_client.close()
+
+    def _serialize_protobuf(self, proto_message: Message) -> bytes:
+        """Serialize a protobuf message to bytes."""
+        return proto_message.SerializeToString()
+
+    def _deserialize_protobuf(self, proto_class: type[ProtoMessageT], data: bytes) -> ProtoMessageT:
+        """Deserialize bytes into a protobuf message."""
+        proto_instance = proto_class()
+        try:
+            proto_instance.ParseFromString(data)
+        except DecodeError as e:
+            raise NodeAPIError(code=-2, detail=f"Error deserialising protobuf: {e}")
+        return proto_instance
+
+    def _handle_error(self, error: BaseException):
+        if isinstance(error, aiohttp.ServerDisconnectedError):
+            raise NodeAPIError(code=500, detail=f"Server closed connection: {error}")
+        elif isinstance(error, aiohttp.ClientConnectorError):
+            # Connection errors (connection refused, DNS errors, etc.) are NOT timeouts
+            raise NodeAPIError(code=-2, detail=f"Connection error: {error}")
+        elif isinstance(error, (aiohttp.ServerTimeoutError, asyncio.TimeoutError)):
+            # Only actual timeouts should be classified as timeout errors
+            raise NodeAPIError(code=-1, detail=f"Timeout error: {error}")
+        elif isinstance(error, aiohttp.ClientConnectionError):
+            # Other network errors (not connection errors or timeouts) are NOT timeouts
+            raise NodeAPIError(code=-2, detail=f"Network error: {error}")
+        elif isinstance(error, BufferedStatusError):
+            raise NodeAPIError(code=error.response.status_code, detail=f"HTTP error: {error.response.text}")
+        elif isinstance(error, aiohttp.ClientResponseError):
+            raise NodeAPIError(code=error.status, detail=f"HTTP error: {error.message}")
+        else:
+            raise NodeAPIError(0, str(error))
+
+    @overload
+    async def _make_request(
+        self,
+        method: str,
+        endpoint: str,
+        timeout: int,
+        *,
+        proto_response_class: type[ProtoMessageT],
+    ) -> ProtoMessageT: ...
+
+    @overload
+    async def _make_request(
+        self,
+        method: str,
+        endpoint: str,
+        timeout: int,
+        proto_message: Message | None,
+        proto_response_class: type[ProtoMessageT],
+    ) -> ProtoMessageT: ...
+
+    @overload
+    async def _make_request(
+        self,
+        method: str,
+        endpoint: str,
+        timeout: int,
+        proto_message: Message | None = None,
+        proto_response_class: None = None,
+    ) -> bytes: ...
+
+    async def _make_request(
+        self,
+        method: str,
+        endpoint: str,
+        timeout: int,
+        proto_message: Message | None = None,
+        proto_response_class: type[ProtoMessageT] | None = None,
+    ) -> ProtoMessageT | bytes:
+        """Handle common REST API call logic with protobuf support (async)."""
+        request_data = None
+
+        if proto_message:
+            request_data = self._serialize_protobuf(proto_message)
+
+        try:
+            async with self._client.request(
+                method=method, url=endpoint, data=request_data, timeout=make_timeout(timeout)
+            ) as raw_response:
+                response = await buffer_response(raw_response)
+            response.raise_for_status()
+
+            if proto_response_class:
+                return self._deserialize_protobuf(proto_response_class, response.content)
+            return response.content
+
+        except Exception as e:
+            self._handle_error(e)
+            raise AssertionError("unreachable")
+
+    async def start(
+        self,
+        config: str,
+        backend_type: service.BackendType,
+        users: list[service.User],
+        keep_alive: int = 0,
+        exclude_inbounds: list[str] | None = None,
+        timeout: int | None = None,
+    ) -> service.BaseInfoResponse | None:
+        """Start the node with proper task management"""
+        exclude_inbounds = exclude_inbounds or []
+        timeout = timeout or self._default_timeout
+        health = await self.get_health()
+        if health is Health.INVALID:
+            raise NodeAPIError(code=-4, detail="Invalid node")
+
+        lease = await self._acquire_lifecycle_lease(LifecycleOperation.START)
+        try:
+            async with self._node_lock:
+                response = await self._make_request(
+                    method="POST",
+                    endpoint="start",
+                    timeout=timeout,
+                    proto_message=service.Backend(
+                        type=backend_type,
+                        config=config,
+                        users=users,
+                        keep_alive=keep_alive,
+                        exclude_inbounds=exclude_inbounds,
+                    ),
+                    proto_response_class=service.BaseInfoResponse,
+                )
+
+                if not response.started:
+                    raise NodeAPIError(500, "Failed to start the node")
+
+                try:
+                    await self.connect(response.node_version, response.core_version)
+                except BaseException as e:
+                    await self.disconnect()
+                    self._handle_error(e)
+                self._clear_rejected_users()
+
+            await self._release_lifecycle_lease(
+                lease,
+                LifecycleStatus.HEALTHY,
+                desired=LifecycleStatus.HEALTHY,
+                node_version=response.node_version,
+                core_version=response.core_version,
+            )
+            return response
+        except BaseException:
+            await self._release_lifecycle_lease(lease, LifecycleStatus.BROKEN, desired=LifecycleStatus.HEALTHY)
+            raise
+
+    async def stop(self, timeout: int | None = None) -> None:
+        """Stop the node with proper cleanup"""
+        timeout = timeout or self._default_timeout
+        try:
+            if await self.get_health() is Health.NOT_CONNECTED:
+                return
+
+            lease = await self._acquire_lifecycle_lease(LifecycleOperation.STOP)
+            try:
+                async with self._node_lock:
+                    await self.disconnect()
+
+                    try:
+                        await self._make_request(method="PUT", endpoint="stop", timeout=timeout)
+                    except Exception as e:
+                        self.logger.debug(
+                            f"[{self.name}] Best-effort stop request failed | Error: {type(e).__name__} - {e!s}"
+                        )
+                    await self._release_lifecycle_lease(
+                        lease, LifecycleStatus.STOPPED, desired=LifecycleStatus.STOPPED
+                    )
+            except BaseException:
+                await self._release_lifecycle_lease(lease, LifecycleStatus.BROKEN, desired=LifecycleStatus.STOPPED)
+                raise
+        finally:
+            await self._client.close()
+            await self._json_client.close()
+
+    async def info(self, timeout: int | None = None) -> service.BaseInfoResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET", endpoint="info", timeout=timeout, proto_response_class=service.BaseInfoResponse
+        )
+
+    async def get_system_stats(self, timeout: int | None = None) -> service.SystemStatsResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET", endpoint="stats/system", timeout=timeout, proto_response_class=service.SystemStatsResponse
+        )
+
+    async def get_backend_stats(self, timeout: int | None = None) -> service.BackendStatsResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET", endpoint="stats/backend", timeout=timeout, proto_response_class=service.BackendStatsResponse
+        )
+
+    async def get_stats(
+        self, stat_type: service.StatType, reset: bool = True, name: str = "", timeout: int | None = None
+    ) -> service.StatResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET",
+            endpoint="stats",
+            timeout=timeout,
+            proto_message=service.StatRequest(reset=reset, name=name, type=stat_type),
+            proto_response_class=service.StatResponse,
+        )
+
+    async def get_outbounds_latency(self, name: str = "", timeout: int | None = None) -> service.LatencyResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET",
+            endpoint="stats/latency",
+            timeout=timeout,
+            proto_message=service.LatencyRequest(name=name),
+            proto_response_class=service.LatencyResponse,
+        )
+
+    async def get_user_online_stats(self, email: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET",
+            endpoint="stats/user/online",
+            timeout=timeout,
+            proto_message=service.StatRequest(name=email),
+            proto_response_class=service.OnlineStatResponse,
+        )
+
+    async def get_user_online_ip_list(
+        self, email: str, timeout: int | None = None
+    ) -> service.StatsOnlineIpListResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET",
+            endpoint="stats/user/online_ip",
+            timeout=timeout,
+            proto_message=service.StatRequest(name=email),
+            proto_response_class=service.StatsOnlineIpListResponse,
+        )
+
+    async def sync_users(
+        self, users: list[service.User], flush_pending: bool = False, timeout: int | None = None
+    ) -> service.Empty | None:
+        timeout = timeout or self._default_timeout
+        if flush_pending:
+            await self.flush_pending_users()
+
+        async with self._node_lock:
+            response = await self._make_request(
+                method="PUT",
+                endpoint="users/sync",
+                timeout=timeout,
+                proto_message=service.Users(users=users),
+                proto_response_class=service.Empty,
+            )
+        self._clear_rejected_users()
+        return response
+
+    async def sync_users_chunked(
+        self,
+        users: list[service.User],
+        chunk_size: int = 100,
+        flush_pending: bool = False,
+        timeout: int | None = None,
+    ) -> list[service.User]:
+        """Stream UsersChunk messages over HTTP/2 for large sync operations. Returns failed users."""
+        if chunk_size <= 0:
+            raise NodeAPIError(code=-2, detail="chunk_size must be positive")
+
+        timeout = timeout or self._default_timeout
+        if flush_pending:
+            await self.flush_pending_users()
+
+        def _encode_varint(value: int) -> bytes:
+            encoded = bytearray()
+            while True:
+                to_write = value & 0x7F
+                value >>= 7
+                if value:
+                    encoded.append(to_write | 0x80)
+                else:
+                    encoded.append(to_write)
+                    break
+            return bytes(encoded)
+
+        async def _iter_chunks():
+            # Send a terminating empty chunk when no users are provided
+            if not users:
+                chunk_bytes = self._serialize_protobuf(service.UsersChunk(index=0, last=True))
+                yield _encode_varint(len(chunk_bytes)) + chunk_bytes
+                return
+
+            total_users = len(users)
+            for index, start in enumerate(range(0, total_users, chunk_size)):
+                chunk_users = users[start : start + chunk_size]
+                chunk_bytes = self._serialize_protobuf(
+                    service.UsersChunk(users=chunk_users, index=index, last=start + chunk_size >= total_users)
+                )
+                # Length-prefix each protobuf chunk to preserve framing server-side
+                yield _encode_varint(len(chunk_bytes)) + chunk_bytes
+
+        async with self._node_lock:
+            try:
+                async with self._client.request(
+                    method="PUT",
+                    url="users/sync/chunked",
+                    data=_iter_chunks(),
+                    timeout=make_timeout(timeout),
+                ) as raw_response:
+                    response = await buffer_response(raw_response)
+                    response.raise_for_status()
+                    data = response.content
+                    self._deserialize_protobuf(service.Empty, data)
+                    return []
+            except Exception as e:
+                error_type = type(e).__name__
+                self.logger.warning(
+                    f"[{self.name}] Chunked REST sync failed for {len(users)} user(s) | Error: {error_type} - {e!s}"
+                )
+                # The node answers 500 with its backend's error when it refused the batch. It answers
+                # "backend not initialized" or "backend is not started" (also 500) or 503 when no core
+                # runs: not a rejection.
+                detail = e.response.text.strip() if isinstance(e, BufferedStatusError) else ""
+                rejected = (
+                    isinstance(e, BufferedStatusError)
+                    and e.response.status_code == 500
+                    and detail not in ("backend not initialized", "backend is not started")
+                )
+                return FailedUsers(users, rejected=rejected, detail=detail if rejected else str(e))
+
+    async def list_routing_rules(self, timeout: int | None = None) -> service.RoutingRulesResponse | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="GET",
+            endpoint="routing/rules",
+            timeout=timeout,
+            proto_response_class=service.RoutingRulesResponse,
+        )
+
+    async def get_balancer_info(self, tag: str, timeout: int | None = None) -> service.BalancerInfoResponse | None:
+        timeout = timeout or self._default_timeout
+        # POST (not GET): the request carries a protobuf body, which GET does not
+        # reliably support through clients and intermediaries. Matches the node.
+        return await self._make_request(
+            method="POST",
+            endpoint="routing/balancer",
+            timeout=timeout,
+            proto_message=service.BalancerInfoRequest(tag=tag),
+            proto_response_class=service.BalancerInfoResponse,
+        )
+
+    async def test_route(
+        self,
+        inbound_tag: str = "",
+        network: str = "",
+        target_ip: str = "",
+        target_domain: str = "",
+        target_port: int = 0,
+        protocol: str = "",
+        user: str = "",
+        attributes: dict[str, str] | None = None,
+        field_selectors: list[str] | None = None,
+        publish_result: bool = False,
+        timeout: int | None = None,
+    ) -> service.RouteResult | None:
+        timeout = timeout or self._default_timeout
+        return await self._make_request(
+            method="POST",
+            endpoint="routing/test",
+            timeout=timeout,
+            proto_message=service.TestRouteRequest(
+                inbound_tag=inbound_tag,
+                network=network,
+                target_ip=target_ip,
+                target_domain=target_domain,
+                target_port=target_port,
+                protocol=protocol,
+                user=user,
+                attributes=attributes or {},
+                field_selectors=field_selectors or [],
+                publish_result=publish_result,
+            ),
+            proto_response_class=service.RouteResult,
+        )
+
+    async def add_routing_rule(
+        self, rule: str, should_reset: bool = False, timeout: int | None = None
+    ) -> service.Empty | None:
+        timeout = timeout or self._default_timeout
+        # Serialize state-changing routing calls under the node lock, like the other
+        # mutating ops (start/stop/sync_users), so a rule change can't race a
+        # concurrent core restart (read-only routing methods stay lock-free).
+        async with self._node_lock:
+            return await self._make_request(
+                method="PUT",
+                endpoint="routing/rules",
+                timeout=timeout,
+                proto_message=service.AddRoutingRuleRequest(rule=rule, should_reset=should_reset),
+                proto_response_class=service.Empty,
+            )
+
+    async def remove_routing_rule(self, rule_tag: str, timeout: int | None = None) -> service.Empty | None:
+        timeout = timeout or self._default_timeout
+        async with self._node_lock:
+            return await self._make_request(
+                method="DELETE",
+                endpoint="routing/rules",
+                timeout=timeout,
+                proto_message=service.RemoveRoutingRuleRequest(rule_tag=rule_tag),
+                proto_response_class=service.Empty,
+            )
+
+    async def override_balancer_target(
+        self, balancer_tag: str, target: str, timeout: int | None = None
+    ) -> service.Empty | None:
+        timeout = timeout or self._default_timeout
+        async with self._node_lock:
+            return await self._make_request(
+                method="PUT",
+                endpoint="routing/balancer/override",
+                timeout=timeout,
+                proto_message=service.OverrideBalancerTargetRequest(balancer_tag=balancer_tag, target=target),
+                proto_response_class=service.Empty,
+            )
+
+    async def _sync_batch_users(self, users: list[service.User]) -> list[service.User]:
+        """Sync users individually via PUT user/sync. Returns failed users."""
+        failed = []
+        for user in users:
+            try:
+                await self._make_request(
+                    method="PUT",
+                    endpoint="user/sync",
+                    timeout=self._internal_timeout,
+                    proto_message=user,
+                    proto_response_class=service.Empty,
+                )
+            except Exception as e:
+                error_type = type(e).__name__
+                self.logger.warning(f"[{self.name}] Failed to sync user {user.email} | Error: {error_type} - {e!s}")
+                failed.append(user)
+        return failed
+
+    async def _check_node_health(self):
+        """Health check task with proper cancellation handling"""
+        health_check_interval = 10
+        max_retries = 3
+        retry_delay = 2
+        retries = 0
+        self.logger.debug(f"[{self.name}] Health check task started")
+
+        try:
+            while not self.is_shutting_down():
+                last_health = await self.get_health()
+
+                if last_health in (Health.NOT_CONNECTED, Health.INVALID):
+                    self.logger.debug(f"[{self.name}] Health check task stopped due to node state: {last_health.name}")
+                    break
+
+                try:
+                    await asyncio.wait_for(self.get_backend_stats(), timeout=10)
+                    # Only update to HEALTHY if we were BROKEN or NOT_CONNECTED
+                    if last_health in (Health.BROKEN, Health.NOT_CONNECTED):
+                        self.logger.debug(f"[{self.name}] Node health is HEALTHY")
+                        await self.set_health(Health.HEALTHY)
+                    retries = 0
+                except Exception as e:
+                    retries += 1
+                    error_type = type(e).__name__
+                    if retries >= max_retries:
+                        if last_health != Health.BROKEN:
+                            self.logger.error(
+                                f"[{self.name}] Health check failed after {max_retries} retries, setting health to BROKEN | "
+                                f"Error: {error_type} - {e!s}"
+                            )
+                            await self.set_health(Health.BROKEN)
+                    else:
+                        self.logger.warning(
+                            f"[{self.name}] Health check failed, retry {retries}/{max_retries} in {retry_delay}s | "
+                            f"Error: {error_type} - {e!s}"
+                        )
+                        await asyncio.sleep(retry_delay)
+                        continue
+
+                try:
+                    await asyncio.wait_for(asyncio.sleep(health_check_interval), timeout=health_check_interval + 1)
+                except TimeoutError:
+                    continue
+
+        except asyncio.CancelledError:
+            self.logger.debug(f"[{self.name}] Health check task cancelled")
+        except Exception as e:
+            error_type = type(e).__name__
+            self.logger.exception(f"[{self.name}] Unexpected error in health check task | Error: {error_type}")
+            try:
+                await self.set_health(Health.BROKEN)
+            except Exception as e_set_health:
+                error_type_set = type(e_set_health).__name__
+                self.logger.exception(f"[{self.name}] Failed to set health to BROKEN | Error: {error_type_set}")
+        finally:
+            self.logger.debug(f"[{self.name}] Health check task finished")
+
+    @asynccontextmanager
+    async def stream_logs(self, max_queue_size: int = 1000) -> AsyncGenerator[asyncio.Queue[str | NodeAPIError], None]:
+        """Context manager for streaming logs on-demand.
+
+        Yields a queue that receives log messages in real-time.
+        The stream is automatically closed when the context exits.
+
+        IMPORTANT: When an error occurs during log streaming, a NodeAPIError instance
+        is placed in the queue. You must check the type of each item received from
+        the queue and raise it if it's an error.
+
+        Args:
+            max_queue_size: Maximum size of the log queue
+
+        Yields:
+            asyncio.Queue containing log messages (str) or NodeAPIError on failure
+
+        Raises:
+            NodeAPIError: If the stream fails to open or encounters errors during operation
+
+        Example:
+            try:
+                async with node.stream_logs() as log_queue:
+                    while True:
+                        item = await log_queue.get()
+                        # Check if we received an error
+                        if isinstance(item, NodeAPIError):
+                            raise item
+                        # Process the log message
+                        print(f"LOG: {item}")
+            except NodeAPIError as e:
+                print(f"Log stream failed: {e.code} - {e.detail}")
+                # Reconnect or handle error
+        """
+        log_queue: asyncio.Queue[str | NodeAPIError] = asyncio.Queue(maxsize=max_queue_size)
+        stream_task: asyncio.Task[None] | None = None
+
+        async def _receive_logs(response: aiohttp.ClientResponse) -> None:
+            """Receive log messages from HTTP stream and put them in the queue."""
+            try:
+                buffer = b""
+                async for chunk in response.content.iter_any():
+                    buffer += chunk
+
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        line = line.decode().strip()
+
+                        if line:
+                            try:
+                                await log_queue.put(line)
+                            except asyncio.QueueFull:
+                                # Drop oldest log if queue is full
+                                try:
+                                    log_queue.get_nowait()
+                                    await log_queue.put(line)
+                                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                                    pass
+            except asyncio.CancelledError:
+                self.logger.debug(f"[{self.name}] Log stream receive task cancelled")
+                raise
+            except (aiohttp.ClientPayloadError, aiohttp.ServerDisconnectedError) as e:
+                # Stream was closed intentionally, this is expected during cleanup
+                self.logger.debug(f"[{self.name}] Log stream closed: {type(e).__name__}")
+            except Exception as e:
+                error_type = type(e).__name__
+                self.logger.error(f"[{self.name}] Error receiving logs | Error: {error_type} - {e!s}")
+                # Convert exception to NodeAPIError and put directly into log queue
+                # so user gets immediate notification when reading
+                try:
+                    self._handle_error(e)
+                except NodeAPIError as api_error:
+                    try:
+                        # Put error into log queue for immediate detection
+                        log_queue.put_nowait(api_error)
+                    except asyncio.QueueFull:
+                        pass
+
+        response = None
+        try:
+            self.logger.debug(f"[{self.name}] Opening on-demand log stream")
+            response = await self._client.get("/logs", timeout=make_timeout(None))
+            if response.status >= 400:
+                buffered_response = await buffer_response(response)
+                buffered_response.raise_for_status()
+            self.logger.debug(f"[{self.name}] On-demand log stream opened successfully")
+
+            # Start background task to receive logs
+            stream_task = asyncio.create_task(_receive_logs(response))
+
+            try:
+                # Yield the queue to the caller
+                yield log_queue
+
+                # After context exits, check if background task failed
+                if stream_task.done():
+                    exc = stream_task.exception()
+                    if exc and not isinstance(exc, asyncio.CancelledError):
+                        self._handle_error(exc)
+            finally:
+                # Cleanup: Close HTTP stream first to interrupt the content iterator.
+                if response is not None:
+                    try:
+                        response.close()
+                    except Exception as e:
+                        self.logger.debug(
+                            f"[{self.name}] Failed to close HTTP stream | Error: {type(e).__name__} - {e!s}"
+                        )
+
+                # Then cancel and wait for background task to finish
+                if stream_task and not stream_task.done():
+                    stream_task.cancel()
+                    try:
+                        await asyncio.wait_for(stream_task, timeout=1.0)
+                    except (TimeoutError, asyncio.CancelledError):
+                        pass
+
+        except NodeAPIError:
+            # Already a NodeAPIError, re-raise as-is
+            raise
+        except Exception as e:
+            error_type = type(e).__name__
+            self.logger.error(f"[{self.name}] Failed to open log stream | Error: {error_type} - {e!s}")
+            # Convert to NodeAPIError
+            self._handle_error(e)
+        finally:
+            self.logger.debug(f"[{self.name}] On-demand log stream closed")

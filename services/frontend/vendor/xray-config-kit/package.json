@@ -1,0 +1,88 @@
+{
+  "name": "@waylane/xray-config-kit",
+  "version": "0.4.1",
+  "description": "WayLane-maintained source module adapted from Version-aware TypeScript engine for generating, validating, importing, analyzing, and exporting Xray-core configuration JSON.",
+  "type": "module",
+  "packageManager": "bun",
+  "license": "AGPL-3.0",
+  "author": "PasarGuard",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KobaProduction/waylane.git",
+    "directory": "services/frontend/vendor/xray-config-kit"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./frontend": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas/index.d.ts",
+      "default": "./dist/schemas/index.js"
+    },
+    "./presets": {
+      "types": "./dist/presets/index.d.ts",
+      "default": "./dist/presets/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "default": "./dist/adapters/index.js"
+    },
+    "./generators": {
+      "types": "./dist/generators/index.d.ts",
+      "default": "./dist/generators/index.js"
+    },
+    "./generators/core-config": {
+      "types": "./dist/generators/core-config.d.ts",
+      "default": "./dist/generators/core-config.js"
+    },
+    "./xray-json": {
+      "types": "./dist/xray-json/index.d.ts",
+      "default": "./dist/xray-json/index.js"
+    },
+    "./exporters/client-links": {
+      "types": "./dist/exporters/client-links.d.ts",
+      "default": "./dist/exporters/client-links.js"
+    },
+    "./exporters/subscriptions": {
+      "types": "./dist/exporters/subscriptions.d.ts",
+      "default": "./dist/exporters/subscriptions.js"
+    },
+    "./exporters/uris": {
+      "types": "./dist/exporters/uris.d.ts",
+      "default": "./dist/exporters/uris.js"
+    },
+    "./exporters/wireguard": {
+      "types": "./dist/exporters/wireguard.d.ts",
+      "default": "./dist/exporters/wireguard.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "generate:parity": "bun scripts/generate-xray-parity-manifest.ts --config xray-parity.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
+  },
+  "dependencies": {
+    "@noble/post-quantum": "^0.5.4",
+    "@stablelib/x25519": "^2.0.1",
+    "mlkem": "^2.7.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "private": true
+}

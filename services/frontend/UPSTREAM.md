@@ -7,14 +7,19 @@ No external subscription-template source is imported.
 
 ## Legacy compatibility intentionally retained
 
-- `@pasarguard/*` npm modules are external published validation/configuration dependencies. Do not rename imports until corresponding WayLane packages have been published.
-- Existing `pasarguard-*` browser preference storage keys are retained so current users' settings survive rebranding.
+- Configuration kits are vendored as local `@waylane/*` workspaces with original AGPL-3.0 licensing and copyright preserved.
+- New browser preference keys use `waylane-*`; migration of prior browser-local preferences is separate.
 - Release checks now target WayLane's own GitHub repositories; without published releases, no updater should claim newer versions.
 - Upstream fundraising, donations and advertising fetches have been removed from the WayLane UI.
 - Original artwork was not redistributed as a WayLane logo. A dedicated identity/favicon is a separate design task.
 
 **Licensing:** existing GitHub root `LICENSE` (MIT) is retained as authored by Koba Production, but derived PasarGuard code is governed by `LICENSE.UPSTREAM` (AGPL-3.0 for panel/frontend or GPL-3.0 for node). See `LICENSING.md`.
 
-## Third-party configuration kit namespace
+## Integrated config kits (source vendoring)
 
-The WayLane frontend imports `@waylane/core-kit`, `@waylane/xray-config-kit` and `@waylane/wireguard-config-kit`. These currently resolve through pinned npm aliases to upstream `@pasarguard/*` published packages. Bun lockfile retains their actual registry identities and integrity hashes; this is not a new library fork or a protocol change.
+The WayLane frontend builds local workspace packages `@waylane/core-kit`,
+`@waylane/xray-config-kit` and `@waylane/wireguard-config-kit` from
+`services/frontend/vendor/`. The published `@pasarguard/*` npm dependencies
+are no longer downloaded. Per-package `UPSTREAM.md`, `LICENSE`
+and `COMMERCIAL_LICENSE.md` preserve upstream provenance and
+AGPL-3.0 licensing. The packaged binaries are compiled from checked-in source.

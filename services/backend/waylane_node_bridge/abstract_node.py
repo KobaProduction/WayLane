@@ -1,0 +1,122 @@
+from abc import ABC, abstractmethod
+from asyncio import Queue
+from contextlib import AbstractAsyncContextManager
+
+from waylane_node_bridge.common import service_pb2 as service
+from waylane_node_bridge.controller import Controller, NodeAPIError
+
+
+class WayLaneNode(Controller, ABC):
+    @abstractmethod
+    async def start(
+        self,
+        config: str,
+        backend_type: service.BackendType,
+        users: list[service.User],
+        keep_alive: int = 0,
+        exclude_inbounds: list[str] | None = None,
+        timeout: int | None = None,
+    ) -> service.BaseInfoResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def stop(self, timeout: int | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def info(self, timeout: int | None = None) -> service.BaseInfoResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_system_stats(self, timeout: int | None = None) -> service.SystemStatsResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_backend_stats(self, timeout: int | None = None) -> service.BackendStatsResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_stats(
+        self, stat_type: service.StatType, reset: bool = True, name: str = "", timeout: int | None = None
+    ) -> service.StatResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_outbounds_latency(self, name: str = "", timeout: int | None = None) -> service.LatencyResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_user_online_stats(self, email: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_user_online_ip_list(
+        self, email: str, timeout: int | None = None
+    ) -> service.StatsOnlineIpListResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def sync_users(
+        self, users: list[service.User], flush_pending: bool = False, timeout: int | None = None
+    ) -> service.Empty | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def sync_users_chunked(
+        self, users: list[service.User], chunk_size: int = 100, flush_pending: bool = False, timeout: int | None = None
+    ) -> list[service.User]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def list_routing_rules(self, timeout: int | None = None) -> service.RoutingRulesResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_balancer_info(self, tag: str, timeout: int | None = None) -> service.BalancerInfoResponse | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def test_route(
+        self,
+        inbound_tag: str = "",
+        network: str = "",
+        target_ip: str = "",
+        target_domain: str = "",
+        target_port: int = 0,
+        protocol: str = "",
+        user: str = "",
+        attributes: dict[str, str] | None = None,
+        field_selectors: list[str] | None = None,
+        publish_result: bool = False,
+        timeout: int | None = None,
+    ) -> service.RouteResult | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def add_routing_rule(
+        self, rule: str, should_reset: bool = False, timeout: int | None = None
+    ) -> service.Empty | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def remove_routing_rule(self, rule_tag: str, timeout: int | None = None) -> service.Empty | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def override_balancer_target(
+        self, balancer_tag: str, target: str, timeout: int | None = None
+    ) -> service.Empty | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def _check_node_health(self):
+        raise NotImplementedError
+
+    @abstractmethod
+    async def _sync_batch_users(self, users: list[service.User]) -> list[service.User]:
+        """Sync a batch of users individually. Returns list of failed users to requeue."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def stream_logs(self, max_queue_size: int = 1000) -> AbstractAsyncContextManager[Queue[str | NodeAPIError]]:
+        raise NotImplementedError

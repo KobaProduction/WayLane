@@ -2,11 +2,13 @@
 FROM oven/bun:1.4.4-alpine AS builder
 WORKDIR /app
 COPY package.json bun.lock ./
+COPY vendor ./vendor
 RUN bun install --frozen-lockfile
 COPY . .
 # Existing public browser API base, configurable at image build time.
 ARG VITE_BASE_API=/
 ENV VITE_BASE_API=${VITE_BASE_API}
+RUN bun run build:vendor-kits
 RUN bun run build
 RUN test -f build/index.html && test -d build/statics
 

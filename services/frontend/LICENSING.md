@@ -22,3 +22,12 @@ Existing upstream-derived code does **not** become MIT by renaming names,
 reformatting, relocating files, or deleting a license notice. Remove the
 upstream code and the corresponding copyleft obligations only once a
 verified clean replacement is available; maintain attribution until then.
+
+## Bundled configuration libraries
+
+The three `vendor/*` source packages are adapted from upstream
+AGPL-3.0-licensed configuration kits. Each retains a full `LICENSE`,
+`COMMERCIAL_LICENSE.md`, and `UPSTREAM.md` documenting the pinned source
+revision. Their use does not turn the code into MIT-licensed WayLane code.
+The frontend now builds these packages itself instead of fetching the
+upstream published npm artifacts.

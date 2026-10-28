@@ -10,10 +10,10 @@ template is included.
 
 ## Legacy compatibility intentionally retained
 
-- The published `pasarguard-node-bridge` dependency is isolated behind `waylane_node_bridge/`. The app and tests use the WayLane facade while Python package names and protobuf wire identities remain unchanged until a separately tested fork/release is available.
-- `pasarguard.*` NATS subjects and `pasarguard_*` JetStream KV buckets are existing persistent protocol/state identifiers and remain unchanged until a dual-read, dual-write migration.
+- The full GPL-3.0 Python node bridge source (upstream `pasarguard-node-bridge` v0.9.4) is integrated in `waylane_node_bridge/`, with original LICENSE and source attribution. No external PyPI bridge package is installed. Generated protobuf descriptors still carry their original schema identity for node interoperability.
+- `waylane.*` NATS subjects and `waylane_*` JetStream KV buckets are defaults for a **new** deployment. Prior clusters with persisted `pasarguard.*` subject/bucket names need a separately planned state migration; no dual-read is automatically enabled.
 - Existing provider API response shapes, subscription tokens and panel-node transport remain compatible.
-- Old `pasarguard-cli` and `pasarguard-tui` aliases remain temporarily available, while the new commands are `waylane-cli` and `waylane-tui`.
+- The container exposes `waylane-cli` and `waylane-tui` directly. Historic command aliases are not required by the fresh deployment.
 - Runtime storage paths and log names are not silently migrated.
 
 **Licensing:** existing GitHub root `LICENSE` (MIT) is retained as authored by Koba Production, but derived PasarGuard code is governed by `LICENSE.UPSTREAM` (AGPL-3.0 for panel/frontend or GPL-3.0 for node). See `LICENSING.md`.
