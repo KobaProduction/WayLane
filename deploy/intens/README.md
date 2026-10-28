@@ -23,6 +23,10 @@ Backend telemetry goes to the private collector on port 4318 without distributin
 
 DEV: WAYLANE_PULL_POLICY=build and default local image tags work with the Git-backed source. PROD: require verified GHCR image digests for frontend and backend and WAYLANE_PULL_POLICY=always. This Compose retains build metadata and is **not production approved** without a separate image/release acceptance review.
 
+## First managed administrator
+
+Once the backend Alembic migrations succeed, use the interactive Coolify Terminal for the backend and run waylane-cli generate-temp-key. The CLI now uses the same PostgreSQL identity as the API rather than silently falling back to a local SQLite file. Pass the one-use key (valid five minutes) to POST /api/setup/owner with a secure owner password; never record the key in chat or CI logs. This setup neither uses the PostgreSQL superuser nor the local-development-only init-owner command. Verify owner login, then issue a scoped pg_key_* management API key for the VPN Core provider adapter.
+
 ## Acceptance
 
 Verify in Coolify's Deployable Compose that there are two services, one named volume, correct external private network, valid mounts and only the frontend receives a generated domain. Then verify the frontend health, same-origin /api/ login, /sub/ routing and log sanitization, database migrations, panel persistence, telemetry and restart/rollback. Existing WayLane admin authorization is still legacy: merely connecting this deployment to a ZITADEL-capable infrastructure does **not** implement ZITADEL OIDC.

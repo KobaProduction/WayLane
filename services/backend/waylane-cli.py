@@ -10,6 +10,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 try:
+    # docker exec does not inherit the SQLALCHEMY_DATABASE_URL dynamically
+    # assembled inside the already-running API process.
+    import os
+
+    if not os.environ.get("SQLALCHEMY_DATABASE_URL") and any(
+        os.environ.get(name) for name in ("POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD")
+    ):
+        from compose_db_entrypoint import configure_database_url_from_components
+
+        configure_database_url_from_components()
+
     from cli.main import app
 
     if len(sys.argv) == 1:

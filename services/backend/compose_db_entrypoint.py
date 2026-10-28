@@ -9,7 +9,8 @@ import os
 from sqlalchemy.engine import URL
 
 
-def main() -> None:
+def configure_database_url_from_components() -> None:
+    """Recreate the API database URL for one-shot managed CLI commands."""
     username = os.getenv("POSTGRES_USER", "")
     password = os.getenv("POSTGRES_PASSWORD", "")
     database = os.getenv("POSTGRES_DB") or "waylane"
@@ -21,6 +22,10 @@ def main() -> None:
         port=5432, database=database,
     )
     os.environ["SQLALCHEMY_DATABASE_URL"] = url.render_as_string(hide_password=False)
+
+
+def main() -> None:
+    configure_database_url_from_components()
     os.execv("/code/start.sh", ["/code/start.sh"])
 
 
