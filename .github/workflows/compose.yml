@@ -57,7 +57,7 @@ jobs:
           docker compose -f services/backend/docker-compose.coolify.yaml config --quiet
           docker compose -f services/frontend/docker-compose.yaml config --quiet
           docker compose -f services/frontend/docker-compose.coolify.yaml config --quiet
-          docker compose -f           docker compose -f       - name: Verify required DB variable enforcement
+      - name: Verify required DB variable enforcement
         run: |
           set -euo pipefail
           if env -u WAYLANE_POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ $# -ne 1 || ! -f "$1/index.html" || ! -d "$1/statics" ]]; then
-  echo "Usage: $0 /path/to/waylane-frontend/build (needs index.html and statics/)" >&2
+  echo "Usage: $0 /path/to/WayLane/services/frontend/build (needs index.html and statics/)" >&2
   exit 2
 fi
 target="$(cd "$(dirname "$0")/.." && pwd)/dashboard/build"

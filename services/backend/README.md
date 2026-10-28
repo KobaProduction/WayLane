@@ -5,12 +5,12 @@ Repository owner: **Koba Production**; original integration: Intens. Python Fast
 This project is **not** production-ready as WayLane; its current behavior remains PasarGuard-compatible.
 The existing API, node orchestration and integrated HTML subscription page are preserved.
 
-The dashboard frontend source is deliberately split into **waylane-frontend**.
-Until the Vue rewrite, build its existing React UI as a temporary compatibility
-artifact and copy the compiled build into `dashboard/build/` using
-`./scripts/install_frontend.sh <path-to-frontend-build>`.
-After obtaining a verified `waylane-frontend` build artifact, use `./scripts/install_frontend.sh /path/to/frontend/build`. A second source checkout is not required.
-The `dashboard/__init__.py` integration remains to serve the compiled files.
+The dashboard frontend source is now part of this same repository at
+`services/frontend/`, with its own service and CI scope. Where an existing
+backend-integrated compatibility artifact is required, use
+`./scripts/install_frontend.sh <path-to-frontend-build>` to install an
+existing React build under `dashboard/build/`; do not clone another repo.
+The `dashboard/__init__.py` integration remains a compatibility path.
 The API Dockerfile **must not** attempt to compile the frontend during container startup.
 The new Vue admin dashboard and subscription view will replace the temporary
 React UI and built-in HTML page in separate migration steps.

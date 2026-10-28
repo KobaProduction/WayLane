@@ -2,8 +2,8 @@
 
 The monorepo was merged into main on 2026-10-26; this did not deploy
 WayLane to production. One Git source has independent service owners.
-Retain former frontend/node repositories until release consumers and
-runtime cutover are verified.
+The former frontend and node repositories were removed. The canonical
+GitHub source for all three services is KobaProduction/WayLane.
 
 | Owner folder | Runtime | Deployment |
 | --- | --- | --- |
@@ -24,8 +24,9 @@ Provenance snapshot (2026-10-26):
 
 Source and upstream LICENSE, UPSTREAM and LICENSING remain with each module.
 The original frontend and node Git histories are joined as separate merge-parent
-ancestries; their historical paths are unchanged. Importing history is not
-authorization to delete the original repositories or their releases.
+ancestries; their historical paths are unchanged. Historical commits remain available in this repository even though the
+former standalone repositories were retired. Do not restore their links
+in current runtime or release consumers.
 Read docs/deployment/README.md for gates and topology.
 
 ## Deployment options
@@ -36,4 +37,8 @@ backend/frontend with external DB and API ingress. The deployment inputs,
 credentials, smoke commands and security constraints are documented at
 [deploy/compose/README.md](deploy/compose/README.md).
 
-For Intens VPN, use [deploy/intens/](deploy/intens/README.md) as a separate WayLane panel resource with an externally owned PostgreSQL/PgBouncer dependency, matched to the environment network. This is distinct from the customer Web App and VPN Core.
+For Intens VPN, the active Git-backed deployment definitions live in
+[intens-cloud/infrastructure/deploy/vpn/waylane](https://gitlab.com/intens-cloud/infrastructure/-/tree/master/deploy/vpn/waylane).
+That resource uses external PostgreSQL/PgBouncer and is distinct from the
+customer Web App and VPN Core. The backend/frontend build inputs come
+from this monorepo, not deleted standalone repositories.
