@@ -1,4 +1,4 @@
-"""Read-only VPN business analytics from existing PasarGuard tables.
+"""Read-only VPN business analytics from WayLane database tables.
 
 No schema migrations, new collectors, persistence preferences, or scheduler.
 NodeUserUsage stores aggregate user traffic only; NodeUsage stores direction

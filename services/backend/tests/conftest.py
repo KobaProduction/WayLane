@@ -37,7 +37,7 @@ if (
     and _requested_database_url.get_backend_name() == "sqlite"
     and _requested_database_url.database not in (None, "", ":memory:")
 ):
-    _worker_database_dir = Path(tempfile.mkdtemp(prefix=f"pasarguard-pytest-{_xdist_worker}-"))
+    _worker_database_dir = Path(tempfile.mkdtemp(prefix=f"waylane-pytest-{_xdist_worker}-"))
     _worker_database_url = str(_requested_database_url.set(database=str(_worker_database_dir / "test.db")))
     os.environ["DATABASE_URL"] = _worker_database_url
     os.environ["SQLALCHEMY_DATABASE_URL"] = _worker_database_url

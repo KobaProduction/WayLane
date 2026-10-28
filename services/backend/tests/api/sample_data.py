@@ -305,8 +305,8 @@ XRAY_CONFIG = {
                     "certificates": [
                         {
                             "serveOnNode": True,
-                            "certificateFile": "/home/mohammad/app/PasarGuard/node/certs/ssl_cert.pem",
-                            "keyFile": "/home/mohammad/app/PasarGuard/node/certs/ssl_key.pem",
+                            "certificateFile": "/home/mohammad/app/WayLane/node/certs/ssl_cert.pem",
+                            "keyFile": "/home/mohammad/app/WayLane/node/certs/ssl_key.pem",
                         }
                     ],
                 },
