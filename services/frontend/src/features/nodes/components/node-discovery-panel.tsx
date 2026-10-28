@@ -10,6 +10,22 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 
+type AgentTLSBinding = {
+  inbound_tag: string
+  preset_id: string
+  preset_name: string
+  revision: number
+  fingerprint_sha256: string
+  not_after: string
+}
+
+type TLSPresetSummary = {
+  id: string
+  name: string
+  revision: number
+  fingerprint_sha256: string
+}
+
 type XrayInboundInfo = {
   tag: string
   protocol: string
@@ -67,6 +83,7 @@ export default function NodeDiscoveryPanel() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const canManageXray = hasPermission(admin, 'nodes', 'update_core')
+  const canBindTLS = hasPermission(admin, 'cores', 'update')
   const [xrayTarget, setXrayTarget] = useState<string | null>(null)
   const [xrayStates, setXrayStates] = useState<Record<string, XrayStatus>>({})
   const [xrayVersion, setXrayVersion] = useState('26.10.21')
@@ -76,6 +93,12 @@ export default function NodeDiscoveryPanel() {
   const [xrayInboundTag, setXrayInboundTag] = useState('waylane-socks5-qa')
   const [xrayInboundStates, setXrayInboundStates] = useState<Record<string, XrayInboundInfo[]>>({})
   const [xrayUsersJSON, setXrayUsersJSON] = useState('')
+  const [editorCoreId, setEditorCoreId] = useState('')
+  const [tlsPresetId, setTlsPresetId] = useState('')
+  const [tlsInboundTag, setTlsInboundTag] = useState('')
+  const [agentTLSBindings, setAgentTLSBindings] = useState<Record<string, AgentTLSBinding[]>>({})
+  const [tlsPresetChoices, setTlsPresetChoices] = useState<TLSPresetSummary[]>([])
+
 
 
 
@@ -179,6 +202,56 @@ export default function NodeDiscoveryPanel() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось прочитать Xray inbounds')
     }
+  }
+
+  const refreshTLSBindings = async (uuid: string) => {
+    try {
+      const response = await $fetch<{ bindings: AgentTLSBinding[] }>(
+        '/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray/tls')
+      setAgentTLSBindings(previous => ({ ...previous, [uuid]: response.bindings }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось получить TLS-привязки')
+    }
+  }
+
+  const synchronizeEditorRouting = async (uuid: string) => {
+    const generation = xrayStates[uuid]?.generation
+    const coreId = Number(editorCoreId)
+    if (!generation || !Number.isSafeInteger(coreId) || coreId < 1) {
+      toast.error('Укажите существующий Core ID и обновите состояние Agent')
+      return
+    }
+    setXrayBusy(true)
+    try {
+      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) +
+        '/xray/routing/from-core', {
+        method: 'PUT', body: { core_id: coreId, expected_generation: generation },
+      })
+      toast.success('Маршрутизация сохранённого Core Editor поставлена в очередь Xray')
+      await readXray(uuid)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Маршрутизация не синхронизирована')
+    } finally { setXrayBusy(false) }
+  }
+
+  const bindExistingTLS = async (uuid: string) => {
+    const generation = xrayStates[uuid]?.generation
+    if (!generation || !tlsPresetId || !tlsInboundTag.trim()) {
+      toast.error('Выберите TLS-пресет и inbound, обновите статус Xray')
+      return
+    }
+    setXrayBusy(true)
+    try {
+      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) +
+        '/xray/tls/' + encodeURIComponent(tlsInboundTag.trim()), {
+        method: 'PUT', body: { preset_id: tlsPresetId, expected_generation: generation },
+      })
+      toast.success('TLS-пресет привязан; новая конфигурация отправлена Agent')
+      await readXray(uuid)
+      await refreshTLSBindings(uuid)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'TLS-привязка не выполнена')
+    } finally { setXrayBusy(false) }
   }
 
   const demoXray = () => {
@@ -360,6 +433,9 @@ export default function NodeDiscoveryPanel() {
                       setXrayTarget(xrayTarget === node.node_uuid ? null : node.node_uuid)
                       void readXray(node.node_uuid)
                       void readXrayInbounds(node.node_uuid)
+                      void refreshTLSBindings(node.node_uuid)
+                      void $fetch<TLSPresetSummary[]>('/api/tls-presets')
+                        .then(setTlsPresetChoices).catch(() => setTlsPresetChoices([]))
                     }}>Xray: управление</Button>
                     <span className="text-muted-foreground text-xs">
                       {xrayStates[node.node_uuid]?.configured
@@ -392,6 +468,50 @@ export default function NodeDiscoveryPanel() {
                           onClick={() => void changeXray(node.node_uuid, 'stop')}>Остановить</Button>
                         <Button variant="outline" size="sm" disabled={xrayBusy}
                           onClick={() => void readXray(node.node_uuid)}>Статус</Button>
+                      </div>
+                      <div className="space-y-2 border-t pt-3">
+                        <p className="text-sm font-medium">Маршрутизация из Core Editor</p>
+                        <p className="text-muted-foreground text-xs">
+                          Использует сохранённые правила, balancers и параметры маршрутизации Xray Core Editor.
+                          Остальные разделы текущего Xray Agent не изменяются.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Input aria-label="Saved Xray core ID" className="max-w-52" type="number"
+                            min="1" placeholder="ID сохранённого Xray Core"
+                            value={editorCoreId} onChange={e => setEditorCoreId(e.target.value)} />
+                          <Button size="sm" variant="outline" disabled={xrayBusy || !xrayStates[node.node_uuid]?.configured}
+                            onClick={() => void synchronizeEditorRouting(node.node_uuid)}>
+                            Применить правила редактора
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2 border-t pt-3">
+                        <p className="text-sm font-medium">TLS-сертификаты из пресетов WayLane</p>
+                        <p className="text-muted-foreground text-xs">
+                          Привязка по tag TLS inbound. Приватный ключ не отображается; ротация пресета автоматически
+                          поставит обновление Xray в очередь.
+                        </p>
+                        {agentTLSBindings[node.node_uuid]?.map(binding => (
+                          <p key={binding.inbound_tag} className="text-muted-foreground text-xs break-all">
+                            {binding.inbound_tag} · {binding.preset_name} · ревизия {binding.revision} · SHA-256 {binding.fingerprint_sha256.slice(0, 16)}…
+                          </p>
+                        ))}
+                        <Input aria-label="Agent TLS inbound tag" placeholder="Tag TLS inbound"
+                          value={tlsInboundTag} onChange={e => setTlsInboundTag(e.target.value)} maxLength={256} />
+                        <select aria-label="TLS preset" className="border-input bg-background w-full rounded-md border p-2 text-sm"
+                          value={tlsPresetId} onChange={e => setTlsPresetId(e.target.value)}>
+                          <option value="">Выберите существующий TLS-пресет</option>
+                          {tlsPresetChoices.map(preset => (
+                            <option key={preset.id} value={preset.id}>
+                              {preset.name} · revision {preset.revision}
+                            </option>
+                          ))}
+                        </select>
+                        {canBindTLS && (
+                          <Button size="sm" variant="outline"
+                            disabled={xrayBusy || !xrayStates[node.node_uuid]?.configured}
+                            onClick={() => void bindExistingTLS(node.node_uuid)}>Привязать сертификат</Button>
+                        )}
                       </div>
                       <div className="space-y-2 border-t pt-3">
                         <p className="text-sm font-medium">Пользователи inbound (синхронизация)</p>

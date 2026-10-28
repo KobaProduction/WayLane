@@ -201,3 +201,43 @@ This still lacks PasarGuard live SyncUsers, Shadowsocks 2022, statistics,
 real region switching, multi-core drivers and accepted public UDP ingress.
 See Issue #13 for full parity. Local DEV verified authenticated TCP SOCKS5
 end-to-end; public VPN traffic is not accepted.
+
+
+## Managed TLS certificates and Core Editor routing (DEV contract)
+
+Autonomous Agents reuse **existing** WayLane resources rather than copying
+the legacy node/core database or introducing a second certificate vault.
+
+* TLS source of truth: `tls_presets`, with validated X.509 pairs, encrypted
+  private keys, preset revision and the existing ACME/webhook rotation flow.
+  `node_agent_tls_bindings` associates Agent UUID + exact TLS inbound tag
+  with an existing preset. Only an authorized Agent receives decrypted
+  certificate/key material through authenticated `GET /api/agent/xray/desired`.
+  Admin `GET .../xray/tls` lists fingerprint, revision and expiry but never
+  private keys. Bind/unbind and preset rotation increment the Xray desired
+  generation to request reconciliation; legacy TLS bindings are unaffected.
+* The Agent verifies certificate/key pairing and expiry again, writes the
+  material into mode-0600 generation-specific private files under its state
+  volume and injects Xray `certificateFile`/`keyFile` references **only in
+  a separate runtime config**. The underlying desired JSON, Agent state
+  report and admin API do not contain decrypted keys. Private runtime
+  directory is mounted read-only into the child Xray container.
+* Xray preflight runs before replacing the core; previous runtime config
+  and its generation-scoped certificate files remain available for rollback.
+  An intentionally stopped Xray is not implicitly restarted by a certificate
+  rotation. The operator must explicitly start/update it.
+* Routing is synchronized **from a saved Xray Core Editor CoreConfig** through
+  `PUT /api/node-discovery/registrations/{uuid}/xray/routing/from-core` with
+  `core_id` and `expected_generation`. The same full editor `routing`
+  object (rules, domain strategy, balancers) is used. Only `config.routing`
+  is changed; other inbounds/outbounds and users remain untouched.
+  Invalid routing/unknown outbound references are subject to Agent Xray
+  preflight and error reporting; previous core keeps serving traffic.
+
+Both operations are scoped to approved Agents and RBAC permissions, use
+optimistic generations, and never touch production legacy Node assignments.
+**Still unaccepted:** live client TLS handshake after certificate rotation,
+automatic propagation of every Core Editor save, true PasarGuard live routing
+API updates, public VPN/UDP ingress and automatic certificate cleanup/expiry
+alerts. The local DEV rollout requires a separate controlled test with a
+real TLS inbound, not only source or database migration tests.

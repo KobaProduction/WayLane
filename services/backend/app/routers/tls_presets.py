@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import CoreConfig, Node
-from app.db.tls import tls_bindings, tls_presets
+from app.db.tls import tls_bindings, tls_presets, agent_tls_bindings
+from .agent_xray_resources import queue_xray_refresh
 from app.models.admin import AdminDetails
 from app.operation import OperatorType
 from app.operation.node import NodeOperation
@@ -173,6 +174,9 @@ async def remove_tls_preset(
     await _preset(db, preset_id)
     if await list_bindings(db, preset_id):
         raise HTTPException(409, "Unbind nodes before deleting this TLS preset")
+    if await db.scalar(select(agent_tls_bindings.c.node_uuid).where(
+        agent_tls_bindings.c.preset_id == preset_id).limit(1)):
+        raise HTTPException(409, "Unbind autonomous Agents before deleting this TLS preset")
     await db.execute(delete(tls_presets).where(tls_presets.c.id == preset_id))
     await db.commit()
 
@@ -317,9 +321,17 @@ async def _rotate(db: AsyncSession, preset_id: str, body: CertificateRotation) -
             **info,
         )
     )
+    # Existing webhook/manual preset rotation also schedules all bound
+    # autonomous Agents. The private keys remain only in the encrypted vault.
+    agents = (await db.execute(select(agent_tls_bindings.c.node_uuid).where(
+        agent_tls_bindings.c.preset_id == preset_id).distinct())).scalars().all()
+    for node_uuid in agents:
+        await queue_xray_refresh(db, node_uuid)
     await db.commit()
     bindings = await list_bindings(db, preset_id)
-    return {"revision": row["revision"] + 1, "nodes": await _apply(db, [b["node_id"] for b in bindings])}
+    return {"revision": row["revision"] + 1,
+            "agent_count": len(agents),
+            "nodes": await _apply(db, [b["node_id"] for b in bindings])}
 
 
 @router.put("/{preset_id}")

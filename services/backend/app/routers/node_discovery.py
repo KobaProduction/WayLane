@@ -10,15 +10,17 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import begin_immediate_if_sqlite, get_db
 from app.db.models import node_agent_registrations, node_discovery_invitations, node_agent_xray_desired
+from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
 from .authentication import require_permission
 from .xray_inbound_users import replace_inbound_users
+from .agent_xray_resources import (agent_tls_material, queue_xray_refresh, replace_routing, routing_from_editor, xray_tls_inbound)
 
 router = APIRouter(prefix="/api/node-discovery", tags=["Node discovery"])
 agent_router = APIRouter(prefix="/api/agent", tags=["Node agent"])
@@ -350,6 +352,121 @@ async def set_desired_xray(
             "image_version": version, "region": region}
 
 
+class EditorRoutingInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    core_id: int = Field(gt=0)
+    expected_generation: int = Field(ge=1)
+
+
+class AgentTLSBindingInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    preset_id: UUID
+    expected_generation: int = Field(ge=1)
+
+
+async def _mutable_xray(db: AsyncSession, node_uuid: UUID, expected_generation: int):
+    node = await db.scalar(select(node_agent_registrations.c.status).where(
+        node_agent_registrations.c.node_uuid == str(node_uuid)))
+    if node != "approved":
+        raise HTTPException(409, "Only approved Agents can change Xray resources")
+    desired = (await db.execute(select(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if not desired or not isinstance(desired["config"], dict):
+        raise HTTPException(409, "Xray must be configured first")
+    if desired["generation"] != expected_generation or desired["runtime_status"] == "pending":
+        raise HTTPException(409, "Xray state is stale or a change is pending")
+    if desired["runtime_status"] == "stopped":
+        raise HTTPException(409, "Xray is stopped; explicitly start it before applying resources")
+    return desired
+
+
+@router.put("/registrations/{node_uuid}/xray/routing/from-core")
+async def sync_editor_routing(
+    node_uuid: UUID, body: EditorRoutingInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update_core")),
+):
+    """Reuse saved Xray Core Editor routing, including balancers/rules."""
+    await begin_immediate_if_sqlite(db)
+    desired = await _mutable_xray(db, node_uuid, body.expected_generation)
+    try:
+        routing = await routing_from_editor(db, body.core_id)
+        config = replace_routing(desired["config"], routing)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await db.execute(update(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)).values(
+        config=config, generation=desired["generation"] + 1, action="update",
+        last_error=None, runtime_status="pending", updated_at=datetime.now(UTC)))
+    await db.commit()
+    return {"generation": desired["generation"] + 1, "status": "pending",
+            "core_id": body.core_id, "rule_count": len(routing["rules"])}
+
+
+@router.get("/registrations/{node_uuid}/xray/tls")
+async def list_agent_tls_bindings(
+    node_uuid: UUID, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    rows = (await db.execute(select(
+        agent_tls_bindings.c.inbound_tag, agent_tls_bindings.c.preset_id,
+        tls_presets.c.name, tls_presets.c.revision, tls_presets.c.fingerprint_sha256,
+        tls_presets.c.not_after,
+    ).select_from(agent_tls_bindings.join(
+        tls_presets, agent_tls_bindings.c.preset_id == tls_presets.c.id
+    )).where(agent_tls_bindings.c.node_uuid == str(node_uuid)))).all()
+    return {"bindings": [dict(zip(("inbound_tag", "preset_id", "preset_name",
+                                   "revision", "fingerprint_sha256", "not_after"), row)) for row in rows]}
+
+
+@router.put("/registrations/{node_uuid}/xray/tls/{inbound_tag}")
+async def bind_agent_tls(
+    node_uuid: UUID, inbound_tag: str, body: AgentTLSBindingInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("cores", "update")),
+):
+    await begin_immediate_if_sqlite(db)
+    desired = await _mutable_xray(db, node_uuid, body.expected_generation)
+    if len(inbound_tag) > 256 or not xray_tls_inbound(desired["config"], inbound_tag):
+        raise HTTPException(422, "Inbound must exist and use TLS")
+    preset = await db.scalar(select(tls_presets.c.id).where(
+        tls_presets.c.id == str(body.preset_id)))
+    if not preset:
+        raise HTTPException(404, "TLS preset not found")
+    prior = await db.scalar(select(agent_tls_bindings.c.preset_id).where(
+        agent_tls_bindings.c.node_uuid == str(node_uuid),
+        agent_tls_bindings.c.inbound_tag == inbound_tag))
+    if prior:
+        await db.execute(update(agent_tls_bindings).where(
+            agent_tls_bindings.c.node_uuid == str(node_uuid),
+            agent_tls_bindings.c.inbound_tag == inbound_tag).values(preset_id=str(body.preset_id)))
+    else:
+        await db.execute(insert(agent_tls_bindings).values(
+            node_uuid=str(node_uuid), inbound_tag=inbound_tag, preset_id=str(body.preset_id)))
+    await queue_xray_refresh(db, str(node_uuid))
+    await db.commit()
+    return {"inbound_tag": inbound_tag, "preset_id": str(body.preset_id),
+            "generation": desired["generation"] + 1, "status": "pending"}
+
+
+@router.delete("/registrations/{node_uuid}/xray/tls/{inbound_tag}")
+async def unbind_agent_tls(
+    node_uuid: UUID, inbound_tag: str, expected_generation: int,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("cores", "update")),
+):
+    await begin_immediate_if_sqlite(db)
+    desired = await _mutable_xray(db, node_uuid, expected_generation)
+    deleted = await db.execute(delete(agent_tls_bindings).where(
+        agent_tls_bindings.c.node_uuid == str(node_uuid),
+        agent_tls_bindings.c.inbound_tag == inbound_tag))
+    if deleted.rowcount != 1:
+        raise HTTPException(404, "Agent TLS binding not found")
+    await queue_xray_refresh(db, str(node_uuid))
+    await db.commit()
+    return {"removed": inbound_tag, "generation": desired["generation"] + 1}
+
+
 @router.get("/registrations/{node_uuid}/xray/inbounds")
 async def list_xray_inbounds(
     node_uuid: UUID, db: AsyncSession = Depends(get_db),
@@ -453,7 +570,8 @@ async def agent_xray_desired(
     # Only an authenticated Agent receives the raw Xray config.
     return {"configured": True, "generation": entry["generation"], "action": entry["action"],
             "image_version": entry["image_version"], "config": entry["config"],
-            "region": entry["region"], "applied_generation": entry["applied_generation"]}
+            "region": entry["region"], "applied_generation": entry["applied_generation"],
+            "tls_certificates": await agent_tls_material(db, str(node_uuid))}
 
 
 @agent_router.post("/xray/report")
