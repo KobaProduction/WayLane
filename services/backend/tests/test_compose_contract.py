@@ -230,3 +230,46 @@ def test_pgbouncer_config_is_session_pooling_scram_and_never_trust_auth():
     assert "os.chmod(auth_file, 0o600)" in source
     assert "password" in source
     assert "auth_type = trust" not in source
+
+
+@pytest.mark.parametrize("exists", [True, False])
+@pytest.mark.asyncio
+async def test_intens_backend_creates_only_missing_database(monkeypatch, exists):
+    from unittest.mock import AsyncMock
+
+    path = ROOT / "services/backend/compose_db_entrypoint.py"
+    spec = importlib.util.spec_from_file_location("waylane_owner_db", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setenv("POSTGRES_USER", "waylane")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "test_only_password")
+    monkeypatch.setenv("POSTGRES_DB", "waylane")
+    connection = AsyncMock()
+    connection.fetchval.return_value = exists
+    connect = AsyncMock(return_value=connection)
+    monkeypatch.setattr(module.asyncpg, "connect", connect)
+
+    await module.ensure_database_exists()
+
+    assert connect.await_args.kwargs["host"] == "postgres"
+    assert connect.await_args.kwargs["database"] == "postgres"
+    assert connect.await_args.kwargs["user"] == "waylane"
+    connection.fetchval.assert_awaited_once_with(
+        "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)", "waylane"
+    )
+    if exists:
+        connection.execute.assert_not_awaited()
+    else:
+        connection.execute.assert_awaited_once_with('CREATE DATABASE "waylane"')
+    connection.close.assert_awaited_once()
+
+
+def test_intens_compose_has_only_backend_and_frontend():
+    for name in ("docker-compose.yaml", "docker-compose.coolify.yaml"):
+        services = read("deploy/intens/" + name)["services"]
+        assert set(services) == {"backend", "frontend"}
+        assert services["backend"]["environment"]["POSTGRES_AUTO_CREATE_DB"] == "true"
+    backend = read("deploy/intens/docker-compose.yaml")["services"]["backend"]
+    assert "depends_on" not in backend
+    assert backend["environment"]["POSTGRES_HOST"] == "database"
