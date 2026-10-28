@@ -1,5 +1,12 @@
 # WayLane backend exports sanitized OTLP/HTTP telemetry only to the private collector.
 services:
+  db-init:
+    extends:
+      file: ./docker-compose.yaml
+      service: db-init
+    environment:
+      PGPASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+    exclude_from_hc: true
   backend:
     extends:
       file: ./docker-compose.yaml

@@ -1,5 +1,24 @@
 # WayLane backend exports sanitized OTLP/HTTP telemetry only to the private collector.
 services:
+  db-init:
+    image: postgres:16-alpine
+    restart: 'no'
+    environment:
+      PGHOST: postgres
+      PGPORT: '5432'
+      PGUSER: waylane
+      PGDATABASE: postgres
+      PGPASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
+    command:
+    - /bin/sh
+    - -ec
+    - |
+      psql -X -v ON_ERROR_STOP=1 <<'SQL'
+      SELECT format('CREATE DATABASE %I OWNER %I', 'waylane', current_user)
+      WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'waylane') \gexec
+      SQL
+    networks:
+    - dependencies
   backend:
     build:
       context: ../../services/backend
@@ -7,6 +26,9 @@ services:
     image: ${WAYLANE_BACKEND_IMAGE:-waylane-backend:dev}
     pull_policy: ${WAYLANE_PULL_POLICY:-build}
     restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
     entrypoint:
     - /code/.venv/bin/python
     - /code/compose_db_entrypoint.py
