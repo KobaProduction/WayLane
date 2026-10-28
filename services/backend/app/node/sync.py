@@ -1,6 +1,6 @@
 import asyncio
 
-from PasarGuardNodeBridge.common.service_pb2 import User as ProtoUser
+from waylane_node_bridge.common.service_pb2 import User as ProtoUser
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_object_session
 

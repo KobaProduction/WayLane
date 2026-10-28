@@ -4,9 +4,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import ClassVar
 
 from fastapi import HTTPException
-from PasarGuardNodeBridge import Health, NodeAPIError, PasarGuardNode
-from PasarGuardNodeBridge.common import service_pb2 as service
-from PasarGuardNodeBridge.storage import LifecycleStatus
+from waylane_node_bridge import Health, NodeAPIError, WayLaneNode
+from waylane_node_bridge.common import service_pb2 as service
+from waylane_node_bridge.storage import LifecycleStatus
 from sqlalchemy.exc import IntegrityError
 
 from app import notification
@@ -314,13 +314,13 @@ class NodeOperation(BaseOperation):
         return cores_by_id, users_by_core
 
     @staticmethod
-    async def _resume_shared_sync(pg_node: PasarGuardNode):
+    async def _resume_shared_sync(pg_node: WayLaneNode):
         if needs_shared_bridge_memory():
             pg_node._work_available.set()
             await pg_node._ensure_sync_worker_running()
 
     @staticmethod
-    async def _attach_if_running(pg_node: PasarGuardNode, node_name: str):
+    async def _attach_if_running(pg_node: WayLaneNode, node_name: str):
         """Attach to an already-started remote core without calling Start RPC."""
         try:
             state = await pg_node.get_lifecycle_state()
@@ -358,7 +358,7 @@ class NodeOperation(BaseOperation):
 
     @staticmethod
     async def _start_or_attach_node(
-        pg_node: PasarGuardNode,
+        pg_node: WayLaneNode,
         db_node: Node,
         core,
         users: CoreUsers,
@@ -467,7 +467,7 @@ class NodeOperation(BaseOperation):
             return info
 
     @staticmethod
-    async def _cleanup_cancelled_batched_start(node_id: int, pg_node: PasarGuardNode) -> None:
+    async def _cleanup_cancelled_batched_start(node_id: int, pg_node: WayLaneNode) -> None:
         cleanup_task = asyncio.create_task(node_manager.stop_node_if_current(node_id, pg_node))
         try:
             await asyncio.shield(cleanup_task)
@@ -500,7 +500,7 @@ class NodeOperation(BaseOperation):
             dict: {node_id, status, message, xray_version, node_version, old_status}
             None: if connection should be skipped
         """
-        pg_node: PasarGuardNode | None = await node_manager.get_node(db_node.id)
+        pg_node: WayLaneNode | None = await node_manager.get_node(db_node.id)
         if pg_node is None:
             return None
         if core is None:

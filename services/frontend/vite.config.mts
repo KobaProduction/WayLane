@@ -87,7 +87,7 @@ export default defineConfig({
             urlPattern: ({ request, url, sameOrigin }) => sameOrigin && request.destination === 'script' && /\/statics\/[^/]+\.js$/.test(url.pathname),
             handler: 'CacheFirst',
             options: {
-              cacheName: 'pasarguard-lazy-javascript',
+              cacheName: 'waylane-lazy-javascript',
               cacheableResponse: { statuses: [200] },
               expiration: { maxEntries: 128, maxAgeSeconds: 30 * 24 * 60 * 60 },
             },

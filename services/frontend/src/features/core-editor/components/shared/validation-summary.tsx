@@ -1,8 +1,8 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { cn } from '@/lib/utils'
-import type { CoreKitValidationIssue } from '@pasarguard/core-kit'
-import type { Issue, Profile } from '@pasarguard/xray-config-kit'
-import type { WireGuardValidationIssue } from '@pasarguard/wireguard-config-kit'
+import type { CoreKitValidationIssue } from '@waylane/core-kit'
+import type { Issue, Profile } from '@waylane/xray-config-kit'
+import type { WireGuardValidationIssue } from '@waylane/wireguard-config-kit'
 import { useTranslation } from 'react-i18next'
 import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
 

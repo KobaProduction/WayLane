@@ -15,7 +15,7 @@ import { remapIndexAfterArrayMove } from '@/features/core-editor/kit/remap-index
 import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
 import useDirDetection from '@/hooks/use-dir-detection'
 import { cn } from '@/lib/utils'
-import type { Dns, NameServer, Profile } from '@pasarguard/xray-config-kit'
+import type { Dns, NameServer, Profile } from '@waylane/xray-config-kit'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Globe, Pencil, Plus, Trash2 } from 'lucide-react'

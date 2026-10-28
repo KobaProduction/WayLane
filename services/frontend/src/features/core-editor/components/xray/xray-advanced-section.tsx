@@ -8,7 +8,7 @@ import { useCoreDraftMonacoSync } from '@/features/core-editor/state/use-core-dr
 import { profileToPersistedConfig } from '@/features/core-editor/kit/xray-adapter'
 import { draftToPersistedConfig } from '@/features/core-editor/kit/wireguard-adapter'
 import useDirDetection from '@/hooks/use-dir-detection'
-import type { JsonValue } from '@pasarguard/xray-config-kit'
+import type { JsonValue } from '@waylane/xray-config-kit'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'

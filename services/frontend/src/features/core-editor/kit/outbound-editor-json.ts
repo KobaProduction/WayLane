@@ -1,4 +1,4 @@
-import type { Outbound } from '@pasarguard/xray-config-kit'
+import type { Outbound } from '@waylane/xray-config-kit'
 import { deepPruneEmptyJsonObjects, stringifyVerifyPeerCertByName } from '@/features/core-editor/kit/xray-parity-value'
 import { migrateWireguardOutboundLegacySettings } from '@/features/core-editor/kit/wireguard-outbound-settings'
 

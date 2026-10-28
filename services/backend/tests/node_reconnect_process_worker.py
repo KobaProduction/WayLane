@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import nats
-from PasarGuardNodeBridge import Health
+from waylane_node_bridge import Health
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

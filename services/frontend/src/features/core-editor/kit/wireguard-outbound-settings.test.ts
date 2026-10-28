@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getOutboundFormCapabilities } from '@pasarguard/xray-config-kit'
+import { getOutboundFormCapabilities } from '@waylane/xray-config-kit'
 import { normalizeSettingsFromEditor } from '@/features/core-editor/kit/outbound-editor-json'
 import {
   applyWireguardKernelTunChoice,

@@ -16,7 +16,7 @@ import {
   updateAmneziaSetting,
 } from '@/features/core-editor/kit/amneziawg-settings'
 import type { AmneziaField } from '@/features/core-editor/kit/amneziawg-settings'
-import type { WireGuardCoreDraft } from '@pasarguard/wireguard-config-kit'
+import type { WireGuardCoreDraft } from '@waylane/wireguard-config-kit'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 

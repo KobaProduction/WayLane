@@ -1,5 +1,5 @@
-import { MASQUE_LIMITS } from '@pasarguard/xray-config-kit'
-import type { Alpn, Security, TlsSecurity } from '@pasarguard/xray-config-kit'
+import { MASQUE_LIMITS } from '@waylane/xray-config-kit'
+import type { Alpn, Security, TlsSecurity } from '@waylane/xray-config-kit'
 
 import { isPlainObject } from '@/features/core-editor/kit/stream-form-fields'
 import type { ParsedInput } from '@/features/core-editor/kit/stream-form-fields'

@@ -1,8 +1,8 @@
 import { DEFAULT_XRAY_CORE_CONFIG } from '@/lib/default-xray-core-config'
-import { buildXrayConfig, importXrayConfig, normalizeProfile } from '@pasarguard/xray-config-kit'
-import type { Issue, JsonValue, Profile } from '@pasarguard/xray-config-kit'
-import type { CoreKitValidationIssue } from '@pasarguard/core-kit'
-import { validateCoreConfig } from '@pasarguard/core-kit'
+import { buildXrayConfig, importXrayConfig, normalizeProfile } from '@waylane/xray-config-kit'
+import type { Issue, JsonValue, Profile } from '@waylane/xray-config-kit'
+import type { CoreKitValidationIssue } from '@waylane/core-kit'
+import { validateCoreConfig } from '@waylane/core-kit'
 import { filterCoreKitIssuesHidingInboundClients } from './inbound-clients-issue-filter'
 import { sanitizeProfileInbounds } from './sanitize-inbound'
 

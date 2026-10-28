@@ -2,8 +2,8 @@ import asyncio
 import time
 from dataclasses import dataclass
 
-from PasarGuardNodeBridge import Health, NodeAPIError, PasarGuardNode
-from PasarGuardNodeBridge.storage import LifecycleStatus
+from waylane_node_bridge import Health, NodeAPIError, WayLaneNode
+from waylane_node_bridge.storage import LifecycleStatus
 
 from app import notification, on_shutdown, on_startup, scheduler
 from app.db import GetDB
@@ -33,7 +33,7 @@ _sync_recovery_deadlines: dict[int, float] = {}
 
 @dataclass
 class _HealthStreak:
-    node: PasarGuardNode
+    node: WayLaneNode
     status: NodeStatus
     leader: bool
     failures: int = 0
@@ -46,7 +46,7 @@ _health_streaks: dict[int, _HealthStreak] = {}
 
 @dataclass
 class _ProbeBackoff:
-    node: PasarGuardNode
+    node: WayLaneNode
     leader: bool
     failures: int = 0
     next_probe_at: float = 0.0
@@ -78,7 +78,7 @@ def _probe_timeout(db_node: Node) -> int:
     return min(limit, db_node.default_timeout or limit)
 
 
-def _in_probe_backoff(db_node: Node, node: PasarGuardNode) -> bool:
+def _in_probe_backoff(db_node: Node, node: WayLaneNode) -> bool:
     backoff = _probe_backoffs.get(db_node.id)
     if backoff is None:
         return False
@@ -97,7 +97,7 @@ def _in_probe_backoff(db_node: Node, node: PasarGuardNode) -> bool:
     return time.monotonic() < backoff.next_probe_at
 
 
-async def _record_probe(db_node: Node, node: PasarGuardNode, probed: Health, attempt: _ProbeAttempt) -> None:
+async def _record_probe(db_node: Node, node: WayLaneNode, probed: Health, attempt: _ProbeAttempt) -> None:
     # Only nodes already reported as error back off, so the failure threshold
     # before that still counts consecutive runs. A failed probe can still end
     # healthy when the same run repaired the node.
@@ -117,7 +117,7 @@ async def _record_probe(db_node: Node, node: PasarGuardNode, probed: Health, att
     backoff.unanswered = attempt.unanswered
 
 
-async def _node_answers(node: PasarGuardNode, db_node: Node) -> bool:
+async def _node_answers(node: WayLaneNode, db_node: Node) -> bool:
     try:
         await node.info(timeout=_probe_timeout(db_node))
         return True
@@ -130,7 +130,7 @@ def _reset_health_streaks() -> None:
     _health_streaks.clear()
 
 
-def _accept_health(db_node: Node, node: PasarGuardNode, health: Health) -> bool:
+def _accept_health(db_node: Node, node: WayLaneNode, health: Health) -> bool:
     leader = _owns_health_checks()
     streak = _health_streaks.get(db_node.id)
     if streak is None or streak.node is not node or streak.status != db_node.status or streak.leader != leader:
@@ -151,7 +151,7 @@ def _accept_health(db_node: Node, node: PasarGuardNode, health: Health) -> bool:
     return True
 
 
-async def _set_node_health(node: PasarGuardNode, health: Health, node_name: str) -> None:
+async def _set_node_health(node: WayLaneNode, health: Health, node_name: str) -> None:
     try:
         if await node.get_health() != health:
             await node.set_health(health)
@@ -215,7 +215,7 @@ async def _start_already_in_progress(db_node: Node, shared_state) -> bool:
 
 
 async def verify_node_backend_health(
-    node: PasarGuardNode, node_name: str, timeout: int | None = None
+    node: WayLaneNode, node_name: str, timeout: int | None = None
 ) -> tuple[Health, int | None, str | None]:
     """
     Verify node health by checking backend stats.
@@ -238,7 +238,7 @@ async def verify_node_backend_health(
         return Health.BROKEN, None, error_message
 
 
-async def process_node_health_check(db_node: Node, node: PasarGuardNode):
+async def process_node_health_check(db_node: Node, node: WayLaneNode):
     """Probe every worker's attachment; only the job leader changes shared status."""
     if node is None or db_node.status not in ACTIVE_NODE_STATUSES:
         _health_streaks.pop(db_node.id, None)
@@ -253,7 +253,7 @@ async def process_node_health_check(db_node: Node, node: PasarGuardNode):
         await _record_probe(db_node, node, probed, attempt)
 
 
-async def _check_node(db_node: Node, node: PasarGuardNode, attempt: _ProbeAttempt) -> Health:
+async def _check_node(db_node: Node, node: WayLaneNode, attempt: _ProbeAttempt) -> Health:
     async with NODE_CHECK_SEM:
         attempt.started = time.monotonic()
         try:
@@ -463,14 +463,14 @@ async def node_health_check():
         logger.debug("Health check run left %d slow node check(s) running", len(pending))
 
 
-def _start_check(db_node: Node, node: PasarGuardNode | None) -> asyncio.Task:
+def _start_check(db_node: Node, node: WayLaneNode | None) -> asyncio.Task:
     task = _check_tasks.get(db_node.id)
     if task is None or task.done():
         task = _check_tasks[db_node.id] = asyncio.create_task(_run_check(db_node, node))
     return task
 
 
-async def _run_check(db_node: Node, node: PasarGuardNode | None) -> None:
+async def _run_check(db_node: Node, node: WayLaneNode | None) -> None:
     try:
         await process_node_health_check(db_node, node)
     except Exception as exc:
@@ -575,7 +575,7 @@ async def shutdown_nodes():
 
     logger.info("Stopping nodes' cores...")
 
-    nodes: dict[int, PasarGuardNode] = await node_manager.get_nodes()
+    nodes: dict[int, WayLaneNode] = await node_manager.get_nodes()
 
     stop_tasks = [node.stop() for node in nodes.values()]
 

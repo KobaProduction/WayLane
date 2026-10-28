@@ -4,8 +4,8 @@ import json
 import uuid
 
 from nats.aio.subscription import Subscription
-from PasarGuardNodeBridge import NodeAPIError
-from PasarGuardNodeBridge.common.service_pb2 import User as ProtoUser
+from waylane_node_bridge import NodeAPIError
+from waylane_node_bridge.common.service_pb2 import User as ProtoUser
 
 from app import on_shutdown, on_startup
 from app.core.manager import core_manager

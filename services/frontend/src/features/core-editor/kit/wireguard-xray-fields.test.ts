@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import type { Inbound } from '@pasarguard/xray-config-kit'
+import type { Inbound } from '@waylane/xray-config-kit'
 import {
   applyWireguardInboundFormValues,
   classifyWireguardAddresses,

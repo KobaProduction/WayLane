@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createDefaultInbound, getInboundFormCapabilities } from '@pasarguard/xray-config-kit'
+import { createDefaultInbound, getInboundFormCapabilities } from '@waylane/xray-config-kit'
 import { getInboundSecuritySelectOptions, getInboundTransportSelectOptions, inboundTransportHasDedicatedForm, kitBuildsInboundTransport } from '@/features/core-editor/kit/inbound-form-options'
 
 const caps = getInboundFormCapabilities()

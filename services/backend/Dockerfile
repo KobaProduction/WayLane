@@ -41,11 +41,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY cli_wrapper.sh /usr/bin/waylane-cli
 RUN chmod +x /usr/bin/waylane-cli
 # Temporary backwards-compatible entry point for existing operators.
-RUN ln -s /usr/bin/waylane-cli /usr/bin/pasarguard-cli
 
 COPY tui_wrapper.sh /usr/bin/waylane-tui
 RUN chmod +x /usr/bin/waylane-tui
-RUN ln -s /usr/bin/waylane-tui /usr/bin/pasarguard-tui
 
 # Copy healthcheck script
 COPY healthcheck.sh /code/healthcheck.sh

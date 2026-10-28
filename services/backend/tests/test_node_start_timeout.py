@@ -2,8 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from PasarGuardNodeBridge import Health, NodeAPIError
-from PasarGuardNodeBridge.storage import LifecycleStatus
+from waylane_node_bridge import Health, NodeAPIError
+from waylane_node_bridge.storage import LifecycleStatus
 from pydantic import ValidationError
 
 from app.db.models import NodeStatus

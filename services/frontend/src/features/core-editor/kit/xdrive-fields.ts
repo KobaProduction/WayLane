@@ -1,5 +1,5 @@
-import { createDefaultInboundForProtocol, XDRIVE_SERVICES } from '@pasarguard/xray-config-kit'
-import type { Inbound, XDriveService } from '@pasarguard/xray-config-kit'
+import { createDefaultInboundForProtocol, XDRIVE_SERVICES } from '@waylane/xray-config-kit'
+import type { Inbound, XDriveService } from '@waylane/xray-config-kit'
 
 import type { ParsedInput, StreamFieldIssue } from '@/features/core-editor/kit/stream-form-fields'
 

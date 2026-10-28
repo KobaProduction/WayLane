@@ -10,7 +10,7 @@ template is included.
 
 ## Legacy compatibility intentionally retained
 
-- `PasarGuardNodeBridge` and `pasarguard-node-bridge` are **third-party Python dependency names**, not the WayLane product name. Code imports them as published.
+- The published `pasarguard-node-bridge` dependency is isolated behind `waylane_node_bridge/`. The app and tests use the WayLane facade while Python package names and protobuf wire identities remain unchanged until a separately tested fork/release is available.
 - `pasarguard.*` NATS subjects and `pasarguard_*` JetStream KV buckets are existing persistent protocol/state identifiers and remain unchanged until a dual-read, dual-write migration.
 - Existing provider API response shapes, subscription tokens and panel-node transport remain compatible.
 - Old `pasarguard-cli` and `pasarguard-tui` aliases remain temporarily available, while the new commands are `waylane-cli` and `waylane-tui`.

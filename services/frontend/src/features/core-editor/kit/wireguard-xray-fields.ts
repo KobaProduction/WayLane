@@ -1,5 +1,5 @@
 import { scalarMultBase } from '@stablelib/x25519'
-import type { Inbound } from '@pasarguard/xray-config-kit'
+import type { Inbound } from '@waylane/xray-config-kit'
 
 /** Backend WireGuard MTU range (inclusive). */
 export const WIREGUARD_MTU_MIN = 576

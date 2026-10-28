@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createDefaultInboundForProtocol, getInboundFormCapabilities, getOutboundFormCapabilities } from '@pasarguard/xray-config-kit'
-import type { Inbound, Security } from '@pasarguard/xray-config-kit'
+import { createDefaultInboundForProtocol, getInboundFormCapabilities, getOutboundFormCapabilities } from '@waylane/xray-config-kit'
+import type { Inbound, Security } from '@waylane/xray-config-kit'
 import {
   applyMasqueClientAuthMode,
   hasMasqueClientOnlySettings,

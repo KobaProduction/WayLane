@@ -1,5 +1,5 @@
-import { validateInboundDraft, validateOutboundDraft } from '@pasarguard/xray-config-kit'
-import type { Inbound, Issue, Outbound } from '@pasarguard/xray-config-kit'
+import { validateInboundDraft, validateOutboundDraft } from '@waylane/xray-config-kit'
+import type { Inbound, Issue, Outbound } from '@waylane/xray-config-kit'
 
 import { normalizedName, outboundStreamTransportName } from '@/features/core-editor/kit/outbound-stream-dynamic'
 

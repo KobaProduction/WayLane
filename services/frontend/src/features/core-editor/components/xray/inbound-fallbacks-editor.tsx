@@ -1,4 +1,4 @@
-import type { Fallback } from '@pasarguard/xray-config-kit'
+import type { Fallback } from '@waylane/xray-config-kit'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

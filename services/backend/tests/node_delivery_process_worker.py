@@ -15,11 +15,11 @@ from uuid import uuid4
 import certifi
 import nats
 from grpclib.client import Channel
-from PasarGuardNodeBridge.common import service_grpc
+from waylane_node_bridge.common import service_grpc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PasarGuardNodeBridge.common.service_pb2 import User
+from waylane_node_bridge.common.service_pb2 import User
 
 from app.node.bridge import QueuedGrpcNode, register_refresh_handler
 from app.node.nats_memory import NatsUserSyncStore

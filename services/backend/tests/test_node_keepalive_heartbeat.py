@@ -10,8 +10,8 @@ import pytest
 from grpclib.client import Channel
 from grpclib.const import Cardinality, Handler
 from grpclib.server import Server
-from PasarGuardNodeBridge import Health, NodeType
-from PasarGuardNodeBridge.common import service_grpc, service_pb2 as service
+from waylane_node_bridge import Health, NodeType
+from waylane_node_bridge.common import service_grpc, service_pb2 as service
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import Node, NodeConnectionType, NodeStatus

@@ -1,4 +1,4 @@
-import type { Inbound, InboundFormCapabilities, Transport } from '@pasarguard/xray-config-kit'
+import type { Inbound, InboundFormCapabilities, Transport } from '@waylane/xray-config-kit'
 
 /**
  * Stream transport types the kit models (hysteria is fixed by its protocol). Mainly decides which stored transport

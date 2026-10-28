@@ -1,9 +1,9 @@
 /**
  * Single import path for Xray template generators used by core-config UI and the core editor.
- * All logic lives in `@pasarguard/xray-config-kit`.
+ * All logic lives in `@waylane/xray-config-kit`.
  */
-import { createDefaultVlessOptions, VLESS_ENCRYPTION_METHODS } from '@pasarguard/xray-config-kit'
-import type { VlessBuilderOptions } from '@pasarguard/xray-config-kit'
+import { createDefaultVlessOptions, VLESS_ENCRYPTION_METHODS } from '@waylane/xray-config-kit'
+import type { VlessBuilderOptions } from '@waylane/xray-config-kit'
 import { encodeURLSafe } from '@stablelib/base64'
 import { generateKeyPair } from '@stablelib/x25519'
 import { generateMldsa65 as kitGenerateMldsa65 } from '@/utils/mldsa65'
@@ -23,9 +23,9 @@ export {
   VLESS_ENCRYPTION_METHODS,
   VLESS_HANDSHAKE_OPTIONS,
   VLESS_RESUME_OPTIONS,
-} from '@pasarguard/xray-config-kit'
+} from '@waylane/xray-config-kit'
 
-export type { ShadowsocksPasswordResult, VlessEncryptionResult, VlessBuilderOptions } from '@pasarguard/xray-config-kit'
+export type { ShadowsocksPasswordResult, VlessEncryptionResult, VlessBuilderOptions } from '@waylane/xray-config-kit'
 
 export type VlessEncryptionMethodSelect = 'none' | (typeof VLESS_ENCRYPTION_METHODS)[number]['value']
 

@@ -1,4 +1,4 @@
-import type { RoutingBalancer } from '@pasarguard/xray-config-kit'
+import type { RoutingBalancer } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 import { z } from 'zod'
 

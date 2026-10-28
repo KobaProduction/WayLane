@@ -59,9 +59,9 @@ import {
   stripEmptyStreamSettingsFromRecord,
   stripSparseOutboundEnvelope,
 } from '@/features/core-editor/kit/outbound-editor-json'
-import { createDefaultOutbound, generateXrayOutboundFromUri, getOutboundFieldVisibility, getOutboundFormCapabilities } from '@pasarguard/xray-config-kit'
-import type { JsonObject, JsonValue, Outbound, Profile, StreamSettings } from '@pasarguard/xray-config-kit'
-import type { XrayGeneratedFormField } from '@pasarguard/xray-config-kit'
+import { createDefaultOutbound, generateXrayOutboundFromUri, getOutboundFieldVisibility, getOutboundFormCapabilities } from '@waylane/xray-config-kit'
+import type { JsonObject, JsonValue, Outbound, Profile, StreamSettings } from '@waylane/xray-config-kit'
+import type { XrayGeneratedFormField } from '@waylane/xray-config-kit'
 import type { ColumnDef } from '@tanstack/react-table'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { ReactElement, ReactNode } from 'react'

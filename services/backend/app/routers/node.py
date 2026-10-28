@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from PasarGuardNodeBridge import NodeAPIError
+from waylane_node_bridge import NodeAPIError
 from sse_starlette.sse import EventSourceResponse
 
 from app.db import AsyncSession, GetDB, get_db

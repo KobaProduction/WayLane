@@ -41,7 +41,7 @@ def test_original_pasarguard_history_is_intact_and_waylane_extends_it():
 
 
 def test_waylane_compatibility_bridge_must_never_recreate_existing_tables():
-    source = (MIGRATIONS / "versions" / "21bec95874f4_align_pasarguard_json_types.py").read_text()
+    source = (MIGRATIONS / "versions" / "21bec95874f4_align_waylane_json_types.py").read_text()
     tree = ast.parse(source)
     forbidden_calls = []
     for node in ast.walk(tree):

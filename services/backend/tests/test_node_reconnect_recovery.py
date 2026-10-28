@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from PasarGuardNodeBridge import Health
-from PasarGuardNodeBridge.storage import LifecycleStatus
+from waylane_node_bridge import Health
+from waylane_node_bridge.storage import LifecycleStatus
 
 from app.db.models import NodeStatus
 from app.jobs import node_checker

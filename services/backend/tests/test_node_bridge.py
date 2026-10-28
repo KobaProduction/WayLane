@@ -10,10 +10,10 @@ from uuid import uuid4
 import certifi
 import nats.errors as nats_errors
 import pytest
-from PasarGuardNodeBridge import Health, InMemoryUserSyncStore, NodeAPIError, NodeType
-from PasarGuardNodeBridge.common.service_pb2 import Empty, User
-from PasarGuardNodeBridge.grpclib import Node as GrpcNode
-from PasarGuardNodeBridge.rest import Node as RestNode
+from waylane_node_bridge import Health, InMemoryUserSyncStore, NodeAPIError, NodeType
+from waylane_node_bridge.common.service_pb2 import Empty, User
+from waylane_node_bridge.grpclib import Node as GrpcNode
+from waylane_node_bridge.rest import Node as RestNode
 
 from app.nats.kv_cas import MemoryCasKv, kv_get_json
 from app.node import NodeManager, bridge as bridge_module

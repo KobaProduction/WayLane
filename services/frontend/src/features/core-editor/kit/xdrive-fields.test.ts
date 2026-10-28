@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createDefaultInboundForProtocol, XDRIVE_DEFAULTS } from '@pasarguard/xray-config-kit'
-import type { Inbound } from '@pasarguard/xray-config-kit'
+import { createDefaultInboundForProtocol, XDRIVE_DEFAULTS } from '@waylane/xray-config-kit'
+import type { Inbound } from '@waylane/xray-config-kit'
 import { blockingStreamFieldIssues, streamFieldIssuesForInbound } from '@/features/core-editor/kit/stream-form-fields'
 import {
   applyXdriveService,

@@ -16,7 +16,7 @@ import nats
 import pytest
 import pytest_asyncio
 from nats.js.errors import KeyNotFoundError
-from PasarGuardNodeBridge.common.service_pb2 import User
+from waylane_node_bridge.common.service_pb2 import User
 
 from app.nats.kv_cleanup import compact_deleted_keys
 from app.nats.kv_watch import KvWatcher, watch_kv
@@ -127,7 +127,7 @@ async def test_sync_recovery_preserves_queued_users_and_active_claims(jetstream,
     from unittest.mock import AsyncMock
 
     import certifi
-    from PasarGuardNodeBridge.controller import Controller, Health
+    from waylane_node_bridge.controller import Controller, Health
 
     from app.db.models import NodeStatus
     from app.jobs import node_checker
@@ -189,7 +189,7 @@ async def test_restored_queue_retries_and_drains_after_attach(jetstream, monkeyp
     from unittest.mock import AsyncMock
 
     import certifi
-    from PasarGuardNodeBridge import NodeType
+    from waylane_node_bridge import NodeType
 
     from app.node.bridge import create_node
     from app.operation import node as node_operation
@@ -255,8 +255,8 @@ async def test_health_poll_recovers_claim_that_expires_after_startup(jetstream, 
     from unittest.mock import AsyncMock
 
     import certifi
-    from PasarGuardNodeBridge import Health
-    from PasarGuardNodeBridge.controller import Controller
+    from waylane_node_bridge import Health
+    from waylane_node_bridge.controller import Controller
 
     from app.db.models import NodeStatus
     from app.jobs import node_checker

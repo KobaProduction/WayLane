@@ -21,7 +21,7 @@ import {
 } from '@/features/core-editor/kit/wireguard-outbound-settings'
 import { formatWireguardReserved, parseWireguardReservedInput, wireguardReservedBytes, wireguardReservedInputMatches } from '@/features/core-editor/kit/wireguard-xray-fields'
 import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
-import type { Outbound } from '@pasarguard/xray-config-kit'
+import type { Outbound } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 import { AlertTriangle, Globe2, ListOrdered, Plus, Radio, Scissors, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'

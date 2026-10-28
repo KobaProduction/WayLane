@@ -21,7 +21,7 @@ import {
   xdriveServiceSelectOptions,
   type XdriveTuningField,
 } from '@/features/core-editor/kit/xdrive-fields'
-import { XDRIVE_DEFAULTS, XDRIVE_LIMITS, type XDriveService } from '@pasarguard/xray-config-kit'
+import { XDRIVE_DEFAULTS, XDRIVE_LIMITS, type XDriveService } from '@waylane/xray-config-kit'
 
 export interface XdriveSettingsFieldsProps {
   /** the xdrive transport model (inbound, keeps `type`) or `streamSettings.xdriveSettings` (outbound) */

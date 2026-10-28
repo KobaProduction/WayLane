@@ -5,26 +5,26 @@ export const CORE_EDITOR_VIEW_MODE_STORAGE_KEY = 'view-mode:core-editor-lists'
 
 export const DEFAULT_CORE_EDITOR_VIEW_MODE: CoreEditorViewMode = 'list'
 
-const NUM_USERS_PER_PAGE_LOCAL_STORAGE_KEY = 'pasarguard-num-users-per-page'
-const NUM_ADMINS_PER_PAGE_LOCAL_STORAGE_KEY = 'pasarguard-num-admins-per-page'
+const NUM_USERS_PER_PAGE_LOCAL_STORAGE_KEY = 'waylane-num-users-per-page'
+const NUM_ADMINS_PER_PAGE_LOCAL_STORAGE_KEY = 'waylane-num-admins-per-page'
 const NUM_ITEMS_PER_PAGE_DEFAULT = 10
 
-const USERS_AUTO_REFRESH_INTERVAL_KEY = 'pasarguard-users-auto-refresh-interval'
+const USERS_AUTO_REFRESH_INTERVAL_KEY = 'waylane-users-auto-refresh-interval'
 const DEFAULT_USERS_AUTO_REFRESH_INTERVAL_SECONDS = 15
-const USERS_SHOW_CREATED_BY_KEY = 'pasarguard-users-show-created-by'
+const USERS_SHOW_CREATED_BY_KEY = 'waylane-users-show-created-by'
 const DEFAULT_USERS_SHOW_CREATED_BY = true
-const USERS_SHOW_SELECTION_CHECKBOX_KEY = 'pasarguard-users-show-selection-checkbox'
+const USERS_SHOW_SELECTION_CHECKBOX_KEY = 'waylane-users-show-selection-checkbox'
 const DEFAULT_USERS_SHOW_SELECTION_CHECKBOX = true
-const CHART_VIEW_TYPE_KEY = 'pasarguard-chart-view-type'
+const CHART_VIEW_TYPE_KEY = 'waylane-chart-view-type'
 
-const CORES_LIST_USE_CONFIG_MODAL_KEY = 'pasarguard-cores-list-use-config-modal'
+const CORES_LIST_USE_CONFIG_MODAL_KEY = 'waylane-cores-list-use-config-modal'
 const DEFAULT_CORES_LIST_USE_CONFIG_MODAL = false
 
-export const DATE_PICKER_PREFERENCE_KEY = 'pasarguard-date-picker-preference'
+export const DATE_PICKER_PREFERENCE_KEY = 'waylane-date-picker-preference'
 export type DatePickerPreference = 'locale' | 'gregorian' | 'persian'
 const DEFAULT_DATE_PICKER_PREFERENCE: DatePickerPreference = 'locale'
 
-export const CHART_VIEW_TYPE_CHANGE_EVENT = 'pasarguard-chart-view-type-change'
+export const CHART_VIEW_TYPE_CHANGE_EVENT = 'waylane-chart-view-type-change'
 export type ChartViewType = 'bar' | 'area'
 const DEFAULT_CHART_VIEW_TYPE: ChartViewType = 'bar'
 

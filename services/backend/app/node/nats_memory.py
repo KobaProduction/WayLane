@@ -18,8 +18,8 @@ import nats
 import nats.js.errors as nats_js_errors
 from nats.js.client import JetStreamContext
 from nats.js.kv import KeyValue
-from PasarGuardNodeBridge.common.service_pb2 import User
-from PasarGuardNodeBridge.storage import (
+from waylane_node_bridge.common.service_pb2 import User
+from waylane_node_bridge.storage import (
     ClaimedUser,
     LifecycleLease,
     LifecycleOperation,

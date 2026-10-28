@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createDefaultInboundForProtocol } from '@pasarguard/xray-config-kit'
-import type { Inbound, Profile, RawPatch } from '@pasarguard/xray-config-kit'
+import { createDefaultInboundForProtocol } from '@waylane/xray-config-kit'
+import type { Inbound, Profile, RawPatch } from '@waylane/xray-config-kit'
 import { importRawToProfile, profileToPersistedConfig, validateProfileForPersist } from '@/features/core-editor/kit/xray-adapter'
 import { normalizeSettingsFromEditor } from '@/features/core-editor/kit/outbound-editor-json'
 import { wireguardOutboundSettingsIssues } from '@/features/core-editor/kit/wireguard-outbound-settings'

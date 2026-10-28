@@ -1,5 +1,5 @@
-from PasarGuardNodeBridge import create_proxy, create_user
-from PasarGuardNodeBridge.common.service_pb2 import User as ProtoUser
+from waylane_node_bridge import create_proxy, create_user
+from waylane_node_bridge.common.service_pb2 import User as ProtoUser
 from sqlalchemy import and_, func, or_, select
 
 from app.db import AsyncSession

@@ -14,7 +14,7 @@ import pytest
 from grpclib.client import Channel
 from grpclib.const import Cardinality, Handler
 from grpclib.server import Server
-from PasarGuardNodeBridge.common import service_grpc, service_pb2 as service
+from waylane_node_bridge.common import service_grpc, service_pb2 as service
 
 from app.node import NodeManager
 from app.node.bridge import QueuedGrpcNode, register_refresh_handler

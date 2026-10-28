@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from PasarGuardNodeBridge import InMemoryUserSyncStore
-from PasarGuardNodeBridge.common.service_pb2 import User as ProtoUser
+from waylane_node_bridge import InMemoryUserSyncStore
+from waylane_node_bridge.common.service_pb2 import User as ProtoUser
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool

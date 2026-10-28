@@ -1,4 +1,4 @@
-import type { Profile, RoutingRule } from '@pasarguard/xray-config-kit'
+import type { Profile, RoutingRule } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 
 /** Which list entry is being edited so its current tag is not counted as a conflict with itself. */

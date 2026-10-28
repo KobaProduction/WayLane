@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import certifi
 import pytest
-from PasarGuardNodeBridge import Health, NodeAPIError, NodeType
+from waylane_node_bridge import Health, NodeAPIError, NodeType
 
 from app.db.models import CoreType, NodeStatus
 from app.jobs import node_checker

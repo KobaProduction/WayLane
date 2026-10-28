@@ -5,8 +5,8 @@ from collections import defaultdict
 from datetime import UTC, datetime as dt, timedelta as td
 from operator import attrgetter
 
-from PasarGuardNodeBridge import NodeAPIError, PasarGuardNode
-from PasarGuardNodeBridge.common.service_pb2 import StatType
+from waylane_node_bridge import NodeAPIError, WayLaneNode
+from waylane_node_bridge.common.service_pb2 import StatType
 from sqlalchemy import BigInteger, DateTime, and_, bindparam, case, func, insert, or_, select, union_all, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import ARRAY, insert as pg_insert
@@ -777,7 +777,7 @@ async def _await_usage_job(job_name: str, impl, interval: int, interval_env: str
         )
 
 
-async def _node_usage_coefficient(node: PasarGuardNode, node_id: int) -> float:
+async def _node_usage_coefficient(node: WayLaneNode, node_id: int) -> float:
     now = time.monotonic()
     cached = _usage_coefficient_cache.get(node_id)
     if cached is not None and cached[1] > now:
@@ -793,7 +793,7 @@ async def _node_usage_coefficient(node: PasarGuardNode, node_id: int) -> float:
     return coeff
 
 
-async def _collect_node_user_usage(node: PasarGuardNode, node_id: int) -> tuple[int, float, list]:
+async def _collect_node_user_usage(node: WayLaneNode, node_id: int) -> tuple[int, float, list]:
     """Fetch coefficient and user stats under one RPC slot so extra+stats overlap."""
     async with API_SEM:
         coeff_result, stats_result = await asyncio.gather(
@@ -819,7 +819,7 @@ async def _bounded_node_rpc(coro):
         return await coro
 
 
-async def get_users_stats(node: PasarGuardNode, node_id: int | None = None):
+async def get_users_stats(node: WayLaneNode, node_id: int | None = None):
     """Fetch and fold user stats from one node. Dict folding stays on the event loop."""
     node_label = node_id if node_id is not None else getattr(node, "node_id", "unknown")
     try:
@@ -849,7 +849,7 @@ def _process_outbounds_stats_response(stats_response):
     return params
 
 
-async def get_outbounds_stats(node: PasarGuardNode, node_id: int | None = None):
+async def get_outbounds_stats(node: WayLaneNode, node_id: int | None = None):
     """Fetch and fold outbound stats from one node. Dict folding stays on the event loop."""
     node_label = node_id if node_id is not None else getattr(node, "node_id", "unknown")
     try:
@@ -919,7 +919,7 @@ async def _record_user_usages_impl():
     except Exception:
         logger.exception("Failed to flush due node user usage history; pending rows will be retried")
 
-    nodes: tuple[int, PasarGuardNode] = await node_manager.get_healthy_nodes()
+    nodes: tuple[int, WayLaneNode] = await node_manager.get_healthy_nodes()
 
     if not nodes:
         logger.debug("No healthy nodes found, skipping user usage recording")

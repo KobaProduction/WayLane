@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { validateOutboundDraft } from '@pasarguard/xray-config-kit'
-import type { Outbound } from '@pasarguard/xray-config-kit'
+import { validateOutboundDraft } from '@waylane/xray-config-kit'
+import type { Outbound } from '@waylane/xray-config-kit'
 import {
   applyOutboundStreamNetwork,
   getOutboundStreamNetworkSelectValues,

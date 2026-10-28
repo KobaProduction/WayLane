@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from PasarGuardNodeBridge import Health
+from waylane_node_bridge import Health
 
 from app.db.models import NodeStatus
 from app.jobs import node_checker

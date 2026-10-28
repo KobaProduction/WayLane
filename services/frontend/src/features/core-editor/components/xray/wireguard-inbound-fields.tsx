@@ -14,7 +14,7 @@ import {
   wireguardInboundAddresses,
 } from '@/features/core-editor/kit/wireguard-xray-fields'
 import { generateWireGuardKeyPair } from '@/utils/wireguard'
-import type { Inbound } from '@pasarguard/xray-config-kit'
+import type { Inbound } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 import { useId, useMemo } from 'react'
 import type { UseFormReturn } from 'react-hook-form'

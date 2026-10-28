@@ -1,4 +1,4 @@
-import { getInboundFormCapabilities } from '@pasarguard/xray-config-kit'
+import { getInboundFormCapabilities } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 import { z } from 'zod'
 import { parseWireguardInboundPort, parseWireguardKey, parseWireguardMtuInput, parseWireguardReservedInput } from '@/features/core-editor/kit/wireguard-xray-fields'
@@ -33,7 +33,7 @@ export function realityInboundZodTriggerFieldNames(): string[] {
 }
 
 /**
- * Aligns with @pasarguard/xray-config-kit REALITY schema: `serverNames` is a non-empty array of non-empty strings.
+ * Aligns with @waylane/xray-config-kit REALITY schema: `serverNames` is a non-empty array of non-empty strings.
  * Flags blank lines/slots (e.g. `example.com,` or `["a",""]`) so strict export validation does not fail.
  */
 export function validateRealityServerNamesFormRaw(raw: unknown, t: TFunction): string | undefined {

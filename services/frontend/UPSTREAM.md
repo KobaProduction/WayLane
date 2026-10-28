@@ -14,3 +14,7 @@ No external subscription-template source is imported.
 - Original artwork was not redistributed as a WayLane logo. A dedicated identity/favicon is a separate design task.
 
 **Licensing:** existing GitHub root `LICENSE` (MIT) is retained as authored by Koba Production, but derived PasarGuard code is governed by `LICENSE.UPSTREAM` (AGPL-3.0 for panel/frontend or GPL-3.0 for node). See `LICENSING.md`.
+
+## Third-party configuration kit namespace
+
+The WayLane frontend imports `@waylane/core-kit`, `@waylane/xray-config-kit` and `@waylane/wireguard-config-kit`. These currently resolve through pinned npm aliases to upstream `@pasarguard/*` published packages. Bun lockfile retains their actual registry identities and integrity hashes; this is not a new library fork or a protocol change.

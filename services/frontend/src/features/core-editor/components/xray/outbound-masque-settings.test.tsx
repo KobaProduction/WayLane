@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { Outbound } from '@pasarguard/xray-config-kit'
+import type { Outbound } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 
 import { OutboundSpecialProtocolSettings } from '@/features/core-editor/components/xray/outbound-special-protocol-settings'

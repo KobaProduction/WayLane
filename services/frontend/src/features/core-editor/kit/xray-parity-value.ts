@@ -1,5 +1,5 @@
-import type { RoutingBalancer, RoutingRule } from '@pasarguard/xray-config-kit'
-import type { XrayGeneratedFormField } from '@pasarguard/xray-config-kit'
+import type { RoutingBalancer, RoutingRule } from '@waylane/xray-config-kit'
+import type { XrayGeneratedFormField } from '@waylane/xray-config-kit'
 
 export type ParityFieldMode = 'scalar' | 'stringList' | 'json'
 

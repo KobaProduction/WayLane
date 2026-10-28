@@ -4,8 +4,8 @@ import asyncio
 import contextlib
 
 import pytest
-from PasarGuardNodeBridge import create_proxy
-from PasarGuardNodeBridge.common.service_pb2 import User
+from waylane_node_bridge import create_proxy
+from waylane_node_bridge.common.service_pb2 import User
 
 from app.node import sync as node_sync
 

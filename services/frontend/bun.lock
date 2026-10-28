@@ -11,8 +11,6 @@
         "@hookform/resolvers": "^5.9.0",
         "@monaco-editor/react": "^4.7.0",
         "@noble/post-quantum": "^0.5.4",
-        "@pasarguard/core-kit": "0.2.12",
-        "@pasarguard/xray-config-kit": "^0.4.1",
         "@radix-ui/react-accordion": "^1.2.20",
         "@radix-ui/react-alert-dialog": "^1.1.23",
         "@radix-ui/react-avatar": "^1.2.6",
@@ -41,6 +39,9 @@
         "@tanstack/react-table": "^8.21.3",
         "@telegram-apps/sdk": "^3.11.8",
         "@vitejs/plugin-react": "^6.0.5",
+        "@waylane/core-kit": "npm:@pasarguard/core-kit@0.2.12",
+        "@waylane/wireguard-config-kit": "npm:@pasarguard/wireguard-config-kit@0.1.0",
+        "@waylane/xray-config-kit": "npm:@pasarguard/xray-config-kit@^0.4.1",
         "ace-builds": "^1.44.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -473,8 +474,6 @@
 
     "@oxc-project/types": ["@oxc-project/types@0.144.0", "", {}, "sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg=="],
 
-    "@pasarguard/core-kit": ["@pasarguard/core-kit@0.2.12", "", { "dependencies": { "@pasarguard/wireguard-config-kit": "0.1.0", "@pasarguard/xray-config-kit": "0.4.1" } }, "sha512-QsSPS6tKdE1RtAY+3aPb7sUH31FmO/KEkY+nyv32DRyjKvV75pv9B2CuPIrle8UBp6kJ6CvHUo3FgqogGaVmlA=="],
-
     "@pasarguard/wireguard-config-kit": ["@pasarguard/wireguard-config-kit@0.1.0", "", { "dependencies": { "@stablelib/x25519": "^2.0.1", "zod": "^3.25.76" } }, "sha512-vC4ULRfrgsN+W9mFLHFkr74G+6yPmMtxj1/1ZjIwulHPeQ5qHVGA0ed1vSMxL9f722rmV3jj/eMeRQCasGJsrw=="],
 
     "@pasarguard/xray-config-kit": ["@pasarguard/xray-config-kit@0.4.1", "", { "dependencies": { "@noble/post-quantum": "^0.5.4", "@stablelib/x25519": "^2.0.1", "mlkem": "^2.7.0", "zod": "^3.23.8", "zod-to-json-schema": "^3.25.2" } }, "sha512-9RoZwB3z7IuvMvEHko/34YWbtixUQhA3IpHJtQmjNF2bf5rCuPvLxH/+CiKFYCbEF9byfoIyXmzi/129yEqnhg=="],
@@ -862,6 +861,12 @@
     "@typescript-eslint/visitor-keys": ["@typescript-eslint/visitor-keys@8.67.0", "", { "dependencies": { "@typescript-eslint/types": "8.67.0", "eslint-visitor-keys": "^5.0.0" } }, "sha512-fkv8dHRDqfGtTHuJeebdrQ7cX6Ad4WAS00rgHh9UGvMycF1mjBfsxry1XsLIFhWZ6Judlh6UdzK+TYlbpCXgnA=="],
 
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.5", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-BOVzne/NL162sMdResB25mUv+vWMF5NoAjNf09TeGlE7ZpszZWSD3winycicLJw72yeVsoCn/2kOhEuCvEShMA=="],
+
+    "@waylane/core-kit": ["@pasarguard/core-kit@0.2.12", "", { "dependencies": { "@pasarguard/wireguard-config-kit": "0.1.0", "@pasarguard/xray-config-kit": "0.4.1" } }, "sha512-QsSPS6tKdE1RtAY+3aPb7sUH31FmO/KEkY+nyv32DRyjKvV75pv9B2CuPIrle8UBp6kJ6CvHUo3FgqogGaVmlA=="],
+
+    "@waylane/wireguard-config-kit": ["@pasarguard/wireguard-config-kit@0.1.0", "", { "dependencies": { "@stablelib/x25519": "^2.0.1", "zod": "^3.25.76" } }, "sha512-vC4ULRfrgsN+W9mFLHFkr74G+6yPmMtxj1/1ZjIwulHPeQ5qHVGA0ed1vSMxL9f722rmV3jj/eMeRQCasGJsrw=="],
+
+    "@waylane/xray-config-kit": ["@pasarguard/xray-config-kit@0.4.1", "", { "dependencies": { "@noble/post-quantum": "^0.5.4", "@stablelib/x25519": "^2.0.1", "mlkem": "^2.7.0", "zod": "^3.23.8", "zod-to-json-schema": "^3.25.2" } }, "sha512-9RoZwB3z7IuvMvEHko/34YWbtixUQhA3IpHJtQmjNF2bf5rCuPvLxH/+CiKFYCbEF9byfoIyXmzi/129yEqnhg=="],
 
     "ace-builds": ["ace-builds@1.44.0", "", {}, "sha512-PFNMSYqFdEUkul2Ntud0HvA09AgY+F1ag0UYdpMH60wNI/qOA8cB8tlTgoALMEwIdUPJK2CjrIQ7OnbiSS/ugQ=="],
 

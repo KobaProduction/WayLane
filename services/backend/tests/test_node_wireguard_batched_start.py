@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from PasarGuardNodeBridge import NodeAPIError
-from PasarGuardNodeBridge.common import service_pb2 as service
+from waylane_node_bridge import NodeAPIError
+from waylane_node_bridge.common import service_pb2 as service
 
 from app.db.models import Node
 from app.models.core import CoreType

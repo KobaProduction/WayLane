@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock
 import nats.errors as nats_errors
 import pytest
 from nats.js.errors import KeyWrongLastSequenceError
-from PasarGuardNodeBridge.common.service_pb2 import User
-from PasarGuardNodeBridge.storage import LifecycleOperation, LifecycleStatus, NodeLifecycleState
+from waylane_node_bridge.common.service_pb2 import User
+from waylane_node_bridge.storage import LifecycleOperation, LifecycleStatus, NodeLifecycleState
 
 from app.nats.kv_cas import MemoryCasKv
 from app.node.nats_memory import NatsNodeLifecycleCoordinator, NatsUserSyncStore, _b64_user as _b64

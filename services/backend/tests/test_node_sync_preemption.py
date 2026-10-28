@@ -288,7 +288,7 @@ async def test_sync_node_users_during_a_start_answers_conflict_without_marking_t
 
 @pytest.mark.asyncio
 async def test_sync_node_users_still_marks_the_node_on_a_node_error(monkeypatch: pytest.MonkeyPatch):
-    from PasarGuardNodeBridge import NodeAPIError
+    from waylane_node_bridge import NodeAPIError
 
     operator = NodeOperation(operator_type=OperatorType.API)
     db_node = SimpleNamespace(id=5, status=NodeStatus.connected, core_config_id=None)

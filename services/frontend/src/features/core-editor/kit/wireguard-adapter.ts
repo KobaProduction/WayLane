@@ -1,13 +1,13 @@
-import type { JsonValue } from '@pasarguard/wireguard-config-kit'
+import type { JsonValue } from '@waylane/wireguard-config-kit'
 import {
   createDefaultWireGuardCoreDraft,
   generateWireGuardCoreConfigJsonFromDraft,
   syncWireGuardCoreDraftPublicKey,
   validateWireGuardCoreConfig,
   validateWireGuardCoreDraft,
-} from '@pasarguard/wireguard-config-kit'
-import type { WireGuardCoreConfig, WireGuardCoreDraft, WireGuardValidationIssue } from '@pasarguard/wireguard-config-kit'
-import { validateCoreConfig } from '@pasarguard/core-kit'
+} from '@waylane/wireguard-config-kit'
+import type { WireGuardCoreConfig, WireGuardCoreDraft, WireGuardValidationIssue } from '@waylane/wireguard-config-kit'
+import { validateCoreConfig } from '@waylane/core-kit'
 import { validateAmneziaSettings } from './amneziawg-settings'
 
 const knownConfigKeys = new Set(['interface_name', 'private_key', 'pre_shared_key', 'listen_port', 'address', 'peers'])

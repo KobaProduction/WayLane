@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createDefaultInboundForProtocol, validateInboundDraft, validateOutboundDraft } from '@pasarguard/xray-config-kit'
-import type { Inbound, Issue, Outbound } from '@pasarguard/xray-config-kit'
+import { createDefaultInboundForProtocol, validateInboundDraft, validateOutboundDraft } from '@waylane/xray-config-kit'
+import type { Inbound, Issue, Outbound } from '@waylane/xray-config-kit'
 import {
   blockingStreamFieldIssues,
   cleanStringList,

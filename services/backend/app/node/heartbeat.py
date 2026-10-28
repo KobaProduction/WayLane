@@ -10,7 +10,7 @@ import asyncio
 import itertools
 import time
 
-from PasarGuardNodeBridge import Health, PasarGuardNode
+from waylane_node_bridge import Health, WayLaneNode
 
 from app.nats.leader import (
     DEFAULT_LEASE_SECONDS,
@@ -62,7 +62,7 @@ class NodeHeartbeat:
         self._manager = manager
         self._due: dict[int, float] = {}
         self._beats: dict[int, asyncio.Task] = {}
-        self._answers: dict[int, tuple[PasarGuardNode, float]] = {}
+        self._answers: dict[int, tuple[WayLaneNode, float]] = {}
         self._loop: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -79,7 +79,7 @@ class NodeHeartbeat:
         self._due.clear()
         self._answers.clear()
 
-    def answered_since(self, node_id: int, node: PasarGuardNode, since: float) -> bool:
+    def answered_since(self, node_id: int, node: WayLaneNode, since: float) -> bool:
         """Whether this connection object got a beat answered after ``since`` (``time.monotonic()``)."""
         answer = self._answers.get(node_id)
         return answer is not None and answer[0] is node and answer[1] > since
@@ -115,7 +115,7 @@ class NodeHeartbeat:
             if beat is not None:
                 beat.cancel()
 
-    async def _beat(self, node_id: int, node: PasarGuardNode, interval: float) -> None:
+    async def _beat(self, node_id: int, node: WayLaneNode, interval: float) -> None:
         if await node.get_health() is Health.INVALID:
             return
         try:

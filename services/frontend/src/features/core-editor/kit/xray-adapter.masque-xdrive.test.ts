@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createDefaultInboundForProtocol, createDefaultOutbound } from '@pasarguard/xray-config-kit'
-import type { Inbound, Outbound, Profile, StreamSettings } from '@pasarguard/xray-config-kit'
+import { createDefaultInboundForProtocol, createDefaultOutbound } from '@waylane/xray-config-kit'
+import type { Inbound, Outbound, Profile, StreamSettings } from '@waylane/xray-config-kit'
 import { applyMasqueClientAuthMode } from '@/features/core-editor/kit/masque-fields'
 import { stripSparseOutboundEnvelope } from '@/features/core-editor/kit/outbound-editor-json'
 import { applyOutboundStreamNetwork, outboundStreamSettingsForProtocolSwitch } from '@/features/core-editor/kit/outbound-stream-dynamic'

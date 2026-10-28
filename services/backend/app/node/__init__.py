@@ -3,8 +3,8 @@ from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any
 
 from aiorwlock import RWLock
-from PasarGuardNodeBridge import Health, NodeType, PasarGuardNode
-from PasarGuardNodeBridge.common.service_pb2 import User as ProtoUser
+from waylane_node_bridge import Health, NodeType, WayLaneNode
+from waylane_node_bridge.common.service_pb2 import User as ProtoUser
 
 from app.db.models import Node, NodeConnectionType
 from app.node.bridge import create_node
@@ -25,7 +25,7 @@ class UserSyncPreemptedError(RuntimeError):
 
 class NodeManager:
     def __init__(self):
-        self._nodes: dict[int, PasarGuardNode] = {}
+        self._nodes: dict[int, WayLaneNode] = {}
         self._node_signatures: dict[int, tuple] = {}
         # keep_alive goes to Start, not to the bridge object; the heartbeat reads it here.
         self._keep_alives: dict[int, int] = {}
@@ -75,7 +75,7 @@ class NodeManager:
             kwargs["worker_id"] = worker_id
         return kwargs
 
-    async def _shutdown_node(self, node: PasarGuardNode | None, *, remote_stop: bool = True):
+    async def _shutdown_node(self, node: WayLaneNode | None, *, remote_stop: bool = True):
         if node is None:
             return
 
@@ -111,7 +111,7 @@ class NodeManager:
         if not tasks:
             self._user_sync_tasks.pop(node_id, None)
 
-    async def update_node(self, node: Node) -> PasarGuardNode:
+    async def update_node(self, node: Node) -> WayLaneNode:
         await ensure_bridge_memory()
 
         self._keep_alives[node.id] = node.keep_alive or 0
@@ -149,7 +149,7 @@ class NodeManager:
                     return existing
 
             async with self._lock.writer_lock:
-                old_node: PasarGuardNode | None = self._nodes.pop(node.id, None)
+                old_node: WayLaneNode | None = self._nodes.pop(node.id, None)
 
                 new_node = create_node(**self._create_node_kwargs(node))
 
@@ -169,7 +169,7 @@ class NodeManager:
         # waiter cannot overlap a later operation through a newly-created lock.
         lock = self._user_sync_locks.setdefault(id, asyncio.Lock())
         async with lock, self._lock.writer_lock:
-            old_node: PasarGuardNode | None = self._nodes.pop(id, None)
+            old_node: WayLaneNode | None = self._nodes.pop(id, None)
             self._node_signatures.pop(id, None)
             self._keep_alives.pop(id, None)
             self._user_sync_tasks.pop(id, None)
@@ -177,11 +177,11 @@ class NodeManager:
         # Do cleanup without holding the lock to avoid slow delete operations.
         asyncio.create_task(self._shutdown_node(old_node, remote_stop=remote_stop))
 
-    async def get_node(self, id: int) -> PasarGuardNode | None:
+    async def get_node(self, id: int) -> WayLaneNode | None:
         async with self._lock.reader_lock:
             return self._nodes.get(id, None)
 
-    async def stop_node_if_current(self, node_id: int, node: PasarGuardNode) -> bool:
+    async def stop_node_if_current(self, node_id: int, node: WayLaneNode) -> bool:
         """Stop a node only while it is still the manager's current connection."""
         lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
         async with lock:
@@ -190,11 +190,11 @@ class NodeManager:
             await node.stop()
             return True
 
-    async def get_nodes(self) -> dict[int, PasarGuardNode]:
+    async def get_nodes(self) -> dict[int, WayLaneNode]:
         async with self._lock.reader_lock:
             return self._nodes
 
-    async def get_keep_alive_nodes(self) -> list[tuple[int, PasarGuardNode, int]]:
+    async def get_keep_alive_nodes(self) -> list[tuple[int, WayLaneNode, int]]:
         """Nodes whose core stops without regular requests, with their keep_alive."""
         async with self._lock.reader_lock:
             return [
@@ -203,32 +203,32 @@ class NodeManager:
                 if self._keep_alives.get(node_id, 0) > 0
             ]
 
-    async def get_healthy_nodes(self) -> list[tuple[int, PasarGuardNode]]:
+    async def get_healthy_nodes(self) -> list[tuple[int, WayLaneNode]]:
         async with self._lock.reader_lock:
-            nodes: list[tuple[int, PasarGuardNode]] = [
+            nodes: list[tuple[int, WayLaneNode]] = [
                 (id, node) for id, node in self._nodes.items() if (await node.get_health() == Health.HEALTHY)
             ]
             return nodes
 
-    async def get_broken_nodes(self) -> list[tuple[int, PasarGuardNode]]:
+    async def get_broken_nodes(self) -> list[tuple[int, WayLaneNode]]:
         async with self._lock.reader_lock:
-            nodes: list[tuple[int, PasarGuardNode]] = [
+            nodes: list[tuple[int, WayLaneNode]] = [
                 (id, node) for id, node in self._nodes.items() if (await node.get_health() == Health.BROKEN)
             ]
             return nodes
 
-    async def get_not_connected_nodes(self) -> list[tuple[int, PasarGuardNode]]:
+    async def get_not_connected_nodes(self) -> list[tuple[int, WayLaneNode]]:
         async with self._lock.reader_lock:
-            nodes: list[tuple[int, PasarGuardNode]] = [
+            nodes: list[tuple[int, WayLaneNode]] = [
                 (id, node) for id, node in self._nodes.items() if (await node.get_health() == Health.NOT_CONNECTED)
             ]
             return nodes
 
-    async def _snapshot_nodes(self) -> list[PasarGuardNode]:
+    async def _snapshot_nodes(self) -> list[WayLaneNode]:
         async with self._lock.reader_lock:
             return list(self._nodes.values())
 
-    async def _snapshot_node_items(self) -> list[tuple[int, PasarGuardNode]]:
+    async def _snapshot_node_items(self) -> list[tuple[int, WayLaneNode]]:
         async with self._lock.reader_lock:
             return list(self._nodes.items())
 
@@ -236,7 +236,7 @@ class NodeManager:
     def _chunk_users(users: list[ProtoUser], size: int) -> list[list[ProtoUser]]:
         return [users[start : start + size] for start in range(0, len(users), size)]
 
-    async def _sync_user_batch_to_node(self, node: PasarGuardNode, batch: list[ProtoUser]) -> list[ProtoUser]:
+    async def _sync_user_batch_to_node(self, node: WayLaneNode, batch: list[ProtoUser]) -> list[ProtoUser]:
         """Deliver one bounded batch directly; returns the users that failed."""
         users_to_sync = batch
         supports_chunked = True
@@ -260,7 +260,7 @@ class NodeManager:
         return list(users_to_sync)
 
     async def _sync_user_batches(
-        self, node_id: int, node: PasarGuardNode, users: list[ProtoUser], *, batch_size: int | None = None
+        self, node_id: int, node: WayLaneNode, users: list[ProtoUser], *, batch_size: int | None = None
     ) -> None:
         batch_size = max(1, batch_size or nats_settings.node_update_users_batch_size)
         failed_count = 0
@@ -271,7 +271,7 @@ class NodeManager:
         if failed_count:
             raise RuntimeError(f"failed to sync {failed_count}/{len(users)} users to node {node_id}")
 
-    async def _sync_users_to_node(self, node_id: int, node: PasarGuardNode | None, users: list[ProtoUser]):
+    async def _sync_users_to_node(self, node_id: int, node: WayLaneNode | None, users: list[ProtoUser]):
         batch_size = max(1, nats_settings.node_update_users_batch_size)
         lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
         failed_count = 0
@@ -309,8 +309,8 @@ class NodeManager:
             raise RuntimeError(f"failed to sync {failed_count}/{len(users)} users to node {node_id}")
 
     async def _run_preemptible_sync(
-        self, node_id: int, sync: Coroutine[Any, Any, PasarGuardNode | None]
-    ) -> PasarGuardNode | None:
+        self, node_id: int, sync: Coroutine[Any, Any, WayLaneNode | None]
+    ) -> WayLaneNode | None:
         """Run a user sync in its own tracked task so lifecycle operations can preempt it.
 
         A connection change or removal of the node cancels only that task, never the
@@ -332,8 +332,8 @@ class NodeManager:
             self._untrack_user_sync(node_id, task)
 
     async def sync_users_batched(
-        self, node_id: int, node: PasarGuardNode, users: list[ProtoUser], *, batch_size: int | None = None
-    ) -> PasarGuardNode | None:
+        self, node_id: int, node: WayLaneNode, users: list[ProtoUser], *, batch_size: int | None = None
+    ) -> WayLaneNode | None:
         """Apply a large initial user set through bounded delta batches.
 
         Holds the per-node lock for all batches, so a metadata-only edit waits for the
@@ -344,8 +344,8 @@ class NodeManager:
         )
 
     async def _sync_users_batched(
-        self, node_id: int, node: PasarGuardNode, users: list[ProtoUser], *, batch_size: int | None
-    ) -> PasarGuardNode | None:
+        self, node_id: int, node: WayLaneNode, users: list[ProtoUser], *, batch_size: int | None
+    ) -> WayLaneNode | None:
         lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
         async with lock:
             if await self.get_node(node_id) is not node:
@@ -354,7 +354,7 @@ class NodeManager:
         return node
 
     @staticmethod
-    def _supports_shared_sync(node: PasarGuardNode) -> bool:
+    def _supports_shared_sync(node: WayLaneNode) -> bool:
         # The panel adapter implements a safe process-local fence as well as
         # the NATS-backed one. The upstream bridge's base fence alone is not
         # enough: it lacks the capture/release protocol used below.
@@ -372,7 +372,7 @@ class NodeManager:
         users: list[ProtoUser] | Callable[[], Awaitable[list[ProtoUser]]],
         *,
         flush_pending: bool = False,
-    ) -> PasarGuardNode | None:
+    ) -> WayLaneNode | None:
         """Push a full user snapshot to a node, coordinated with update_node/remove_node.
 
         ``users`` may be a deferred loader. It is resolved inside the node's
@@ -400,7 +400,7 @@ class NodeManager:
         users: list[ProtoUser] | Callable[[], Awaitable[list[ProtoUser]]],
         *,
         flush_pending: bool,
-    ) -> PasarGuardNode | None:
+    ) -> WayLaneNode | None:
         lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
         async with lock:
             node = await self.get_node(node_id)

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getInboundFormCapabilities } from '@pasarguard/xray-config-kit'
+import { getInboundFormCapabilities } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 import { createInboundDialogSchema } from '@/features/core-editor/kit/inbound-dialog-schema'
 

@@ -1,4 +1,4 @@
-import type { Inbound, Profile } from '@pasarguard/xray-config-kit'
+import type { Inbound, Profile } from '@waylane/xray-config-kit'
 import { coerceVerifyPeerCertByNameList } from '@/features/core-editor/kit/xray-parity-value'
 
 /** xray-config-kit strict schema allows only these; empty or unknown values break compile. */

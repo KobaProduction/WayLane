@@ -1,4 +1,4 @@
-import type { WireGuardCoreDraft, WireGuardValidationIssue } from '@pasarguard/wireguard-config-kit'
+import type { WireGuardCoreDraft, WireGuardValidationIssue } from '@waylane/wireguard-config-kit'
 
 export type AmneziaField = 'jc' | 'jmin' | 'jmax' | 's1' | 's2' | 's3' | 's4' | 'h1' | 'h2' | 'h3' | 'h4'
   | 'i1' | 'i2' | 'i3' | 'i4' | 'i5' | 'header_protection_key'

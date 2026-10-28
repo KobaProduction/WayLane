@@ -35,7 +35,7 @@ import {
   setRecordKey,
 } from '@/features/core-editor/kit/stream-form-fields'
 import type { ParsedInput, StreamFieldIssue } from '@/features/core-editor/kit/stream-form-fields'
-import { MASQUE_DEFAULTS } from '@pasarguard/xray-config-kit'
+import { MASQUE_DEFAULTS } from '@waylane/xray-config-kit'
 import { useState } from 'react'
 
 export interface MasqueSettingsFieldsProps {

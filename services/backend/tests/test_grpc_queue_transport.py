@@ -8,7 +8,7 @@ from grpclib.client import Channel
 from grpclib.const import Cardinality, Handler, Status
 from grpclib.exceptions import GRPCError
 from grpclib.server import Server
-from PasarGuardNodeBridge.common import service_grpc, service_pb2 as service
+from waylane_node_bridge.common import service_grpc, service_pb2 as service
 
 from app.node.bridge import QueuedGrpcNode
 from app.node.nats_memory import NatsUserSyncStore

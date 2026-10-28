@@ -1,5 +1,5 @@
-import type { Issue, RoutingRule } from '@pasarguard/xray-config-kit'
-import { validateRoutingRuleDraft } from '@pasarguard/xray-config-kit'
+import type { Issue, RoutingRule } from '@waylane/xray-config-kit'
+import { validateRoutingRuleDraft } from '@waylane/xray-config-kit'
 import type { TFunction } from 'i18next'
 import { z } from 'zod'
 import { isValidXrayPortList } from '@/features/core-editor/kit/xray-port-list-validation'

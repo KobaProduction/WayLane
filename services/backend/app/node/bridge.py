@@ -20,11 +20,11 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
 
-from PasarGuardNodeBridge import Health, NodeAPIError, NodeType, PasarGuardNode
-from PasarGuardNodeBridge.common.service_pb2 import User
-from PasarGuardNodeBridge.grpclib import Node as GrpcNode
-from PasarGuardNodeBridge.rest import Node as RestNode
-from PasarGuardNodeBridge.storage import ClaimedUser
+from waylane_node_bridge import Health, NodeAPIError, NodeType, WayLaneNode
+from waylane_node_bridge.common.service_pb2 import User
+from waylane_node_bridge.grpclib import Node as GrpcNode
+from waylane_node_bridge.rest import Node as RestNode
+from waylane_node_bridge.storage import ClaimedUser
 
 _queued_sync: ContextVar[bool] = ContextVar("queued_node_user_sync", default=False)
 
@@ -409,7 +409,7 @@ class QueuedRestNode(_QueuedBatchSync, RestNode):
     pass
 
 
-def create_node(connection: NodeType, **kwargs) -> PasarGuardNode:
+def create_node(connection: NodeType, **kwargs) -> WayLaneNode:
     if connection is NodeType.grpc:
         return QueuedGrpcNode(**kwargs)
     if connection is NodeType.rest:
