@@ -711,6 +711,7 @@ node_agent_registrations = Table(
     Column("reported_ipv4", String(45)),
     Column("reported_ipv6", String(45)),
     Column("capabilities", JSON(), nullable=False),
+    Column("machine_metrics", JSON(), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("last_seen_at", DateTime(timezone=True)),
 )

@@ -76,6 +76,6 @@ async def queue_xray_refresh(db: AsyncSession, uuid: str) -> bool:
     await db.execute(update(node_agent_xray_desired).where(
         node_agent_xray_desired.c.node_uuid == uuid).values(
             generation=entry["generation"] + 1,
-            action="update", runtime_status="pending",
+            action="reconfigure", runtime_status="pending",
             last_error=None, updated_at=datetime.now(UTC)))
     return True

@@ -99,8 +99,11 @@ func writePrivateFile(path string, content []byte) error {
 // state JSON and the admin API NEVER contain the injected private key.
 func materializeXrayTLS(dir string, generation int, raw json.RawMessage,
 	materials []xrayTLSMaterial) (json.RawMessage, error) {
+	// Agent owns the internal gRPC control API. It is available only from
+	// within the Xray child container through loopback, never on the host.
+	// Even cores with no TLS bindings need this for live routing/user updates.
 	if len(materials) == 0 {
-		return raw, nil
+		return injectXrayControlAPI(raw)
 	}
 	if generation < 1 || len(materials) > 64 {
 		return nil, errors.New("invalid Xray certificate generation")
@@ -118,10 +121,6 @@ func materializeXrayTLS(dir string, generation int, raw json.RawMessage,
 		return nil, err
 	}
 	if err := os.MkdirAll(path, 0700); err != nil {
-		return nil, err
-	}
-	release := filepath.Join(path, fmt.Sprintf("revision-%d", generation))
-	if err := os.MkdirAll(release, 0700); err != nil {
 		return nil, err
 	}
 	seen := make(map[string]bool)
@@ -160,6 +159,14 @@ func materializeXrayTLS(dir string, generation int, raw json.RawMessage,
 			return nil, errors.New("managed TLS inbound is not TLS")
 		}
 		fingerprint := sha256.Sum256([]byte(material.InboundTag))
+		materialID := sha256.Sum256([]byte(material.Certificate + "\x00" + material.PrivateKey))
+		// Stable content-addressed private files mean routing-only generations
+		// keep the same TLS filenames and do not replace a healthy inbound.
+		directoryName := "material-" + hex.EncodeToString(materialID[:12])
+		release := filepath.Join(path, directoryName)
+		if err := os.MkdirAll(release, 0700); err != nil {
+			return nil, err
+		}
 		name := hex.EncodeToString(fingerprint[:12])
 		certificateName := name + ".pem"
 		keyName := name + ".key"
@@ -175,11 +182,15 @@ func materializeXrayTLS(dir string, generation int, raw json.RawMessage,
 			stream["tlsSettings"] = settings
 		}
 		settings["certificates"] = []map[string]any{{
-			"certificateFile": fmt.Sprintf("/etc/waylane-xray/certificates/revision-%d/%s", generation, certificateName),
-			"keyFile":         fmt.Sprintf("/etc/waylane-xray/certificates/revision-%d/%s", generation, keyName),
+			"certificateFile": fmt.Sprintf("/etc/waylane-xray/certificates/%s/%s", directoryName, certificateName),
+			"keyFile":         fmt.Sprintf("/etc/waylane-xray/certificates/%s/%s", directoryName, keyName),
 		}}
 	}
-	return json.Marshal(config)
+	materialized, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	return injectXrayControlAPI(materialized)
 }
 
 func readXrayState(dir string) (xrayLocalState, error) {
@@ -268,7 +279,7 @@ func applyXrayDesired(ctx context.Context, socket, dir string, current xrayLocal
 		}
 		return next, err
 	}
-	if desired.Action != "deploy" && desired.Action != "update" {
+	if desired.Action != "deploy" && desired.Action != "update" && desired.Action != "reconfigure" {
 		return next, errors.New("Xray action not allowed")
 	}
 	image, err := xrayImage(desired.ImageVersion)
@@ -282,9 +293,11 @@ func applyXrayDesired(ctx context.Context, socket, dir string, current xrayLocal
 	if err != nil {
 		return next, err
 	}
-	// Pull and validate the incoming image before touching an active core.
-	if err := dockerXray(ctx, socket, 180*time.Second, "pull", image); err != nil {
-		return next, err
+	// A live reconfigure must never silently pull/restart the core.
+	if desired.Action != "reconfigure" {
+		if err := dockerXray(ctx, socket, 180*time.Second, "pull", image); err != nil {
+			return next, err
+		}
 	}
 	configFile, err := privateXrayFile(dir, "config.json")
 	if err != nil {
@@ -306,6 +319,15 @@ func applyXrayDesired(ctx context.Context, socket, dir string, current xrayLocal
 		image, "run", "-test", "-config", "/usr/local/etc/xray/config.json")
 	if err != nil {
 		return next, fmt.Errorf("Xray configuration rejected: %w", err)
+	}
+	if desired.Action == "reconfigure" {
+		if err := applyXrayLive(ctx, socket, dir, current, desired, materialized); err != nil {
+			return next, err
+		}
+		next.Status = "running"
+		next.ImageVersion = desired.ImageVersion
+		next.Config = append(json.RawMessage(nil), desired.Config...)
+		return next, nil
 	}
 	if err := dockerXray(ctx, socket, 20*time.Second, "stop", "-t", "5", xrayChildName); err != nil {
 		// An absent pre-existing child is normal on a first deployment.
@@ -425,6 +447,9 @@ func synchronizeXray(ctx context.Context, client *http.Client, origin string, id
 		result, applyErr := applyXrayDesired(ctx, socket, dir, local, desired)
 		if applyErr != nil {
 			result.Status = "error"
+			if errors.Is(applyErr, errLiveRequiresRestart) {
+				result.Status = "requires_restart"
+			}
 			// Never return raw Docker output to the panel.
 			result.Error = applyErr.Error()
 			if len(result.Error) > 290 {

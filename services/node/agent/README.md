@@ -241,3 +241,13 @@ automatic propagation of every Core Editor save, true PasarGuard live routing
 API updates, public VPN/UDP ingress and automatic certificate cleanup/expiry
 alerts. The local DEV rollout requires a separate controlled test with a
 real TLS inbound, not only source or database migration tests.
+
+## Xray live control and machine telemetry
+
+The reconfigure desired action uses the private Xray loopback gRPC API
+from inside the child Docker container. The Xray process remains running;
+handler replacement may briefly interrupt that listener. Unsupported
+changes report requires_restart; explicit update still replaces the child
+image. Machine metrics are collected by Agent, marked agent-runtime, and
+do not claim physical Windows host visibility under Docker Desktop.
+See shared/contracts/AGENT_CONTROL.md for full topology and target WSS.

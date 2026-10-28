@@ -84,6 +84,21 @@ class Enrollment(BaseModel):
         return raw
 
 
+class NodeMachineMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scope: Literal["agent-runtime"] = "agent-runtime"
+    hostname: str = Field(min_length=1, max_length=128)
+    os: str = Field(min_length=1, max_length=32)
+    arch: str = Field(min_length=1, max_length=32)
+    cpu_logical_count: int = Field(ge=1, le=4096)
+    memory_total_bytes: int = Field(ge=0)
+    memory_available_bytes: int = Field(ge=0)
+    disk_total_bytes: int = Field(ge=0)
+    disk_free_bytes: int = Field(ge=0)
+    load_1: float = Field(ge=0, le=100000)
+    uptime_seconds: float = Field(ge=0, le=1000000000)
+
+
 class Heartbeat(BaseModel):
     model_config = ConfigDict(extra="forbid")
     node_uuid: UUID
@@ -91,6 +106,7 @@ class Heartbeat(BaseModel):
     reported_ipv4: str | None = None
     reported_ipv6: str | None = None
     capabilities: list[str] = Field(default_factory=list, max_length=32)
+    machine_metrics: NodeMachineMetrics | None = None
 
     @field_validator("reported_ipv4", "reported_ipv6")
     @classmethod
@@ -160,6 +176,7 @@ async def list_registrations(db: AsyncSession = Depends(get_db),
         node_agent_registrations.c.legacy_node_id, node_agent_registrations.c.last_seen_at,
         node_agent_registrations.c.observed_ip, node_agent_registrations.c.reported_ipv4,
         node_agent_registrations.c.reported_ipv6, node_agent_registrations.c.capabilities,
+        node_agent_registrations.c.machine_metrics,
         node_agent_registrations.c.invitation_id,
     ]
     rows = (await db.execute(select(*columns).order_by(node_agent_registrations.c.created_at.desc()))).mappings()
@@ -258,6 +275,8 @@ async def heartbeat(body: Heartbeat, request: Request, x_agent_secret: str = Hea
         "capabilities": body.capabilities,
         "last_seen_at": datetime.now(UTC),
     }
+    if body.machine_metrics is not None:
+        changes["machine_metrics"] = body.machine_metrics.model_dump()
     if body.reported_ipv4 is not None:
         changes["reported_ipv4"] = body.reported_ipv4
     if body.reported_ipv6 is not None:
@@ -274,10 +293,11 @@ async def heartbeat(body: Heartbeat, request: Request, x_agent_secret: str = Hea
 # updates and retains the last desired state after Agent reconnection.
 class XrayDesiredInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["deploy", "update", "restart", "stop"]
+    action: Literal["deploy", "update", "restart", "stop", "reconfigure"]
     image_version: str | None = None
     config: dict[str, Any] | None = None
     region: str | None = Field(default=None, max_length=64)
+    expected_generation: int | None = Field(default=None, ge=1)
 
     @field_validator("image_version")
     @classmethod
@@ -302,7 +322,7 @@ class XrayReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
     node_uuid: UUID
     generation: int = Field(ge=1)
-    status: Literal["running", "stopped", "error"]
+    status: Literal["running", "stopped", "error", "requires_restart"]
     error: str | None = Field(default=None, max_length=300)
 
 
@@ -330,10 +350,15 @@ async def set_desired_xray(
         raise HTTPException(409, "Only approved autonomous Agents accept Xray changes")
     previous = (await db.execute(select(node_agent_xray_desired).where(
         node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if body.action == "reconfigure":
+        if not previous or body.expected_generation is None or body.expected_generation != previous["generation"]:
+            raise HTTPException(409, "Reload current Agent generation before a live change")
+        if previous["runtime_status"] == "pending":
+            raise HTTPException(409, "An Xray operation is already pending")
     config = body.config if body.config is not None else (previous["config"] if previous else None)
-    if body.action in {"deploy", "update"} and not config:
+    if body.action in {"deploy", "update", "reconfigure"} and not config:
         raise HTTPException(422, "Xray configuration required on first deployment")
-    if body.action in {"restart", "stop"} and previous is None:
+    if body.action in {"restart", "stop", "reconfigure"} and previous is None:
         raise HTTPException(409, "Xray has not been configured")
     version = body.image_version or (previous["image_version"] if previous else "26.10.21")
     generation = int(previous["generation"]) + 1 if previous else 1
@@ -396,7 +421,7 @@ async def sync_editor_routing(
         raise HTTPException(422, str(exc)) from exc
     await db.execute(update(node_agent_xray_desired).where(
         node_agent_xray_desired.c.node_uuid == str(node_uuid)).values(
-        config=config, generation=desired["generation"] + 1, action="update",
+        config=config, generation=desired["generation"] + 1, action="reconfigure",
         last_error=None, runtime_status="pending", updated_at=datetime.now(UTC)))
     await db.commit()
     return {"generation": desired["generation"] + 1, "status": "pending",
@@ -534,7 +559,7 @@ async def sync_xray_inbound_users(
     generation = int(previous["generation"]) + 1
     await db.execute(update(node_agent_xray_desired).where(
         node_agent_xray_desired.c.node_uuid == str(node_uuid)).values(
-            generation=generation, action="update", config=config,
+            generation=generation, action="reconfigure", config=config,
             runtime_status="pending", last_error=None, updated_at=datetime.now(UTC)))
     await db.commit()
     return {"generation": generation, "status": "pending",

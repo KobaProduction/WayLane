@@ -54,6 +54,20 @@ type Invitation = {
   auto_approve: '0' | '1'
 }
 
+type NodeRuntimeMetrics = {
+  scope: 'agent-runtime'
+  hostname: string
+  os: string
+  arch: string
+  cpu_logical_count: number
+  memory_total_bytes: number
+  memory_available_bytes: number
+  disk_total_bytes: number
+  disk_free_bytes: number
+  load_1: number
+  uptime_seconds: number
+}
+
 type Registration = {
   node_uuid: string
   enrollment_mode: 'direct' | 'discovery'
@@ -65,6 +79,7 @@ type Registration = {
   reported_ipv6: string | null
   capabilities: string[]
   last_seen_at: string | null
+  machine_metrics: NodeRuntimeMetrics | null
 }
 
 /** Optional Agent registry, separate from the existing legacy node cards. */
@@ -266,14 +281,19 @@ export default function NodeDiscoveryPanel() {
     }, null, 2))
   }
 
-  const changeXray = async (uuid: string, action: 'deploy' | 'update' | 'restart' | 'stop') => {
+  const changeXray = async (uuid: string, action: 'deploy' | 'update' | 'restart' | 'stop' | 'reconfigure') => {
     if (!canManageXray) return
     setXrayBusy(true)
     try {
-      const payload: { action: string; image_version: string; region: string | null; config?: Record<string, unknown> } = {
+      const payload: { action: string; image_version: string; region: string | null; config?: Record<string, unknown>; expected_generation?: number } = {
         action, image_version: xrayVersion.trim(), region: xrayRegion.trim() || null,
       }
-      if (action === 'deploy' || action === 'update') {
+      if (action === 'reconfigure') {
+        const generation = xrayStates[uuid]?.generation
+        if (!generation) throw new Error('Сначала обновите статус Xray')
+        payload.expected_generation = generation
+      }
+      if (action === 'deploy' || action === 'update' || action === 'reconfigure') {
         if (xrayConfig.trim()) {
           const parsed: unknown = JSON.parse(xrayConfig)
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Требуется объект JSON')
@@ -425,6 +445,15 @@ export default function NodeDiscoveryPanel() {
                 <p className="text-muted-foreground break-words text-xs">
                   Agent {node.agent_version} · {node.last_seen_at ? 'Был на связи' : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
                 </p>
+                {node.machine_metrics && (
+                  <p className="text-muted-foreground break-words text-xs">
+                    Agent runtime ({node.machine_metrics.scope}): {node.machine_metrics.os}/{node.machine_metrics.arch}
+                    {' · '}CPU {node.machine_metrics.cpu_logical_count}
+                    {' · '}RAM {Math.round(node.machine_metrics.memory_total_bytes / 1024 / 1024)} MiB
+                    {' · '}load {node.machine_metrics.load_1.toFixed(2)}
+                    {' · '}agent container {node.machine_metrics.hostname}
+                  </p>
+                )}
               </div>
               {canManageXray && node.status === 'approved' && (
                 <div className="min-w-0 w-full space-y-2 border-t pt-2 sm:basis-full">
@@ -461,7 +490,9 @@ export default function NodeDiscoveryPanel() {
                         <Button size="sm" disabled={xrayBusy || !xrayConfig.trim()}
                           onClick={() => void changeXray(node.node_uuid, 'deploy')}>Развернуть</Button>
                         <Button variant="outline" size="sm" disabled={xrayBusy}
-                          onClick={() => void changeXray(node.node_uuid, 'update')}>Скачать и обновить</Button>
+                          onClick={() => void changeXray(node.node_uuid, 'update')}>Обновить образ Xray (с перезапуском)</Button>
+                        <Button variant="outline" size="sm" disabled={xrayBusy || !xrayConfig.trim()}
+                          onClick={() => void changeXray(node.node_uuid, 'reconfigure')}>Применить конфигурацию без рестарта Xray</Button>
                         <Button variant="outline" size="sm" disabled={xrayBusy}
                           onClick={() => void changeXray(node.node_uuid, 'restart')}>Перезапустить</Button>
                         <Button variant="destructive" size="sm" disabled={xrayBusy}

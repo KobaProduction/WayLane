@@ -106,6 +106,25 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
     asyncio.run(run())
 
 
+def test_agent_runtime_metrics_validation():
+    from app.routers.node_discovery import NodeMachineMetrics
+    valid = NodeMachineMetrics(
+        hostname="qa-agent", os="linux", arch="amd64",
+        cpu_logical_count=4, memory_total_bytes=4 * 1024**3,
+        memory_available_bytes=2 * 1024**3, disk_total_bytes=100 * 1024**3,
+        disk_free_bytes=80 * 1024**3, load_1=0.25, uptime_seconds=90,
+    )
+    assert Heartbeat(node_uuid=uuid4(),agent_version="0.1.0",machine_metrics=valid).machine_metrics.scope == "agent-runtime"
+    with pytest.raises(ValidationError):
+        NodeMachineMetrics(hostname="invalid",os="linux",arch="amd64",cpu_logical_count=-1,
+            memory_total_bytes=0,memory_available_bytes=0,disk_total_bytes=0,disk_free_bytes=0,
+            load_1=0,uptime_seconds=0)
+    with pytest.raises(ValidationError):
+        NodeMachineMetrics(scope="host",hostname="invalid",os="linux",arch="amd64",cpu_logical_count=2,
+            memory_total_bytes=0,memory_available_bytes=0,disk_total_bytes=0,disk_free_bytes=0,
+            load_1=0,uptime_seconds=0)
+
+
 def test_agent_ip_and_input_validation():
     for bad in ["127.0.0.1", "10.0.0.2", "not-an-ip", "fe80::1", "::1"]:
         with pytest.raises(ValidationError):

@@ -342,7 +342,8 @@ func run(ctx context.Context) error {
 		reply, err := post(ctx, client, origin, "/api/agent/heartbeat", "X-Agent-Secret", ident.Secret, map[string]any{
 			"node_uuid": ident.UUID, "agent_version": version,
 			"reported_ipv4": optionalIP(lastPublicIPv4), "reported_ipv6": optionalIP(lastPublicIPv6),
-			"capabilities": []string{"docker.rootless.inspect"},
+			"capabilities":    []string{"docker.rootless.inspect", "xray.live-control"},
+			"machine_metrics": collectNodeRuntimeMetrics(state),
 		})
 		if err != nil {
 			return err

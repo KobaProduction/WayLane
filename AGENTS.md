@@ -39,3 +39,8 @@ now owns a single DEV Xray child (deploy/pull/update/restart/stop,
 per-inbound account updates), while PasarGuard parity, multi-engine drivers,
 public UDP/TCP ingress and production traffic are **not** shipped.
 The security/runtime pilot is not accepted by source CI alone.
+
+The control channel and Node-versus-Core ownership contract is
+documented in shared/contracts/AGENT_CONTROL.md. One Agent owns machine
+telemetry; child cores own only their separate service traffic and state.
+The WSS single-connection target is not implemented yet.
