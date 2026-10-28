@@ -43,4 +43,4 @@ The security/runtime pilot is not accepted by source CI alone.
 The control channel and Node-versus-Core ownership contract is
 documented in shared/contracts/AGENT_CONTROL.md. One Agent owns machine
 telemetry; child cores own only their separate service traffic and state.
-The WSS single-connection target is not implemented yet.
+The future single logical control session is transport-neutral: gRPC bidi-stream is preferred for direct links; HTTP streaming and WSS are optional adapters. Current authenticated HTTPS heartbeat/polling remains implemented, and the streaming adapters are not yet accepted.

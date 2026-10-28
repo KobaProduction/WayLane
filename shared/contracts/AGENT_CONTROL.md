@@ -12,24 +12,79 @@ The outer Compose remains exactly bootstrap (privileged one-shot) and agent
 (unprivileged persistent). The Agent supervises private RootlessKit and
 dockerd, never the host Docker socket or host systemd.
 
-## Target bidirectional protocol (not yet shipped)
+## Logical bidirectional control protocol (transport-neutral; not yet shipped)
 
-The Agent initiates one CA-verified TLS / WebSocket connection to the
-Panel. Multiplex both directions over the same versioned control channel:
-commands, replies, telemetry, secrets and health. Each command has node UUID,
-core ID, operation, monotonically increasing desired generation, unique
-message ID, deadline, idempotency key and acknowledgement/result. Commands
-to different cores have independent queues and resource budgets. Reconnect
-replays only unacknowledged generations, not already applied operations.
+The **protocol** is the stable, versioned command/event envelope and the
+state machine that handles authentication, desired generations, acknowledgments,
+results, machine telemetry and secret revisions. A transport merely carries
+these messages. **No mandatory WebSocket requirement.** The Agent normally
+initiates the outbound connection to the Panel, so no Agent administrative
+port must be opened. Panel-initiated instructions travel back on that Agent
+session or on the existing authenticated HTTPS compatibility transport.
 
-The current authenticated HTTPS heartbeat + desired-state polling is a
-compatibility transport; it is not yet this persistent WSS stream. Only the
-Agent talks to the Panel, including when the Panel initiates a command via
-its authenticated connection.
+The session is one *logical* Node identity and control relationship, not
+necessarily one TCP socket or one physical HTTP request. A node can have
+multiple cores, identified independently by core ID, while the Agent alone
+is the authenticated Panel peer. The transport adapter must not change the
+meaning, authorization, ordering or idempotency of commands.
+
+### Transport adapters and defaults
+
+| Adapter | Purpose | Communication shape | Status |
+| --- | --- | --- | --- |
+| **gRPC over HTTP/2** | Preferred direct Agent ↔ Panel control path when both endpoints support gRPC | Agent-initiated bidirectional streaming RPC, both sides send typed messages | **Planned**, not yet implemented |
+| **HTTP streaming** | Alternative behind compatible HTTP reverse proxies or when native gRPC is unavailable | Downlink streaming response (e.g. SSE or newline-delimited events) and authenticated POST uplink; HTTP/2 request/response streaming may be used only after end-to-end acceptance | **Planned**, not yet implemented |
+| **WebSocket over TLS** | Optional bidirectional adapter when the environment requires or supports it | Agent-initiated WSS upgraded connection carrying identical envelopes | **Optional**, not a prerequisite |
+| **HTTPS request/response** | Compatibility and recovery | Existing authenticated heartbeat, desired-state polling and result reporting, with bounded retries | **Implemented** |
+
+SSE is one-way **server → client**; an Agent receiving a stream from the
+Panel still sends acknowledgments/telemetry via separate authenticated HTTP
+requests. A two-way *logical* protocol is possible across multiple HTTP
+requests; do not describe this as a single full-duplex SSE socket.
+
+gRPC uses HTTP/2; some reverse proxies/CDNs may require explicit support for
+long-lived streaming, HTTP/2, idle timeouts and buffering. CDN compatibility is
+**opt-in**, not a reason to force an extra transport into every deployment.
+For a particular CDN endpoint, accept a transport only after validating
+authentication, stream delivery, reconnection, cancellation and timeouts.
+Cloudflare's gRPC support has product-specific limitations; do not treat
+enabling gRPC on a zone as proof that the entire management stack is safe.
+See https://grpc.io/docs/what-is-grpc/core-concepts/ and
+https://developers.cloudflare.com/network/grpc-connections/ .
+
+Transport choice is explicit in configuration or negotiated from an
+authenticated server capability response. A failure must not silently
+downgrade security, reuse secrets across unaudited origins or bypass RBAC.
+Keep CA-verified TLS, redirect protection, per-Agent identity, revocation,
+replay protection and bounded message size/queue limits for every adapter.
+An operator may choose an allowed fallback profile after verified failures.
+
+### Shared envelope and state machine
+
+Commands and events use the same schema across every adapter:
+`protocol_version`, `message_id`, `node_uuid`, optional `core_id`,
+`operation`, desired `generation`, deadline and bounded typed payload.
+Replies refer to the original message and generation and report
+`accepted`, `applying`, `applied`, `requires_restart`, `failed` or
+`rolled_back` without logging private material.
+
+A per-node session handshake authenticates the Agent and negotiates protocol
+version, supported transports/capabilities and recovery cursor. The Agent
+keeps per-core application state and monotonic generations durably. Reconnect
+must not repeat an already applied command. Enforce per-core serialization,
+bounded concurrency across cores, backpressure, maximum payload size and
+deadlines independent of the underlying framing. Secrets are transported only
+to their authorized Node Agent; child engines do not receive Panel credentials.
+The Panel never connects directly to child Docker sockets or Xray's local API.
+
+The existing authenticated HTTPS heartbeat/desired-state polling remains
+fully valid as a working compatibility and recovery transport while the
+streaming adapters are developed. Do **not** remove it or claim gRPC/WSS
+runtime acceptance until a real end-to-end test passes.
 
 ## Management vs client traffic
 
-The unified Agent management connection uses the Panel HTTPS port.
+The Agent control transport terminates on the Panel's configured HTTPS/gRPC management origin.
 Xray, WireGuard and other data-plane client protocols still need separately
 approved TCP/UDP listening endpoints on the Node. Do not claim a single
 management port can carry every wire protocol without an explicit
@@ -60,7 +115,7 @@ only their own health, traffic, user and resource usage.
 
 ## Deferred parity
 
-Persistent WSS control transport, multiple core IDs and driver plugins,
+Persistent transport-neutral streaming control and optional adapters, multiple core IDs and driver plugins,
 one-click orchestrator-mediated Agent update, per-core Docker deployment
 specification, production-grade networking/port allocation, public TCP/UDP
 traffic, hardware-level machine stats, full legacy PasarGuard removal and
