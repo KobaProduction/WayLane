@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build the backend DSN and optionally initialize its own database.
 
-Bundled and Intens Compose topologies supply POSTGRES_* credentials. Only the
-Intens adapter opts into owner-created database initialization; standalone
-backend deployments continue to use their own SQLALCHEMY_DATABASE_URL.
+Deployment adapters may supply POSTGRES_* credentials and opt into owner-created
+database initialization. Standalone deployments continue to use their own
+SQLALCHEMY_DATABASE_URL without enabling this optional feature.
 """
 import asyncio
 import os
