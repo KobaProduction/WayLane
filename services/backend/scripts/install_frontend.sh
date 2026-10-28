@@ -9,3 +9,4 @@ mkdir -p "$target"
 rsync -a --delete "$1/" "$target/"
 cp "$target/index.html" "$target/404.html"
 echo "Installed frontend artifact at $target"
+
