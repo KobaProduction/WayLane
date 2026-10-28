@@ -6,7 +6,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 	routingCommand "github.com/xtls/xray-core/app/router/command"
 	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/serial"

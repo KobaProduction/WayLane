@@ -1,9 +1,9 @@
 # WayLane monorepo — service owners
 
 KobaProduction/waylane main is the authoritative source layout following
-monorepo merge. The former frontend/node repositories remain available for
-compatibility and rollback until the retirement audit, dependency migration
-and deployment cutover are accepted.
+monorepo merge. All active source, CI, release and Coolify build contexts must use this single monorepo.
+Former split repositories are not active source authorities and must not be used
+for builds, release checks or deployments; removal requires repository administration.
 
 Read ArthurKoba/ai-agent-workflow/AGENTS.md and the skill for the task.
 Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.

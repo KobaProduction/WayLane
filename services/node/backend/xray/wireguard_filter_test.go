@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/backend/xray/api"
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/backend/xray/api"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func testWireguardUser(peerIPs []string) *common.User {

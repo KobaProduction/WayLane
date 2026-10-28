@@ -18,7 +18,7 @@ export function VersionBadge({ currentVersion, className }: VersionBadgeProps) {
     return null
   }
 
-  const releaseLink = releaseUrl || 'https://github.com/KobaProduction/waylane-backend/-/releases'
+  const releaseLink = releaseUrl || 'https://github.com/KobaProduction/waylane/releases'
   const showText = isMobile || state === 'expanded'
   const showBadge = state === 'collapsed' && !isMobile
 

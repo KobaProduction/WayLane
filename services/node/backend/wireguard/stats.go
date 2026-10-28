@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/pkg/stats"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/pkg/stats"
 )
 
 const onlineActivityThreshold = 45 * time.Second

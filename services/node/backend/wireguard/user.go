@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // SyncUser synchronizes a single user to the WireGuard interface.

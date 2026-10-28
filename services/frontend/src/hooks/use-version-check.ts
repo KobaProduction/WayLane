@@ -18,8 +18,8 @@ interface UseVersionCheckOptions {
   enabled?: boolean
 }
 
-const WAYLANE_RELEASE_API_URL = 'https://api.github.com/repos/KobaProduction/waylane-backend/releases/latest'
-const CACHE_KEY = 'waylane_release'
+const WAYLANE_RELEASE_API_URL = 'https://api.github.com/repos/KobaProduction/waylane/releases?per_page=100'
+const CACHE_KEY = 'waylane_monorepo_backend_release'
 const CACHE_DURATION = 10 * 60 * 1000
 
 function compareVersions(current: string, latest: string): number {
@@ -71,9 +71,15 @@ async function fetchLatestRelease(): Promise<{ version: string; url: string } | 
       return cached ? { version: cached.version, url: cached.url } : null
     }
 
-    const data = await response.json()
-    const version = data.tag_name?.replace(/^v/, '') || ''
-    const url = data.html_url || ''
+    // A monorepo release belongs to one component; never compare node
+    // versions against backend or frontend releases.
+    const releases = await response.json()
+    if (!Array.isArray(releases)) return cached ? { version: cached.version, url: cached.url } : null
+    const release = releases.find((item: { tag_name?: string; html_url?: string; draft?: boolean; prerelease?: boolean }) =>
+      !item.draft && !item.prerelease && item.tag_name?.startsWith('backend-v'),
+    )
+    const version = release?.tag_name?.slice('backend-v'.length) || ''
+    const url = release?.html_url || ''
 
     if (version) setCache(version, url)
     return { version, url }

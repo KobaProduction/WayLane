@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/controller"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/controller"
 )
 
 func New(cfg *config.Config) *Service {

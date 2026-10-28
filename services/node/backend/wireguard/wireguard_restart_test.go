@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/common"
-	nodeconfig "github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane/services/node/common"
+	nodeconfig "github.com/KobaProduction/waylane/services/node/config"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )

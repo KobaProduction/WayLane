@@ -19,11 +19,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/KobaProduction/waylane-node/backend/xray/api"
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/pkg/logstream"
-	"github.com/KobaProduction/waylane-node/pkg/netutil"
+	"github.com/KobaProduction/waylane/services/node/backend/xray/api"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/pkg/logstream"
+	"github.com/KobaProduction/waylane/services/node/pkg/netutil"
 )
 
 // fakeStatsService stands in for xray's StatsService. GetSysStats fails like a

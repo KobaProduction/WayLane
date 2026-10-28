@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/pkg/stats"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/pkg/stats"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 

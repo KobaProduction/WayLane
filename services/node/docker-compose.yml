@@ -3,7 +3,7 @@ services:
     build: .
     image: waylane-node:dev
     # for situations, you don't have access to docker hub use 👇
-    # image: ghcr.io/registry.github.com/KobaProduction/waylane-node:latest
+    # image: ghcr.io/kobaproduction/waylane-node:node-vVERSION
     restart: always
     network_mode: host
     cap_add:

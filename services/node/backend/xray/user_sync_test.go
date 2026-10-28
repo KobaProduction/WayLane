@@ -13,8 +13,8 @@ import (
 	"github.com/xtls/xray-core/app/proxyman/command"
 	"google.golang.org/grpc"
 
-	"github.com/KobaProduction/waylane-node/backend/xray/api"
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/backend/xray/api"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 const recordingInbounds = `{"inbounds":[

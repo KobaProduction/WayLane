@@ -9,7 +9,7 @@ import (
 	"github.com/xtls/xray-core/infra/conf"
 	"github.com/xtls/xray-core/proxy/shadowsocks_2022"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 const toBytesConfig = `{

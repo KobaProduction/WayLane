@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/KobaProduction/waylane-node/backend/xray/api"
+	"github.com/KobaProduction/waylane/services/node/backend/xray/api"
 )
 
 func cloneAccount(account api.Account) api.Account {

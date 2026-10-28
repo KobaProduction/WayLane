@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	nodeLogger "github.com/KobaProduction/waylane-node/logger"
+	nodeLogger "github.com/KobaProduction/waylane/services/node/logger"
 )
 
 func TestDetectLogType(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"log"
 	"net"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/controller"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/controller"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )

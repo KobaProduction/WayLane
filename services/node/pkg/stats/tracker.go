@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // Entry tracks stats for one user (map key = public key)

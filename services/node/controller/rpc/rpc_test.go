@@ -16,10 +16,10 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/controller"
-	"github.com/KobaProduction/waylane-node/pkg/tlsutil"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/controller"
+	"github.com/KobaProduction/waylane/services/node/pkg/tlsutil"
 )
 
 var (

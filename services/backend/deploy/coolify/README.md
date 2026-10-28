@@ -21,10 +21,15 @@ storage/backup. The initial backend runtime role is the existing all-in-one
 with one worker (no new NATS); splitting node and scheduler processes later
 requires a separate, approved NATS topology and leadership test.
 
-DEV: In BOTH Coolify instances use a GitHub App source to connect to
-KobaProduction/waylane-backend and KobaProduction/waylane-frontend.
-Proposed branch: development, Base Directory /, Dockerfile /Dockerfile,
-Watch Paths ** (user explicitly requested dev rebuilds for pushes).
+DEV: Connect the Coolify Compose resource to the single Git-backed
+`intens-cloud/infrastructure` deployment definition. Both `backend` and
+`frontend` are built from the **same** `KobaProduction/waylane` commit,
+with remote Git build contexts `services/backend` and `services/frontend`.
+No direct source is taken from any former split GitHub repository.
+For independently managed Coolify Applications, point both to the same
+`KobaProduction/waylane` Git repository with component-specific paths.
+Branch: main, backend Base Directory /services/backend, frontend Base Directory /services/frontend, respective Dockerfiles /Dockerfile.
+Watch Paths services/backend/** for backend and services/frontend/** for frontend (plus explicit shared/contracts/** if consumed).
 Enable automatic deploy on the configured branch only. GitHub App integration
 owns its signed webhook; do NOT duplicate manual webhooks when that source
 integration is used. If using public Git or deploy key instead, copy the
@@ -33,11 +38,11 @@ copy the secret from Webhooks > Manual Git Webhooks. Do not guess endpoints.
 Keep push delivery proof separately for each of the two Coolify domains.
 
 PROD: Use immutable published release images in GHCR:
-ghcr.io/kobaproduction/waylane-backend:VERSION or sha-LONG_SHA
-ghcr.io/kobaproduction/waylane-frontend:VERSION or sha-LONG_SHA
+ghcr.io/kobaproduction/waylane-backend:backend-vVERSION or sha-LONG_SHA
+ghcr.io/kobaproduction/waylane-frontend:frontend-vVERSION or sha-LONG_SHA
 Promotion should pin verified image digests, never floating latest; it must
-not clone and build from main. Repository release workflows publish images
-on GitHub Release published events. Private image pulls require a
+not clone and build from main. Monorepo component-tag release workflows publish images
+on GitHub Release published events. These are separate **image names**, not Git repositories. Private image pulls require a
 protected read:packages principal, independent from Git cloning credentials.
 
 ## Public URLs and possible networking modes

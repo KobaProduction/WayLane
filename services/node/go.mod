@@ -1,4 +1,4 @@
-module github.com/KobaProduction/waylane-node
+module github.com/KobaProduction/waylane/services/node
 
 go 1.27
 

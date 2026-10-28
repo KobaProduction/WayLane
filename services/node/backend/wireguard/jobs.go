@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/pkg/stats"
+	"github.com/KobaProduction/waylane/services/node/pkg/stats"
 )
 
 const statsDeviceErrorLogInterval = time.Minute

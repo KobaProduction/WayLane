@@ -11,13 +11,13 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/KobaProduction/waylane-node/backend"
-	"github.com/KobaProduction/waylane-node/backend/wireguard"
-	"github.com/KobaProduction/waylane-node/backend/xray"
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/pkg/netutil"
-	"github.com/KobaProduction/waylane-node/pkg/sysstats"
+	"github.com/KobaProduction/waylane/services/node/backend"
+	"github.com/KobaProduction/waylane/services/node/backend/wireguard"
+	"github.com/KobaProduction/waylane/services/node/backend/xray"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/pkg/netutil"
+	"github.com/KobaProduction/waylane/services/node/pkg/sysstats"
 )
 
 const NodeVersion = "0.6.0"

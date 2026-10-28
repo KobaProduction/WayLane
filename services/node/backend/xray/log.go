@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	nodeLogger "github.com/KobaProduction/waylane-node/logger"
+	nodeLogger "github.com/KobaProduction/waylane/services/node/logger"
 )
 
 var bufPool = sync.Pool{

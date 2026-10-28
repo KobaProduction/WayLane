@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func (x *Xray) GetSysStats(ctx context.Context) (*common.BackendStatsResponse, error) {

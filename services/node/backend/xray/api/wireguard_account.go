@@ -7,7 +7,7 @@ import (
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/proxy/wireguard"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // WireguardAccount is an Xray UserManager WireGuard peer.

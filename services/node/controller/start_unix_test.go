@@ -13,10 +13,10 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/KobaProduction/waylane-node/backend"
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/pkg/netutil"
+	"github.com/KobaProduction/waylane/services/node/backend"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/pkg/netutil"
 )
 
 func xrayStartRequest(t *testing.T) *common.Backend {

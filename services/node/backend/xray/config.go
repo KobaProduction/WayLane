@@ -14,8 +14,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/KobaProduction/waylane-node/backend/xray/api"
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/backend/xray/api"
+	"github.com/KobaProduction/waylane/services/node/common"
 
 	"github.com/xtls/xray-core/infra/conf"
 )

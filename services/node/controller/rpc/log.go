@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func (s *Service) GetLogs(_ *common.Empty, stream common.NodeService_GetLogsServer) error {

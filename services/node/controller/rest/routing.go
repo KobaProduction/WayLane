@@ -6,8 +6,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/KobaProduction/waylane-node/backend"
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/backend"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // asRoutingBackend adapts a backend to RoutingBackend, returning Unimplemented

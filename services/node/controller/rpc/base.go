@@ -3,7 +3,7 @@ package rpc
 import (
 	"context"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func (s *Service) Start(ctx context.Context, data *common.Backend) (*common.BaseInfoResponse, error) {

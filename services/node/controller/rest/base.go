@@ -3,7 +3,7 @@ package rest
 import (
 	"net/http"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func (s *Service) Base(w http.ResponseWriter, _ *http.Request) {

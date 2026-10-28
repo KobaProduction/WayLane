@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	nodeLogger "github.com/KobaProduction/waylane-node/logger"
-	"github.com/KobaProduction/waylane-node/pkg/logstream"
+	nodeLogger "github.com/KobaProduction/waylane/services/node/logger"
+	"github.com/KobaProduction/waylane/services/node/pkg/logstream"
 )
 
 type Core struct {

@@ -828,7 +828,7 @@ export default function NodesList() {
                   <h3 className="text-lg font-semibold">{t('nodes.noNodes')}</h3>
                   <p className="text-muted-foreground mx-auto max-w-2xl">
                     {t('nodes.noNodesDescription')}{' '}
-                    <a href="https://github.com/KobaProduction/waylane-node" target="_blank" rel="noopener noreferrer" className="text-primary font-medium underline-offset-4 hover:underline">
+                    <a href="https://github.com/KobaProduction/waylane/tree/main/services/node" target="_blank" rel="noopener noreferrer" className="text-primary font-medium underline-offset-4 hover:underline">
                       WayLane Node
                     </a>{' '}
                     {t('nodes.noNodesDescription2', { defaultValue: 'and connect it to the panel.' })}

@@ -3,7 +3,7 @@ package rest
 import (
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/backend"
+	"github.com/KobaProduction/waylane/services/node/backend"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

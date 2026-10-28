@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/backend/xray/api"
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/backend/xray/api"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // setupUserAccount builds the user's account for every protocol it has usable

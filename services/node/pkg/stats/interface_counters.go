@@ -3,7 +3,7 @@ package stats
 import (
 	"sync"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // InterfaceCountersTracker tracks delta and reset state for interface-level RX/TX counters.

@@ -11,8 +11,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/controller"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/controller"
 )
 
 func (s *Service) SyncUser(w http.ResponseWriter, r *http.Request) {

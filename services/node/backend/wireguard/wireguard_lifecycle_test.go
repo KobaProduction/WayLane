@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/backend"
-	"github.com/KobaProduction/waylane-node/common"
-	nodeconfig "github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/pkg/logstream"
+	"github.com/KobaProduction/waylane/services/node/backend"
+	"github.com/KobaProduction/waylane/services/node/common"
+	nodeconfig "github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/pkg/logstream"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )

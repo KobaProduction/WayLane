@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane/services/node/config"
 )
 
 const (

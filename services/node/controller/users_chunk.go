@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/KobaProduction/waylane-node/backend"
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/backend"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // BuildUsersFromChunks orders chunked user payloads by their index and returns a single slice.

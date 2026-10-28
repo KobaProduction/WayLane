@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // TestRoutingMethodsErrorWhenNotStarted verifies every RoutingBackend method on

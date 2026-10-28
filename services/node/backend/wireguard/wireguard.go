@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/pkg/logstream"
-	"github.com/KobaProduction/waylane-node/pkg/stats"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/pkg/logstream"
+	"github.com/KobaProduction/waylane/services/node/pkg/stats"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 

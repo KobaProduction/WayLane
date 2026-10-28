@@ -3,7 +3,7 @@ package wireguard
 import (
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane/services/node/config"
 )
 
 func TestLatencyProbeInterfaceFallsBackToConfiguredInterface(t *testing.T) {

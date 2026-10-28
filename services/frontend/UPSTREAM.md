@@ -9,7 +9,7 @@ No external subscription-template source is imported.
 
 - Configuration kits are vendored as local `@waylane/*` workspaces with original AGPL-3.0 licensing and copyright preserved.
 - New browser preference keys use `waylane-*`; migration of prior browser-local preferences is separate.
-- Release checks now target WayLane's own GitHub repositories; without published releases, no updater should claim newer versions.
+- Release checks target component-prefixed tags in the single WayLane monorepo; without published releases, no updater should claim newer versions.
 - Upstream fundraising, donations and advertising fetches have been removed from the WayLane UI.
 - Original artwork was not redistributed as a WayLane logo. A dedicated identity/favicon is a separate design task.
 

@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 	"github.com/xtls/xray-core/app/router"
 	routingCommand "github.com/xtls/xray-core/app/router/command"
 	xnet "github.com/xtls/xray-core/common/net"

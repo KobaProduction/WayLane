@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/backend/xray/api"
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane/services/node/backend/xray/api"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
 )
 
 // Lock order: syncMu, then mu, then core.mu. syncMu serializes user syncs and

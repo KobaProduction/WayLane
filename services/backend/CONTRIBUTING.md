@@ -1,6 +1,6 @@
 # Contributing to WayLane
 
-**Project owner:** Intens. Primary repository: https://github.com/KobaProduction/waylane-backend
+**Project owner:** Intens. Primary repository: https://github.com/KobaProduction/waylane/tree/main/services/backend
 
 WayLane is an open-source project derived from upstream PasarGuard. Preserve attribution, the AGPL-3.0/GPL-3.0 notices and upstream license terms.
 

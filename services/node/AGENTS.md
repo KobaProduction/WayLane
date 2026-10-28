@@ -1,6 +1,6 @@
 # WayLane Node — agent map
 
-Source: https://github.com/KobaProduction/waylane-node
+Source: https://github.com/KobaProduction/waylane (services/node/)
 
 Reusable engineering guidance: https://github.com/ArthurKoba/ai-agent-workflow
 Read the workflow AGENTS.md; load relevant Git, software-engineering and

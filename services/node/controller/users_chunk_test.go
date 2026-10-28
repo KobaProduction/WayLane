@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/backend"
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/backend"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func TestBuildUsersFromChunksOrdersByIndex(t *testing.T) {

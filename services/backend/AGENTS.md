@@ -1,6 +1,6 @@
 # WayLane Backend — agent map
 
-Source: https://github.com/KobaProduction/waylane-backend
+Source: https://github.com/KobaProduction/waylane (services/backend/)
 
 Reusable engineering guidance: https://github.com/ArthurKoba/ai-agent-workflow
 Read the upstream workflow AGENTS.md and load only task-relevant skills.

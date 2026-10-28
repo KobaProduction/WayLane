@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 type observatoryEntry struct {

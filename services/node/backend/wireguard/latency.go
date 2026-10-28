@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func (wg *WireGuard) latencyProbeInterface() string {

@@ -8,7 +8,7 @@ import (
 	"github.com/xtls/xray-core/common/serial"
 	xcore "github.com/xtls/xray-core/core"
 
-	"github.com/KobaProduction/waylane-node/backend"
+	"github.com/KobaProduction/waylane/services/node/backend"
 )
 
 var _ backend.LiveConfigApplier = (*Xray)(nil)

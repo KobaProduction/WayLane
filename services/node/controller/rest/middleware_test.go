@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane/services/node/config"
 )
 
 func newKeepAliveTestService(t *testing.T) (*Service, uuid.UUID) {

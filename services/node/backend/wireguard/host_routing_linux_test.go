@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane/services/node/config"
 )
 
 func TestNFTMasqueradeRuleArgs(t *testing.T) {

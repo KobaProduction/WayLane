@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/KobaProduction/waylane-node/common"
-	pkgstats "github.com/KobaProduction/waylane-node/pkg/stats"
+	"github.com/KobaProduction/waylane/services/node/common"
+	pkgstats "github.com/KobaProduction/waylane/services/node/pkg/stats"
 	"github.com/vishvananda/netlink"
 )
 

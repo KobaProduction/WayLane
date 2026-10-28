@@ -110,7 +110,7 @@ export function VersionUpdateBanner() {
 
   if (!isOwnerAdmin || isLoading || !hasUpdate || !isVisible || !latestVersion || !normalizedVersion) return null
 
-  const releaseLink = releaseUrl || 'https://github.com/KobaProduction/waylane-backend/-/releases'
+  const releaseLink = releaseUrl || 'https://github.com/KobaProduction/waylane/releases'
 
   return (
     <div

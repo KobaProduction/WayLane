@@ -18,10 +18,10 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/controller"
-	"github.com/KobaProduction/waylane-node/pkg/tlsutil"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/controller"
+	"github.com/KobaProduction/waylane/services/node/pkg/tlsutil"
 )
 
 var (

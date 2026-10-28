@@ -3,7 +3,7 @@ package wireguard
 import (
 	"fmt"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 // buildExistingPeersSubsetForTouched returns the subset of store peers whose email

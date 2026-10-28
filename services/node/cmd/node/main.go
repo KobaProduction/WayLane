@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/config"
-	"github.com/KobaProduction/waylane-node/controller"
-	"github.com/KobaProduction/waylane-node/controller/rest"
-	"github.com/KobaProduction/waylane-node/controller/rpc"
-	"github.com/KobaProduction/waylane-node/pkg/tlsutil"
+	"github.com/KobaProduction/waylane/services/node/config"
+	"github.com/KobaProduction/waylane/services/node/controller"
+	"github.com/KobaProduction/waylane/services/node/controller/rest"
+	"github.com/KobaProduction/waylane/services/node/controller/rpc"
+	"github.com/KobaProduction/waylane/services/node/pkg/tlsutil"
 )
 
 func main() {

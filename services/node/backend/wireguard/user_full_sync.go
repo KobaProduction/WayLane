@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/KobaProduction/waylane-node/common"
+	"github.com/KobaProduction/waylane/services/node/common"
 )
 
 func (wg *WireGuard) syncUsersFull(users []*common.User) error {

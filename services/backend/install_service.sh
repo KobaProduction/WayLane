@@ -2,7 +2,7 @@
 
 SERVICE_NAME="waylane"
 SERVICE_DESCRIPTION="WayLane Service"
-SERVICE_DOCUMENTATION="https://github.com/KobaProduction/waylane-backend"
+SERVICE_DOCUMENTATION="https://github.com/KobaProduction/waylane/tree/main/services/backend"
 MAIN_PY_PATH="$PWD/main.py"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 

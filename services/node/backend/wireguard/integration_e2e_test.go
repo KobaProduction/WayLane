@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KobaProduction/waylane-node/common"
-	"github.com/KobaProduction/waylane-node/config"
+	"github.com/KobaProduction/waylane/services/node/common"
+	"github.com/KobaProduction/waylane/services/node/config"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 

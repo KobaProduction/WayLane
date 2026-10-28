@@ -1,7 +1,6 @@
 # WayLane Frontend
 
-Repository owner: **Koba Production**; original integration: Intens. Separate frontend repository for WayLane admin dashboard and
-future subscriber landing page.
+Repository owner: **Koba Production**; source is `KobaProduction/waylane/services/frontend/` in the sole WayLane monorepo. This directory contains the admin dashboard and future subscriber landing page.
 
 Current source: the upstream React/TypeScript dashboard (transitional).
 Target: Vue 3 with separate admin and subscription-page routes. Do not claim
@@ -10,9 +9,9 @@ Vue has been implemented yet.
 ### Initial build
 - Install compatible Bun/Node toolchain.
 - Run `bun install --frozen-lockfile` and `VITE_BASE_API=/ bun run build`.
-- Publish `build/` as a CI artifact and supply it to the `KobaProduction/waylane-backend` packaging flow. No additional source checkout is required.
-- The backend serves compiled assets with its existing Python integration shim.
-- A separate web-service container is **not necessary** for the first migration.
+- Build frontend from `services/frontend/` inside the single `KobaProduction/waylane` repository. No additional source checkout is required.
+- This directory builds its own `frontend` image inside the same monorepo; the backend image is built independently from `services/backend/`.
+- The supported Coolify DEV deployment is one Compose resource with two services (`backend` and `frontend`) from the same Git SHA.
 
 The existing subscription-page HTML lives in backend until Vue replacement is
 built, to avoid breaking client links. Commercial subscriptions stay in
