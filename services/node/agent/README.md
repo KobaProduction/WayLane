@@ -250,4 +250,4 @@ handler replacement may briefly interrupt that listener. Unsupported
 changes report requires_restart; explicit update still replaces the child
 image. Machine metrics are collected by Agent, marked agent-runtime, and
 do not claim physical Windows host visibility under Docker Desktop.
-See shared/contracts/AGENT_CONTROL.md for the transport-independent control protocol: gRPC bidi-stream preferred for direct links, HTTP streaming and WebSocket as optional adapters, plus the existing HTTPS heartbeat compatibility path. No streaming transport is shipped yet.
+The control protocol uses binary Protobuf only, with gRPC bidirectional streaming and binary WebSocket adapters. SSE, text WS frames, and HTTP streaming are not control options. New Agent defaults to WS; legacy HTTPS heartbeat/desired-state APIs remain an explicit migration fallback. See shared/contracts/AGENT_CONTROL.md for v1 wire schema, port/security settings and acceptance gates.

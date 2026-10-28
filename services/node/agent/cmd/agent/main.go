@@ -311,6 +311,30 @@ func run(ctx context.Context) error {
 		// Never forward discovery/agent credentials to a redirected origin.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+    controlMode := os.Getenv("WAYLANE_CONTROL_TRANSPORT")
+    if controlMode == "" {controlMode="ws"}
+    if controlMode != "legacy" {
+		if controlMode != "ws" && controlMode != "grpc" {
+			return errors.New("unsupported binary Agent transport")
+		}
+		if !ident.Registered {
+			if token == "" {
+				return errors.New("Agent enrollment required before binary control")
+			}
+			reply, err := post(ctx, client, origin, "/api/agent/enroll", "X-Discovery-Token", token, map[string]any{
+				"node_uuid": ident.UUID, "agent_secret": ident.Secret, "display_name": name, "agent_version": version,
+			})
+			if err != nil {
+				return err
+			}
+			ident.Registered = true
+			if err := writeIdentity(state, ident); err != nil {
+				return err
+			}
+			log.Printf("Agent enrolled before binary control node=%s status=%s", ident.UUID, reply.Status)
+		}
+		return runBinaryControl(ctx, origin, ident, state, socket, controlMode)
+	}
 	var lastPublicIPv4, lastPublicIPv6 string
 	var nextIPRefresh time.Time
 	var xrayActionActive atomic.Bool

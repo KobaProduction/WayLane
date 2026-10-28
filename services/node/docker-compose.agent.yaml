@@ -44,6 +44,11 @@ services:
       WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:-}
       WAYLANE_AGENT_TOKEN: ${WAYLANE_AGENT_TOKEN:-}
       WAYLANE_DEV_ALLOW_HTTP: ${WAYLANE_DEV_ALLOW_HTTP:-false}
+      # Binary protobuf over WSS by default. gRPC is an explicit alternative;
+      # legacy HTTPS control is opt-in only for migration/rollback.
+      WAYLANE_CONTROL_TRANSPORT: ${WAYLANE_CONTROL_TRANSPORT:-ws}
+      WAYLANE_CONTROL_GRPC_TARGET: ${WAYLANE_CONTROL_GRPC_TARGET:-}
+      WAYLANE_CONTROL_GRPC_DEV_INSECURE: ${WAYLANE_CONTROL_GRPC_DEV_INSECURE:-false}
       WAYLANE_AGENT_NAME: ${WAYLANE_AGENT_NAME:-waylane-node}
       WAYLANE_AGENT_STATE_DIR: /var/lib/waylane-agent
       WAYLANE_ROOTLESS_SOCKET: /run/user/1000/docker.sock

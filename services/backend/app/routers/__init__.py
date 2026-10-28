@@ -17,6 +17,7 @@ from . import (
     hwid,
     node,
     node_discovery,
+    agent_control_ws,
     passkey,
     settings,
     tls_presets,
@@ -51,6 +52,7 @@ routers = [
     node.router,
     node_discovery.router,
     node_discovery.agent_router,
+    agent_control_ws.router,
     user.router,
     subscription.router,
     subscription_firewall.router,
@@ -63,3 +65,6 @@ for router in routers:
     api_router.include_router(router)
 
 __all__ = ["api_router"]
+
+# Register optional gRPC server with the normal backend lifespan.
+from app import agent_grpc_control as _agent_grpc_control  # noqa: F401
