@@ -1,6 +1,6 @@
 # Intens VPN — WayLane management panel
 
-**Prepared, not yet deployed.** WayLane is a management panel distinct from the Intens customer Web App and VPN Core. The resource contains its own backend (FastAPI) and frontend (Nginx). VPN nodes are independently deployed; none is added to this Compose. Its database is owned by the separate Intens infrastructure dependency stack.
+**Prepared, not yet deployed.** WayLane is a management panel distinct from the Intens customer Web App and VPN Core. The resource contains its own backend (FastAPI) and frontend (Nginx). VPN nodes are independently deployed; none is added to this Compose. Its PostgreSQL server and login role are provided by the separate Intens infrastructure dependency stack; its logical database is created by WayLane itself during initial startup.
 
 ## Coolify source deployment
 
@@ -15,7 +15,7 @@
 
 ## Database and secrets
 
-Infrastructure provisions a dedicated database/role for WayLane and configures the third PgBouncer database entry. Role and database are fixed as waylane in Compose/bootstrap; the only WayLane DB operator input is required secret WAYLANE_POSTGRES_PASSWORD. The backend maps those to upstream POSTGRES_* and constructs SQLALCHEMY_DATABASE_URL using the existing SQLAlchemy helper (no duplicate manually maintained DSN). PgBouncer is reachable as database:5432, not via host ports. Passwords embedded in its configuration URI must be URL-safe. Never reuse VPN Core or ZITADEL logical databases.
+Infrastructure provisions the dedicated login role `waylane` with `CREATEDB` and configures the third PgBouncer database entry, but **does not create the WayLane database**. The one-shot `db-init` connects directly to `postgres:5432` as `waylane`, creates the missing `waylane` database if needed, and completes before the backend performs Alembic migrations. Role and database are fixed as waylane in Compose/bootstrap; the only WayLane DB operator input is required secret WAYLANE_POSTGRES_PASSWORD. The backend maps those to upstream POSTGRES_* and constructs SQLALCHEMY_DATABASE_URL using the existing SQLAlchemy helper (no duplicate manually maintained DSN). PgBouncer is reachable as database:5432, not via host ports. Passwords embedded in its configuration URI must be URL-safe. Never reuse VPN Core or ZITADEL logical databases.
 
 Persistent waylane-data is **application-local** (not a second PostgreSQL volume); back it up and verify its purpose before resetting. Backend runs Alembic migrations at startup. Do not connect an old production panel database without an explicit migration and backup.
 
@@ -29,6 +29,6 @@ Once the backend Alembic migrations succeed, use the interactive Coolify Termina
 
 ## Acceptance
 
-Verify in Coolify's Deployable Compose that there are two services, one named volume, correct external private network, valid mounts and only the frontend receives a generated domain. Then verify the frontend health, same-origin /api/ login, /sub/ routing and log sanitization, database migrations, panel persistence, telemetry and restart/rollback. Existing WayLane admin authorization is still legacy: merely connecting this deployment to a ZITADEL-capable infrastructure does **not** implement ZITADEL OIDC.
+Verify in Coolify's Deployable Compose that there are three services (including one-shot `db-init`), one named volume, correct external private network, valid mounts and only the frontend receives a generated domain. Then verify the frontend health, same-origin /api/ login, /sub/ routing and log sanitization, database migrations, panel persistence, telemetry and restart/rollback. Existing WayLane admin authorization is still legacy: merely connecting this deployment to a ZITADEL-capable infrastructure does **not** implement ZITADEL OIDC.
 
 Publishing the source does not create the Coolify application or change currently running VPN Core/Web App/WayLane nodes.
