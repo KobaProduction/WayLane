@@ -14,11 +14,16 @@ from asyncpg.exceptions import DuplicateDatabaseError
 from sqlalchemy.engine import URL
 
 
+def resolved_database_name() -> str:
+    """Use the optional deployment DB name, falling back to WayLane's default."""
+    return os.getenv("WAYLANE_POSTGRES_DATABASE") or os.getenv("POSTGRES_DB") or "waylane"
+
+
 def configure_database_url_from_components() -> None:
     """Recreate the API database URL for one-shot managed CLI commands."""
     username = os.getenv("POSTGRES_USER", "")
     password = os.getenv("POSTGRES_PASSWORD", "")
-    database = os.getenv("POSTGRES_DB") or "waylane"
+    database = resolved_database_name()
     if not username or not password:
         raise SystemExit("POSTGRES_USER and POSTGRES_PASSWORD must be nonempty")
     url = URL.create(
@@ -33,7 +38,7 @@ async def ensure_database_exists() -> None:
     """Create a missing database as the WayLane owner, before Alembic runs."""
     username = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
-    database = os.getenv("POSTGRES_DB") or "waylane"
+    database = resolved_database_name()
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", database):
         raise SystemExit("Invalid PostgreSQL database identifier")
 

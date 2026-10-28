@@ -263,3 +263,18 @@ async def test_backend_creates_only_missing_database(monkeypatch, exists):
     else:
         connection.execute.assert_awaited_once_with('CREATE DATABASE "waylane"')
     connection.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize(("override", "expected"), [(None, "waylane"), ("", "waylane"), ("custom_db", "custom_db")])
+def test_optional_waylane_database_override(monkeypatch, override, expected):
+    path = ROOT / "services/backend/compose_db_entrypoint.py"
+    spec = importlib.util.spec_from_file_location("waylane_optional_db", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.delenv("POSTGRES_DB", raising=False)
+    if override is None:
+        monkeypatch.delenv("WAYLANE_POSTGRES_DATABASE", raising=False)
+    else:
+        monkeypatch.setenv("WAYLANE_POSTGRES_DATABASE", override)
+    assert module.resolved_database_name() == expected
