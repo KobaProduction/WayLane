@@ -14,10 +14,9 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: legacy Go node implementation and autonomous WayLane Node
-  bootstrap script/agent **source**, not new Node deployment entrypoints. The legacy
-  node remains host-network/NET_ADMIN dependent; do not ascribe those
-  privileges or its single-core lifecycle to the autonomous Node.
+- services/node/: one autonomous Go Node module (single `cmd/node`),
+  rootless child container control, bootstrap and WSS/Protobuf. Source,
+  not a deployment manifest.
 - deploy/node/{classic,discovery}/: separate Git-backed deployment owners,
   each with `docker-compose.yaml` and `docker-compose.coolify.yaml`; shared operator README at `deploy/node/README.md`.
   See `deploy/node/README.md` for Watch Paths, secrets and test boundaries.
@@ -32,16 +31,17 @@ No production DNS, data, token or routing changes before authorized cutover.
 
 ## WayLane Node architecture authority
 
-Read `services/node/AGENTS.md` and `services/node/README.md` before
-changing the autonomous agent-based node. Its single Compose entrypoint has **exactly two services**:
+Read `services/node/AGENTS.md` and `services/node/README.md`
+before changing the autonomous Node. Each Node deployment entrypoint has **exactly two services**:
 a one-shot privileged `bootstrap` preparing private volumes, then one
-non-privileged autonomous `agent`. The agent supervises its own embedded
-rootless Docker daemon through a private Unix socket. Neither host systemd,
+non-privileged autonomous `agent` service running the sole `cmd/node`
+program. The Node supervises its own embedded rootless Docker daemon
+through a private Unix socket. Neither host systemd,
 a separate Compose Docker sidecar, nor the host/system Docker socket belongs
-in this architecture. Only the agent communicates with the panel; the agent
-now owns a single DEV Xray child (deploy/pull/update/restart/stop,
-per-inbound account updates), while PasarGuard parity, multi-engine drivers,
-public UDP/TCP ingress and production traffic are **not** shipped.
+in this architecture. Only the Node communicates with the panel; the Node
+owns one DEV Xray child (deploy/pull/update/restart/stop,
+per-inbound account updates), while multi-engine drivers, public UDP/TCP ingress
+and production traffic are **not** accepted.
 The security/runtime pilot is not accepted by source CI alone.
 
 The control channel and Node-versus-Core ownership contract is

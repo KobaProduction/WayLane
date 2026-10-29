@@ -5,7 +5,7 @@
 `cmd/agent/` built by `node.Dockerfile`.**
 
 A Node is one installation comprising exactly two outer Compose services:
-a privileged **one-shot bootstrap** followed by one non-root **agent**
+a privileged **one-shot bootstrap** followed by one non-root **Node**
 supervising its own private rootless Docker and VPN core containers. A
 Classic or Discovery Node is a **registration mode**, not another runtime.
 
@@ -67,7 +67,7 @@ services/node/**
 
 Paths are repository-relative. The first pattern watches only that mode's
 two Compose files; the second watches all Node source (both Dockerfiles,
-the bootstrap script, Go commands and module dependencies). The final
+the bootstrap script, single Go command and module dependencies). The final
 negation deliberately excludes Node Markdown documentation. The common
 `deploy/node/README.md` is outside both resource Watch Paths, so README
 changes alone do **not** trigger Coolify's Git webhook deployments.
@@ -138,7 +138,6 @@ client traffic are **not yet production accepted**.
 Roll back by selecting the previous approved Git revision **without
 destroying volumes**, checking bootstrap/agent and restored WSS control.
 A source rollback cannot reverse changed persistent registration data;
-back up the identity volumes before a planned migration. Keep existing
-PasarGuard containers, credentials and client routing unchanged.
+back up the identity volumes before a planned migration. The pilot must not modify unrelated services, credentials, or client routing.
 See [Node architecture](../../services/node/README.md) and
 [wire protocol](../../shared/contracts/NODE_CONTROL.md).

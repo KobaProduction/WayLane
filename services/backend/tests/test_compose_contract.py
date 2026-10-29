@@ -249,19 +249,21 @@ def test_split_frontend_has_one_coolify_domain_and_never_backend_credentials():
     assert adapter["services"]["frontend"]["build"]["args"]["VITE_BASE_API"] == "${VITE_BASE_API:-/}"
 
 
-def test_node_is_an_independent_required_authenticated_resource():
-    generic = read("services/node/docker-compose.yaml")
-    coolify = read("services/node/docker-compose.coolify.yaml")
-    assert set(generic["services"]) == {"node"}
-    svc = generic["services"]["node"]
-    assert svc["environment"]["API_KEY"] == "${API_KEY:?}"
-    assert svc["network_mode"] == "host"
-    assert svc["cap_add"] == ["NET_ADMIN"]
-    assert svc.get("privileged") is not True
-    assert "/var/lib/pg-node:/var/lib/pg-node" in svc["volumes"]
-    assert coolify["services"]["node"]["environment"]["API_KEY"] == "${API_KEY:?}"
-    assert coolify["x-watch-path-coolify"] == ["services/node/**"]
-    assert "SERVICE_FQDN_NODE_62050" not in coolify["services"]["node"]["environment"]
+def test_node_is_an_independent_wss_deployment_with_no_old_compose():
+    from pathlib import Path
+    for mode in ("classic", "discovery"):
+        generic = read(f"deploy/node/{mode}/docker-compose.yaml")
+        coolify = read(f"deploy/node/{mode}/docker-compose.coolify.yaml")
+        assert set(generic["services"]) == {"bootstrap", "agent"}
+        assert set(coolify["services"]) == {"bootstrap", "agent"}
+        assert generic["services"]["bootstrap"]["privileged"] is True
+        agent = generic["services"]["agent"]
+        assert agent["user"] == "1000:1000"
+        assert agent["environment"]["CONTROL_PANEL_URL"] == "${CONTROL_PANEL_URL:?}"
+        assert agent["build"]["dockerfile"] == "services/node/node.Dockerfile"
+        assert not agent.get("ports")
+        assert "NODE_NAME" not in agent["environment"]
+    assert not (ROOT / "services/node/docker-compose.yaml").exists()
 
 
 def test_pgbouncer_config_is_session_pooling_scram_and_never_trust_auth():

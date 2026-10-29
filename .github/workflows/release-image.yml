@@ -18,7 +18,6 @@ jobs:
           case "$TAG" in
             backend-v*) echo "component=backend" >> "$GITHUB_OUTPUT";;
             frontend-v*) echo "component=frontend" >> "$GITHUB_OUTPUT";;
-            node-v*) echo "component=node" >> "$GITHUB_OUTPUT";;
             *) echo "Unsupported component release tag" >&2; exit 1;;
           esac
   verify:
@@ -36,10 +35,6 @@ jobs:
           python-version: "3.14"
       - uses: astral-sh/setup-uv@v6
         if: needs.detect.outputs.component == 'backend'
-      - uses: actions/setup-go@v5
-        if: needs.detect.outputs.component == 'node'
-        with:
-          go-version-file: services/node/go.mod
       - name: Component verification
         env:
           COMPONENT: ${{ needs.detect.outputs.component }}

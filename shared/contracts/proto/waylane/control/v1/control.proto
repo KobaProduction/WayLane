@@ -1,6 +1,6 @@
 syntax = "proto3";
 package waylane.control.v1;
-option go_package = "github.com/KobaProduction/waylane/services/node/cmd/agent/controlpb;controlpb";
+option go_package = "github.com/KobaProduction/waylane/services/node/cmd/node/controlpb;controlpb";
 
 import "google/protobuf/struct.proto";
 

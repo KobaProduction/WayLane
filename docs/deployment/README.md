@@ -4,7 +4,8 @@
 | --- | --- | --- | --- |
 | Backend | /services/backend | /Dockerfile | services/backend/** |
 | Frontend | /services/frontend | /Dockerfile | services/frontend/** |
-| Node | /services/node | /Dockerfile | services/node/** |
+| Discovery Node | /deploy/node/discovery | /docker-compose.coolify.yaml | deploy/node/discovery/*.yaml, services/node/** (exclude Markdown) |
+| Classic Node | /deploy/node/classic | /docker-compose.coolify.yaml | deploy/node/classic/*.yaml, services/node/** (exclude Markdown) |
 | Owned backend+PostgreSQL+PgBouncer | /deploy/backend-postgres | /docker-compose.coolify.yaml | deploy/backend-postgres/**, deploy/compose/pgbouncer/**, services/backend/** |
 | All-in-One Control Plane | / | /docker-compose.coolify.yaml | docker-compose*.yaml, deploy/compose/**, services/backend/**, services/frontend/** |
 
@@ -57,16 +58,12 @@ Exact external variable contract, commands, security and source ownership:
 deploy/compose/README.md. Actual Coolify parser resolution, Shared secrets,
 domain generation and persistence must be verified before live deployment.
 
-## Experimental WayLane Node Agent (not the legacy node)
 
-The existing Node row above describes **legacy** `services/node/Dockerfile`
-and host-network node deployment. Do not apply those assumptions to Node
-WayLane Agent. The optional `services/node/docker-compose.agent.yaml` is one
-independent **two-service** deployment: an exited privileged bootstrap plus
-an autonomous non-privileged agent that supervises its own embedded rootless
-Docker daemon. It has **no systemd, extra Compose rootless-engine service or
-host Docker socket**. Future independently deployable VPN engine containers
-are managed exclusively by the agent, but their lifecycle and real traffic
-have not yet been implemented or accepted. This manifest is generic Compose;
-no Coolify v2 resource, ENV or managed-domain contract has been approved.
-Canonical details and runtime gates: `services/node/README.md`.
+## Autonomous Node deployment
+
+Deploy from the two Git-owned Compose entrypoints in
+`deploy/node/discovery/` or `deploy/node/classic/`. Each resource
+contains a one-shot bootstrap and a non-root Node process, with private
+rootless Docker and persistent state volumes. See
+[Node deployment](../../deploy/node/README.md) for Watch Paths, required
+secrets, TLS/WSS acceptance and rollback. No published host control ports.

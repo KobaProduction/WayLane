@@ -69,4 +69,4 @@ are implemented in source, but end-to-end acceptance and public VPN traffic
 have not been demonstrated for this merged revision. Other engines and
 networking/privilege hardening remain future work.
 The legacy Go node is preserved independently until migration acceptance.
-See [services/node/README.md](services/node/README.md).
+See [services/node/README.md](services/node/README.md) and [deploy/node/README.md](deploy/node/README.md).

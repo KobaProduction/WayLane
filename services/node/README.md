@@ -1,65 +1,33 @@
 # WayLane Node
 
-**Project:** WayLane · **Legacy node license:** GPL-3.0 (upstream-derived)
+A single autonomous Go program at `cmd/node/` manages the Node and its
+independent VPN core containers using a private rootless Docker daemon.
 
-This directory contains two distinct node runtimes: the legacy PasarGuard-compatible Go VPN node and the separate autonomous WayLane Node Agent. The legacy implementation originates from the verified PasarGuard Node snapshot.
+## Runtime
 
-**Available today:** Xray-core, WireGuard, gRPC/REST node control, node/user synchronization, health reporting and statistics.
+- `bootstrap.sh` and `bootstrap.Dockerfile`: one-shot privileged
+  initialization of private persistent volumes (UID/GID 1000).
+- `node.Dockerfile`: one unprivileged long-lived Node with its own
+  RootlessKit and private Docker socket.
+- `go.mod`: minimal dependencies for binary WebSocket and Protobuf.
+- `cmd/node/`: Node registration, telemetry, desired state, Xray child
+  lifecycle and persistent identity.
 
-**Existing legacy code:** opt-in AmneziaWG-Go 3.1 UAPI integration and frontend preset are present; real Linux TUN/UDP traffic acceptance remains open (Issue #7). **Planned:** sing-box, custom engines, enhanced failover and pluggable child-container orchestration.
+The Node initiates a single full-duplex WSS session to the Control Panel
+using the configured `CONTROL_PANEL_URL`. Commands and telemetry use
+binary Protobuf `Envelope` messages. The Node name comes from a read-only
+mount of the host's `/etc/hostname`; no `NODE_NAME` is needed.
 
-Build: `make build`, or use `docker build -t waylane-node:dev .`. Existing data directories and `PG_NODE_*` settings are temporarily retained to preserve backward compatibility.
+**Deployment definitions are separate from source:**
+[deploy/node/README.md](../../deploy/node/README.md). Choose either
+Discovery (Node enrolls with a protected invitation) or Classic
+(panel provisions its individual token). Each has one standalone
+`docker-compose.yaml` and one `docker-compose.coolify.yaml`.
 
-For upstream copyright and source commit see [UPSTREAM.md](UPSTREAM.md) and [LICENSE](LICENSE). **Do not run this baseline against production Intens nodes before migration acceptance.**
+## Verification and limits
 
-
-## AI workflow and verification
-
-Read `AGENTS.md` and the task-specific rules from
-[AI Agent Workflow](https://github.com/ArthurKoba/ai-agent-workflow).
-On a new checkout enable the tracked hooks with
-`git config --local core.hooksPath .githooks`; run `./scripts/verify.sh`
-before attempting a push. CI runs the same repository-specific gate.
-
-**Bootstrap limitation:** Passing these checks does not prove runtime
-deployment compatibility, or complete the eventual Vue/HA migration.
-
-Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft license applicable to derived code. See `LICENSING.md` and `LICENSE.UPSTREAM`.
-
-Tests: `./scripts/verify.sh` provisions a pinned checksum-verified Xray executable and disposable TLS certs in ignored local directories before executing the existing integration tests. No production credentials are used.
-
-## Autonomous WayLane Node
-
-The new Node is a **single installation** comprising exactly two outer
-Compose services: one-shot privileged \`bootstrap\` and non-privileged
-\`agent\` (UID/GID 1000). The internal controller runs in a private
-rootless Docker environment and can manage child VPN core containers.
-No host Docker socket, host systemd or third Docker sidecar is allowed.
-
-**Implementation is one Go module (\`services/node/go.mod\`)**. The legacy
-PasarGuard binary builds from \`cmd/node\` and the autonomous controller
-from \`cmd/agent\`. Their executables and Docker images are separate.
-The one-shot initialization is a small \`bootstrap.sh\`, with
-\`bootstrap.Dockerfile\`; the autonomous Node image uses
-\`node.Dockerfile\`. These are source files, not deployment entrypoints.
-
-[Discovery and Classic](../../deploy/node/README.md) are registration
-modes. Each has its own generic and Coolify Compose under \`deploy/node/\`.
-Discovery uses one protected invitation \`DISCOVERY_TOKEN\` to enroll; Classic
-uses an individual \`NODE_TOKEN\` issued from the panel. A registered Node
-persists its private identity in the \`agent-state\` volume and reads its
-name from the host's read-only \`/etc/hostname\`. Never share an identity
-volume across two Nodes.
-
-The Node establishes one authenticated outbound WSS connection derived
-from \`CONTROL_PANEL_URL\`, using only binary Protobuf \`Envelope\` frames:
-hello/ack, desired commands, result/ack, telemetry and ping/pong.
-The panel sends commands on the same full-duplex socket. No autonomous
-Node gRPC control transport, alternate HTTP control fallback or published
-management port is supported. See
-[Node control protocol](../../shared/contracts/NODE_CONTROL.md).
-
-DEV supports one Xray child, but complete PasarGuard parity, multiple
-core drivers and public TCP/UDP VPN traffic require separate acceptance.
-Legacy PasarGuard instances, data and client routing must not be touched
-while testing autonomous Node.
+Run `./scripts/verify.sh` with Go 1.27+, or let CI run its equivalent.
+The source and Compose checks do not prove runtime RootlessKit
+compatibility, real TCP/UDP VPN traffic, multiple engines, or completed
+initial enrollment. Pilot on an isolated host before using client traffic.
+No management HTTP port or host Docker socket should be exposed.

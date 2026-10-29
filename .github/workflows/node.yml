@@ -27,20 +27,7 @@ jobs:
         with:
           go-version-file: services/node/go.mod
       - run: ./scripts/verify.sh
-  image:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./services/node
-          file: ./services/node/Dockerfile
-          push: false
-          platforms: linux/amd64
-          tags: waylane-node:ci
-  agent-images:
+  node-images:
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -52,7 +39,7 @@ jobs:
           file: ./services/node/node.Dockerfile
           push: false
           platforms: linux/amd64
-          tags: waylane-agent:ci
+          tags: waylane-node:ci
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -62,7 +49,7 @@ jobs:
           tags: waylane-bootstrap:ci
 
   agent-compose-smoke:
-    needs: agent-images
+    needs: node-images
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:

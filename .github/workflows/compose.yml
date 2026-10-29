@@ -13,7 +13,6 @@ on:
       - "services/backend/docker-compose*.yaml"
       - "services/backend/compose_db_entrypoint.py"
       - "services/frontend/docker-compose*.yaml"
-      - "services/node/docker-compose*.yaml"
       - ".github/workflows/compose.yml"
   pull_request:
     paths:
@@ -27,7 +26,6 @@ on:
       - "services/backend/docker-compose*.yaml"
       - "services/backend/compose_db_entrypoint.py"
       - "services/frontend/docker-compose*.yaml"
-      - "services/node/docker-compose*.yaml"
       - ".github/workflows/compose.yml"
 
 permissions:
@@ -58,16 +56,12 @@ jobs:
           docker compose -f deploy/external/docker-compose.coolify.yaml config --quiet
           docker compose -f deploy/external/docker-compose.coolify.yaml config --format json | \
             python3 -c 'import json,sys; c=json.load(sys.stdin); assert set(c["services"]) == {"backend","frontend"}; assert c["networks"]["dependencies"]["external"]'
-          docker compose -f services/node/docker-compose.yaml config --quiet
-          docker compose -f services/node/docker-compose.coolify.yaml config --quiet
-          docker compose -f services/node/docker-compose.amnezia.coolify.yaml config --quiet
           CONTROL_PANEL_URL=https://panel.example.invalid \
             DISCOVERY_TOKEN=wl_disc_ci-synthetic-only \
             docker compose -f deploy/node/discovery/docker-compose.yaml config --quiet
           CONTROL_PANEL_URL=https://panel.example.invalid \
             NODE_TOKEN=wl_node_01234567-89ab-4cde-a012-3456789abcde_0123456789012345678901234567890123456789012 \
             docker compose -f deploy/node/classic/docker-compose.yaml config --quiet
-          docker compose -f services/node/docker-compose.yaml -f services/node/docker-compose.amnezia.yaml config --quiet
           docker compose -f services/backend/docker-compose.yaml config --quiet
           docker compose -f services/backend/docker-compose.coolify.yaml config --quiet
           docker compose -f services/frontend/docker-compose.yaml config --quiet
@@ -84,10 +78,6 @@ jobs:
             python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all(s[x]["environment"]["POSTGRES_USER"]=="waylane" and s[x]["environment"]["POSTGRES_DB"]=="waylane" for x in ("postgres","backend"))'
           docker compose -f docker-compose.yaml config --format json | \
             python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all(s[x]["environment"]["POSTGRES_USER"]=="ci_waylane" and s[x]["environment"]["POSTGRES_DB"]=="waylane_test" for x in ("postgres","backend"))'
-          if env -u API_KEY docker compose -f services/node/docker-compose.yaml config --quiet >/dev/null 2>&1; then
-            echo "Missing node API_KEY was accepted" >&2
-            exit 1
-          fi
           if env -u SQLALCHEMY_DATABASE_URL docker compose -f services/backend/docker-compose.yaml config --quiet >/dev/null 2>&1; then
             echo "Missing external database DSN was accepted" >&2
             exit 1

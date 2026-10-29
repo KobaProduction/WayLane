@@ -1,30 +1,17 @@
-# WayLane Node — agent routing
+# WayLane autonomous Node
 
-Canonical source: https://github.com/KobaProduction/WayLane/tree/main/services/node
-The deleted standalone node repository is not an active source or release authority.
-Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
+The only Node implementation is this Go module, built from `cmd/node`.
+Read root `AGENTS.md`, `services/node/README.md`,
+`deploy/node/README.md` and relevant AI Agent Workflow skills.
 
-## Two independent node lifecycles
+Node installs via `deploy/node/{classic,discovery}/` with exactly two
+outer services: one-shot privileged bootstrap, non-root steady-state
+agent controller that owns its private rootless Docker and VPN cores.
+The control plane is **one outbound authenticated WSS connection** with
+binary Protobuf. No secondary management transport, host Docker socket,
+independent systemd service or extra Compose rootless sidecar.
 
-- Legacy `cmd/node/`, `controller/`, `backend/xray/`, `backend/wireguard/`:
-  one existing PasarGuard-compatible node process, host networking and
-  NET_ADMIN requirements; `DEPLOYMENT.md` owns this runtime's acceptance.
-  Kernel WireGuard remains the default; AmneziaWG 3.1 is opt-in and requires
-  separate real-traffic verification (Issue #7).
-- New `bootstrap.sh` plus minimal `bootstrap.Dockerfile`, `node.Dockerfile` and `cmd/agent/`:
-  autonomous WayLane Node **source only**.
-  Git-backed deployment definitions belong to
-  `deploy/node/{classic,discovery}/` (one generic `docker-compose.yaml`,
-  one `docker-compose.coolify.yaml` per mode, with the single README in `deploy/node/`). Read
-  `deploy/node/README.md` and `services/node/README.md` before
-  changing runtime or deployment contracts.
-  Exactly two Compose services, one-shot privileged bootstrap and autonomous
-  non-privileged Go agent supervising its private embedded rootless Docker.
-  No host systemd, independent rootless-engine Compose service, or host Docker
-  socket. The panel communicates only with the internal node controller. Single Xray DEV child is implemented, but full legacy user/stats/routing
-  parity and additional engines are deferred and not accepted.
-
-`common/service.proto` is now a WayLane-native RPC contract, paired with the bundled Python bridge;
-`scripts/verify.sh` runs source gates. Preserve provenance/licenses in
-`UPSTREAM.md` and `LICENSING.md`. No production node migration without
-explicit acceptance.
+`scripts/verify.sh` owns the Go source gate. The Go dependencies are
+isolated to the Node's WSS/Protobuf runtime. Validate both generic and
+Coolify Compose and the host runtime before declaring deployment ready.
+Do not claim production traffic support from source tests alone.

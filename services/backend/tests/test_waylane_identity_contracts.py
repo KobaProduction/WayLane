@@ -6,12 +6,13 @@ from uuid import UUID
 
 import pytest
 from google.protobuf import descriptor_pb2
+from grpc_tools import _proto
 from grpc_tools import protoc
 
 from app.db.crud.api_key import API_KEY_PREFIX, _generate_api_key
 from app.routers import authentication
 from app.utils.crypto import hash_api_key, verify_api_key
-from waylane_node_bridge.common import service_pb2
+from app.controlpb import control_pb2
 
 
 def test_new_keys_use_one_waylane_prefix_and_fit_existing_mask_column():
@@ -36,32 +37,28 @@ async def test_authentication_accepts_only_waylane_key_format(monkeypatch):
     lookup.assert_awaited_once_with(None, f"waylane_{uuid}")
 
 
-def test_python_and_go_node_schemas_are_identical(tmp_path):
+def test_control_protobuf_is_one_binary_websocket_envelope(tmp_path):
     backend = Path(__file__).resolve().parents[1]
-    node = backend.parent / "node"
-    descriptors = []
-    for root, path in (
-        (backend, "waylane_node_bridge/common/service.proto"),
-        (node, "common/service.proto"),
-    ):
-        output = tmp_path / (root.name + "-node.pb")
-        result = protoc.main(
-            [
-                "grpc_tools.protoc",
-                f"-I{root}",
-                f"--descriptor_set_out={output}",
-                path,
-            ]
-        )
-        assert result == 0
-        file_proto = descriptor_pb2.FileDescriptorSet.FromString(output.read_bytes()).file[0]
-        assert file_proto.package == "waylane.node.v1"
-        assert file_proto.options.go_package == "github.com/KobaProduction/waylane/services/node/common"
-        file_proto.ClearField("name")  # local source location is language-specific
-        descriptors.append(file_proto.SerializeToString(deterministic=True))
-    assert descriptors[0] == descriptors[1]
-    assert service_pb2.DESCRIPTOR.package == "waylane.node.v1"
-    assert service_pb2.DESCRIPTOR.name == "waylane_node_bridge/common/service.proto"
-    assert service_pb2.DESCRIPTOR.services_by_name["NodeService"].full_name == "waylane.node.v1.NodeService"
-    assert "pre_shared_key" in service_pb2.Wireguard.DESCRIPTOR.fields_by_name
-    assert "masque" in service_pb2.Proxy.DESCRIPTOR.fields_by_name
+    project = backend.parent.parent
+    proto = project / "shared/contracts/proto/waylane/control/v1/control.proto"
+    assert proto.is_file()
+    output = tmp_path / "control.pb"
+    result = protoc.main([
+        "grpc_tools.protoc",
+        f"-I{proto.parent}",
+        f"-I{Path(_proto.__file__).parent}",
+        f"--descriptor_set_out={output}",
+        proto.name,
+    ])
+    assert result == 0
+    descriptor = descriptor_pb2.FileDescriptorSet.FromString(output.read_bytes()).file[0]
+    assert descriptor.package == "waylane.control.v1"
+    assert not descriptor.service
+    assert descriptor.options.go_package == (
+        "github.com/KobaProduction/waylane/services/node/cmd/node/controlpb;controlpb"
+    )
+    assert set(control_pb2.Envelope.DESCRIPTOR.fields_by_name) == {
+        "protocol_version", "node_uuid", "message_id", "kind",
+        "core_id", "generation", "operation", "payload",
+        "status", "error_code",
+    }
