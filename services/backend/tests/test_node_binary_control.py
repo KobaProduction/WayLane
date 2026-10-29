@@ -1,10 +1,8 @@
-"""Real binary WebSocket and gRPC control path regressions (no secrets logged)."""
+"""Binary WebSocket Node control regressions (no secrets logged)."""
 import asyncio
-import socket
 from datetime import UTC, datetime
 from uuid import uuid4
 
-import grpc
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,8 +11,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.websockets import WebSocketDisconnect
 
 from app import node_binary_control as control
-from app.node_grpc_control import create_grpc_server
-from app.controlpb import control_pb2_grpc as pb_grpc
 from app.db.base import Base
 from app.db.models import node_agent_registrations, node_agent_xray_desired
 from app.routers.node_control_ws import router as ws_router
@@ -53,6 +49,12 @@ def runtime(tmp_path,monkeypatch):
     node=asyncio.run(seed(factory))
     yield node,factory
     asyncio.run(engine.dispose())
+
+
+def test_protobuf_schema_exposes_binary_envelope_without_grpc_rpc():
+    from app.controlpb import control_pb2 as pb
+    assert pb.DESCRIPTOR.services_by_name == {}
+    assert "Envelope" in pb.DESCRIPTOR.message_types_by_name
 
 
 def test_websocket_only_binary_protobuf_frames_and_desired_state(runtime):
@@ -145,34 +147,6 @@ def test_rejected_websocket_agent_cannot_handshake(runtime):
                                           headers={"x-node-secret":"invalid"},
                                           subprotocols=["waylane.pb.v1"]):
                 pass
-
-
-def test_grpc_bidirectional_protobuf_stream_accepts_and_reports(runtime):
-    node,_factory=runtime
-    async def run():
-        sock=socket.socket()
-        sock.bind(("127.0.0.1",0))
-        port=sock.getsockname()[1]
-        sock.close()
-        server=await create_grpc_server(f"127.0.0.1:{port}")
-        try:
-            async with grpc.aio.insecure_channel(f"127.0.0.1:{port}") as channel:
-                client=pb_grpc.AgentControlStub(channel)
-                call=client.Connect(metadata=(("x-node-uuid",node),("x-node-secret",SECRET)))
-                await call.write(control.new_message("hello",node))
-                hello=await asyncio.wait_for(call.read(),timeout=6)
-                assert hello.kind=="hello_ack"
-                desired=await asyncio.wait_for(call.read(),timeout=9)
-                assert desired.kind=="desired" and desired.generation==1
-                await call.write(control.new_message("result",node,generation=1,
-                    core_id="xray/default",status="running"))
-                accepted=await asyncio.wait_for(call.read(),timeout=6)
-                assert accepted.kind=="ack"
-                await call.done_writing()
-                call.cancel()
-        finally:
-            await server.stop(grace=1)
-    asyncio.run(run())
 
 
 def test_reject_obsolete_credential_even_if_its_hash_matches(runtime):

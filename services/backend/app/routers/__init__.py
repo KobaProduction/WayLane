@@ -65,6 +65,3 @@ for router in routers:
     api_router.include_router(router)
 
 __all__ = ["api_router"]
-
-# Register optional gRPC server with the normal backend lifespan.
-from app import node_grpc_control as _node_grpc_control  # noqa: F401

@@ -329,13 +329,6 @@ func run(ctx context.Context) error {
 		// Never forward discovery/agent credentials to a redirected origin.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	controlMode := os.Getenv("CONTROL_TRANSPORT")
-	if controlMode == "" {
-		controlMode = "grpc"
-	}
-	if controlMode != "ws" && controlMode != "grpc" {
-		return errors.New("CONTROL_TRANSPORT must be grpc or ws")
-	}
 	if !ident.Registered {
 		if token == "" {
 			return errors.New("discovery enrollment token is required")
@@ -352,7 +345,7 @@ func run(ctx context.Context) error {
 		}
 		log.Printf("Node registered node=%s status=%s", ident.UUID, reply.Status)
 	}
-	return runBinaryControl(ctx, origin, ident, state, socket, controlMode)
+	return runBinaryControl(ctx, origin, ident, state, socket)
 }
 
 func main() {

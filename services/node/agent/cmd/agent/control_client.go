@@ -3,18 +3,12 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 	"math"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -58,21 +52,6 @@ func (s *wsControlStream) Recv() (*controlEnvelope, error) {
 	return &msg, nil
 }
 func (s *wsControlStream) Close() error { return s.ws.Close() }
-
-type grpcControlStream struct {
-	stream grpc.ClientStream
-	conn   *grpc.ClientConn
-}
-
-func (s *grpcControlStream) Send(e *controlEnvelope) error { return s.stream.SendMsg(e) }
-func (s *grpcControlStream) Recv() (*controlEnvelope, error) {
-	var e controlEnvelope
-	if err := s.stream.RecvMsg(&e); err != nil {
-		return nil, err
-	}
-	return &e, nil
-}
-func (s *grpcControlStream) Close() error { _ = s.stream.CloseSend(); return s.conn.Close() }
 
 func newControlMessage(uuid, kind, core string, generation uint64, payload map[string]any) (*controlEnvelope, error) {
 	random := make([]byte, 16)
@@ -125,73 +104,6 @@ func wsControlConnect(ctx context.Context, origin string, ident identity) (binar
 	return &wsControlStream{ws: conn}, nil
 }
 
-// grpcTarget derives the stream endpoint from the same HTTPS origin used
-// for Discovery registration and optional WSS. gRPC must be routed over the
-// same public TLS hostname/port; there is no separate operator target.
-func grpcTarget(origin string) (string, error) {
-	panel, err := url.Parse(origin)
-	if err != nil || panel.Hostname() == "" || panel.User != nil || panel.RawQuery != "" || panel.Fragment != "" ||
-		(panel.Path != "" && panel.Path != "/") {
-		return "", errors.New("CONTROL_PANEL_URL must be a valid HTTPS origin")
-	}
-	var port string
-	switch panel.Scheme {
-	case "https":
-		port = "443"
-	case "http":
-		if os.Getenv("DEV_ALLOW_HTTP") != "true" {
-			return "", errors.New("plaintext gRPC is forbidden outside local development")
-		}
-		port = "80"
-	default:
-		return "", errors.New("unsupported CONTROL_PANEL_URL scheme")
-	}
-	if panel.Port() != "" {
-		port = panel.Port()
-	}
-	if panel.Scheme == "http" {
-		host := panel.Hostname()
-		if host != "host.docker.internal" && host != "localhost" &&
-			(net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback()) {
-			return "", errors.New("plaintext gRPC is restricted to local development")
-		}
-	}
-	return net.JoinHostPort(panel.Hostname(), port), nil
-}
-
-func grpcControlConnect(ctx context.Context, origin string, ident identity) (binaryStream, error) {
-	target, err := grpcTarget(origin)
-	if err != nil {
-		return nil, err
-	}
-	panel, _ := url.Parse(origin)
-	host := panel.Hostname()
-	opts := []grpc.DialOption{grpc.WithDefaultCallOptions(grpc.ForceCodec(controlWireCodec{})), grpc.WithBlock()}
-	if os.Getenv("GRPC_DEV_INSECURE") == "true" {
-		if panel.Scheme != "http" || os.Getenv("DEV_ALLOW_HTTP") != "true" ||
-			(host != "host.docker.internal" && host != "localhost" &&
-				(net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback())) {
-			return nil, errors.New("plaintext gRPC forbidden")
-		}
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})))
-	}
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(dialCtx, target, opts...)
-	if err != nil {
-		return nil, err
-	}
-	streamCtx := metadata.AppendToOutgoingContext(ctx, "x-node-uuid", ident.UUID, "x-node-secret", ident.Secret)
-	stream, err := conn.NewStream(streamCtx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true},
-		"/waylane.control.v1.AgentControl/Connect")
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return &grpcControlStream{stream: stream, conn: conn}, nil
-}
 func normalizeControlNumbers(value any) any {
 	switch item := value.(type) {
 	case map[string]any:
@@ -283,7 +195,15 @@ func runControlStream(ctx context.Context, stream binaryStream, ident identity, 
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = sendTelemetry()
+				if err := sendTelemetry(); err != nil {
+					return
+				}
+				// Receive-side liveness: server replies with a binary pong
+				// so idle connections do not hit the read deadline.
+				ping, err := newControlMessage(ident.UUID, "ping", "", 0, nil)
+				if err != nil || send(ping) != nil {
+					return
+				}
 			}
 		}
 	}()
@@ -363,28 +283,21 @@ func runControlStream(ctx context.Context, stream binaryStream, ident identity, 
 	}
 }
 
-func runBinaryControl(ctx context.Context, origin string, ident identity, state, socket, transport string) error {
+// A single outbound binary WebSocket carries the entire Node management
+// protocol. There is no transport switch, gRPC dial, or HTTP control fallback.
+func runBinaryControl(ctx context.Context, origin string, ident identity, state, socket string) error {
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		var stream binaryStream
-		var err error
-		switch transport {
-		case "ws":
-			stream, err = wsControlConnect(ctx, origin, ident)
-		case "grpc":
-			stream, err = grpcControlConnect(ctx, origin, ident)
-		default:
-			return errors.New("unsupported binary transport")
-		}
+		stream, err := wsControlConnect(ctx, origin, ident)
 		if err == nil {
 			err = runControlStream(ctx, stream, ident, state, socket)
 		}
 		if ctx.Err() != nil {
 			return nil
 		}
-		// No fallback to HTTP or text transports; bounded reconnection.
+		// Bounded reconnect after network failure; never downgrade to text.
 		_ = err
 		select {
 		case <-ctx.Done():

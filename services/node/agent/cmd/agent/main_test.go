@@ -248,29 +248,3 @@ func TestNodeDefaultsToHostMachineName(t *testing.T) {
 		t.Fatal("missing host /etc/hostname mount must fail closed")
 	}
 }
-
-func TestGRPCTargetDerivedFromControlPanelURL(t *testing.T) {
-	cases := map[string]string{
-		"https://control.example.com":      "control.example.com:443",
-		"https://control.example.com:8443": "control.example.com:8443",
-		"https://[2001:db8::5]:443":        "[2001:db8::5]:443",
-	}
-	for origin, expected := range cases {
-		got, err := grpcTarget(origin)
-		if err != nil || got != expected {
-			t.Fatalf("grpcTarget(%s): %q %v, want %q", origin, got, err, expected)
-		}
-	}
-	for _, bad := range []string{"ftp://control.example.com", "http://control.example.com", "https://user:pass@control.example.com", "https://control.example.com/foo", "https://control.example.com?token=secret"} {
-		if _, err := grpcTarget(bad); err == nil {
-			t.Fatalf("accepted invalid origin %s", bad)
-		}
-	}
-	t.Setenv("DEV_ALLOW_HTTP", "true")
-	if got, err := grpcTarget("http://host.docker.internal:8080"); err != nil || got != "host.docker.internal:8080" {
-		t.Fatalf("local HTTP target: %q %v", got, err)
-	}
-	if _, err := grpcTarget("http://public.example.com"); err == nil {
-		t.Fatal("public plaintext gRPC accepted")
-	}
-}

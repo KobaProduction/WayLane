@@ -13,9 +13,7 @@ services:
       CONTROL_PANEL_URL: ${CONTROL_PANEL_URL:?}
       NODE_TOKEN: ${NODE_TOKEN:?}
       DISCOVERY_TOKEN: ""
-      CONTROL_TRANSPORT: ${CONTROL_TRANSPORT:-grpc}
       DEV_ALLOW_HTTP: "false"
-      GRPC_DEV_INSECURE: "false"
 volumes:
   agent-state: {}
   rootless-data: {}

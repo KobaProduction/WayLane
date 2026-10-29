@@ -40,6 +40,6 @@ Agent products.
 
 The base runtime is `docker-compose.node.yaml`. See
 [Node runtime, enrollment and core ownership](agent/README.md).
-gRPC Protobuf is the default control transport and WSS Protobuf is an
-explicit alternative. Public traffic remains unaccepted. Legacy PasarGuard
+The autonomous Node control plane uses one persistent binary WebSocket
+with Protobuf frames. (Legacy PasarGuard node RPC is a separate runtime.) Public traffic remains unaccepted. Legacy PasarGuard
 nodes are a separate deployment, not an alternate Node-control protocol.

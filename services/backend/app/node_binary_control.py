@@ -1,4 +1,4 @@
-"""Binary-only protobuf control protocol shared by gRPC and WebSocket adapters.
+"""Binary-only Protobuf control over a single Node-initiated WebSocket.
 
 The wire never carries JSON/text/SSE frames. All database operations use a
 short-lived AsyncSession; message framing and authentication are common.

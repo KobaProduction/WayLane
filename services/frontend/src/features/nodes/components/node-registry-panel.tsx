@@ -424,10 +424,10 @@ export default function NodeDiscoveryPanel() {
             </div>
           )}
           <p className="text-muted-foreground text-xs">
-            Один адрес CONTROL_PANEL_URL (полный HTTPS-адрес панели) используется для регистрации,
-            двустороннего gRPC и, при выборе CONTROL_TRANSPORT=ws, бинарного WebSocket.
-            gRPC — по умолчанию; для него панель должна принимать HTTP/2 на том же адресе.
-            Если gRPC недоступен, вручную выберите ws. Обратное подключение к ноде не требуется.
+            Единственный адрес CONTROL_PANEL_URL используется для регистрации по HTTPS
+            и постоянного защищённого WebSocket (WSS) с бинарными сообщениями Protobuf.
+            Панель передаёт команды, нода возвращает состояние и телеметрию по тому же соединению.
+            Открывать входящий порт управления на ноде не требуется.
           </p>
         </div>
         {registrationMode === 'discovery' && invitations.length > 0 && (

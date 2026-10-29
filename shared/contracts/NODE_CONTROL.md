@@ -1,89 +1,75 @@
-# WayLane Agent binary control v1
+# WayLane Node control v1 — binary WebSocket + Protobuf
 
-One autonomous **Node** is a machine running a single autonomous Agent. The Agent
-owns machine telemetry, registration and private core runtime; it can supervise
-many independent cores later. Cores never receive Panel credentials or report
-host/machine identity.
+The installed **Node** contains the one-shot bootstrap, an internal non-root
+`agent` controller and private independently managed VPN cores. Only the
+controller connects to the Control Panel; child VPN cores never receive
+panel credentials or the host identity.
 
-## Binary wire contract
+## Transport: one outbound WSS session
 
-The authoritative message schema is
-`shared/contracts/proto/waylane/control/v1/control.proto`:
+The sole control transport is an authenticated **WebSocket with binary
+Protobuf frames**, using the checked-in message schema
+`shared/contracts/proto/waylane/control/v1/control.proto`.
+The control socket is reached at
+`wss://<control-panel-host>[:port]/api/node-control/control/ws?node_uuid=<uuid>`.
+It requires subprotocol `waylane.pb.v1`; text frames and unrecognized
+subprotocols are rejected. The Node derives this URL from the single
+`CONTROL_PANEL_URL=https://<control-panel-host>[:port]`.
 
-- **gRPC/HTTP2**: bidirectional `AgentControl.Connect(stream Envelope)`;
-- **WebSocket**: `/api/node-control/control/ws?node_uuid=<uuid>`, subprotocol
-  `waylane.pb.v1`, strictly WebSocket **binary frames** carrying the serialized
-  exact same Protobuf `Envelope`;
-- text frames, JSON over WebSocket, SSE and HTTP response streaming are **not
-  supported as control transports**.
+The Node establishes the connection. It is **full duplex**: the Panel can
+push commands at any time over the active session; the Node sends
+telemetry, acknowledgements, results and heartbeats over the same session.
+No separate inbound connection, gRPC listener, system Docker socket or
+published Node management port is required. An offline Node is unreachable
+until it reconnects; the Panel retains durable desired state for replay.
 
-Each envelope contains a protocol version, random message ID, Node UUID,
-optional core ID, generation, operation, typed Protobuf `Struct` payload,
-status and redacted error code. There is no transport-specific command schema.
-Xray configuration maps inside `Struct` are serialized as Protobuf binary on
-both transports, not JSON on the network.
+Discovery enrollment uses an HTTPS request before the binary channel is
+opened. The registered Node presents its individual secret as an
+`X-Node-Secret` header, and the server verifies its approved identity
+before accepting the WebSocket.
 
-The Node initiates one outbound connection. In gRPC bidirectional streaming,
-both the panel and the Node send independent Protobuf messages over that
-single authenticated session; the panel does **not** initiate a separate
-network connection to the Node. Management is full-duplex in both cases:
-Panel pushes desired generations, Agent sends telemetry, acknowledges and
-reports applied/restart-needed/error states. Server authenticates every
-session with the existing per-Agent credential and requires approval.
-Wrong/revoked identity is rejected. The child never receives that credential.
+No gRPC Node control RPC, alternative transport selector, plaintext
+remote WebSocket, text/JSON control frames, SSE, HTTP desired polling or
+legacy credential aliases are supported. Local Docker Desktop-only
+`DEV_ALLOW_HTTP=true` permits `ws://` to an explicit local endpoint;
+never enable it on a public network.
 
-### Connection configuration
+## Wire semantics
 
-`CONTROL_TRANSPORT=grpc` is the default for a **new Node**.
-Both HTTPS registration and bidirectional gRPC use the **one**
-`CONTROL_PANEL_URL=https://hostname[:port]`. The Node derives its gRPC
-host and port (443 by default) from this URL. The panel ingress MUST route
-`/waylane.control.v1.AgentControl/Connect` over HTTP/2 to its gRPC server.
-It does not need a separate Node-facing endpoint or a second operator URL.
-Use `CONTROL_TRANSPORT=ws` as an explicit binary WebSocket alternative.
-The Panel's optional gRPC listener is started with
-`CONTROL_GRPC_BIND=host:port` (default off). Remote gRPC listener
-**requires TLS** via `CONTROL_GRPC_TLS_CERT` and
-`CONTROL_GRPC_TLS_KEY`; plaintext listeners bind loopback only.
-Agent gRPC verifies CA certificates by default. Docker Desktop test-only
-plaintext requires BOTH `DEV_ALLOW_HTTP=true` and
-`GRPC_DEV_INSECURE=true`.
-WebSocket derives `wss://` from the configured HTTPS Panel URL; `ws://`
-is permitted only with the explicit local development HTTP flag.
+Every Protobuf `Envelope` carries protocol_version, node_uuid,
+message_id, kind, optional core_id, generation, operation, typed Struct
+payload, status and redacted error_code. Maximum frame size: 2 MiB.
+The control session supports:
 
-Neither transport silently falls back. No legacy HTTP heartbeat/desired
-control transport is available; Discovery enrollment uses a separate
-authenticated HTTPS registration request.
+- `hello → hello_ack`: authenticated session establishment
+- `desired`: Panel → Node desired core generation/configuration
+- `result → ack`: Node → Panel application result and acknowledgement
+- `telemetry`: Node → Panel host/runtime metrics
+- `ping → pong`: application-level liveness during idle periods
 
-### Semantics and bounds
+Bounded server queues protect memory. The Node persists its applied
+generation; repeated commands after reconnect must not execute again.
+Unknown versions/cores, stale generations, wrong identities, revoked
+credentials and text frames are rejected. The control channel never
+carries client VPN traffic and does not publish child core TCP/UDP ports.
 
-- Session: binary `hello → hello_ack → desired`, periodic
-  `telemetry`, `result → ack`, optional `ping/pong`.
-- Messages are ≤ 2 MiB. The server uses bounded queues and refuses unknown
-  versions, cores, status, stale generations and invalid identity.
-- Desired generations are pulled from the durable DB and pushed while the
-  streaming connection is active. The Agent persists applied state and
-  suppresses duplicate execution after reconnect.
-- Per-Agent connection is logical; one node can eventually have multiple
-  independent cores, each identified by `core_id`. The first version
-  currently targets `xray/default` only.
-- Secrets are only placed in authorized Protobuf payloads; never expose them
-  via telemetry, HTML, admin lists or logs.
-- Management links do **not** carry external VPN client traffic. Node-owned
-  ingress must explicitly publish applicable TCP/UDP engine ports.
+## Deploy and acceptance
 
-The backend accepts a gRPC listener on a separate local address; an ingress
-can route gRPC and WSS behind one public TLS domain/port only after proper
-HTTP/2/WebSocket proxy validation. CDN support is optional, not required.
+The Panel's existing same-origin reverse proxy must forward
+`/api/node-control/control/ws` as a real HTTP/1.1 WebSocket Upgrade
+to the backend, with long-lived proxy timeouts and TLS verification.
+The backend owns Protobuf interpretation; the Node owns the rootless
+Docker daemon. `CONTROL_PANEL_URL` is the **only** externally configured
+control address. There is no gRPC endpoint or extra HTTP/2 ingress to
+provision for Node control.
 
-## Acceptance
+Before a first isolated DEV Node pilot verify:
+HTTPS enrollment, binary WSS subprotocol negotiation, `hello_ack`,
+authentication/revocation, telemetry/host hostname, desired-state push,
+result/ack, ping/pong, reconnect and durable generation, and TLS
+certificate validation. Real TCP/UDP VPN ingress and core compatibility
+must be accepted separately. Never modify existing PasarGuard nodes,
+certificates or customer routing as a side effect.
 
-The v1 source transports and Protobuf codecs are not evidence of a
-production-compatible node deployment by themselves. Gate on authenticated
-WS and gRPC interoperability, unauthorized/revoked rejection, reconnect
-and monotonic generations, real Xray desired-state execution, telemetry
-storage, private-key handling, port/traffic acceptance and rollback.
-
-The previous WSS-only and HTTP-stream proposals are superseded. See Issues
-#13 (Xray/PasarGuard parity), #14 (outer Agent orchestrator update), and
-#15 (multi-core and binary control protocol).
+Related work: Issues #13 (VPN parity), #14 (Node lifecycle),
+#15 (Node binary control).

@@ -65,31 +65,27 @@ Only use:
 
 | Variable | Required? | Meaning |
 | --- | --- | --- |
-| `CONTROL_PANEL_URL` | Yes | One public HTTPS **origin** for registration, gRPC and WSS; no URL path |
+| `CONTROL_PANEL_URL` | Yes | One public HTTPS **origin** for registration and binary WSS; no URL path |
 | `NODE_TOKEN` | Classic profile only | One-time private Node token |
 | `DISCOVERY_TOKEN` | Discovery profile only | One-time private invitation |
-| `CONTROL_TRANSPORT` | No, default `grpc` | `grpc` or `ws` binary Protobuf |
-
-
 The private internal runtime uses `NODE_STATE_DIR` and
-`ROOTLESS_SOCKET`. Local Docker Desktop-only test overrides are
-`DEV_ALLOW_HTTP` / `GRPC_DEV_INSECURE`; **both are fixed false
-in the remote Coolify adapters**. Never disable certificate validation
-for remote panel URLs.
+`ROOTLESS_SOCKET`. Only `DEV_ALLOW_HTTP=true` may allow an explicitly
+local Docker Desktop HTTP/WS trial; it is fixed to false in both remote
+Coolify adapters. Remote connections require CA-verified HTTPS/WSS.
 
-The canonical protocol is `shared/contracts/NODE_CONTROL.md`. gRPC is
-full-duplex Protobuf `AgentControl.Connect`, with optional full-duplex binary
-WebSocket at `wss://<panel>/api/node-control/control/ws`. They carry the
-same `Envelope`. No text frames, SSE, JSON control, HTTP desired polling,
-or implicit fallback between transports.
+The **single** Node control transport is a persistent WSS connection with
+strictly binary Protobuf `Envelope` frames. The Node derives
+`wss://<panel>/api/node-control/control/ws` from
+`CONTROL_PANEL_URL` and initiates one authenticated session. The Panel
+pushes desired commands and the Node sends result, telemetry and
+acknowledgements across the same full-duplex connection. There is no
+gRPC target, transport selector, extra listener or fallback protocol.
+See `shared/contracts/NODE_CONTROL.md` for the authoritative wire contract.
 
-**Important:** The existing bundled frontend proxies WSS but does **not**
-by itself expose the separate gRPC listener. The panel backend's
-`CONTROL_GRPC_BIND` listener, trusted server certificate and an accessible
-HTTP/2 TLS ingress must be configured and verified before a remote Node
-can connect with the default `grpc`. Until that is done, an explicitly
-selected `CONTROL_TRANSPORT=ws` uses the panel's existing HTTPS origin.
-Do not claim a gRPC default means the live ingress is already configured.
+The Panel frontend's same-origin Nginx configuration already declares the
+binary WebSocket Upgrade route. Acceptance still requires a **real**
+trusted TLS WSS handshake through the deployed proxy; source checks alone
+do not prove the route works end-to-end.
 
 ## Coolify setup (per Node)
 
@@ -113,8 +109,7 @@ has only had isolated DEV TCP SOCKS5 acceptance, **not production VPN ingress**.
 
 Source CI/tests prove schemas, Go control, Docker images and Compose
 structure. A real isolated host pilot must separately prove bootstrap exit,
-non-root agent, private daemon health, panel TLS/auth enrollment, gRPC or
-WSS hello/ack, heartbeats, revocation, identity persistence, single Xray
+non-root agent, private daemon health, panel TLS/auth enrollment, binary WSS hello/ack, heartbeats, revocation, identity persistence, single Xray
 desired/application with real TCP and UDP checks, and safe rollback.
 Full PasarGuard Xray user/stats/routing parity, sing-box, WireGuard,
 AmneziaWG and multicore routing remain separate tasks. Do not stop or

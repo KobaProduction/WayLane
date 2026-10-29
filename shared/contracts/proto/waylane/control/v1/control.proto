@@ -1,10 +1,10 @@
 syntax = "proto3";
 package waylane.control.v1;
-option go_package = "github.com/KobaProduction/waylane-agent/cmd/agent/controlpb;controlpb";
+option go_package = "github.com/KobaProduction/WayLane/services/node/agent/cmd/agent/controlpb;controlpb";
 
 import "google/protobuf/struct.proto";
 
-// One protobuf binary envelope for both gRPC bidi-stream and binary WebSocket.
+// One protobuf binary envelope for the Node-initiated WebSocket control channel.
 // No text frames, SSE, NDJSON or streaming JSON transports are permitted.
 message Envelope {
   uint32 protocol_version = 1;
@@ -17,8 +17,4 @@ message Envelope {
   google.protobuf.Struct payload = 8;
   string status = 9;
   string error_code = 10;
-}
-
-service AgentControl {
-  rpc Connect(stream Envelope) returns (stream Envelope);
 }
