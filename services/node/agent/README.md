@@ -93,7 +93,18 @@ secrets only in scoped runtime storage, never in source, built images or logs.
 
 Current Docker Desktop evidence of a running rootless daemon and a disposable
 nested container is a partial runtime probe, not acceptance of the full stack
-or of any VPN protocol. The source task is WayLane Issue #11; the implementation is integrated
+or of any VPN protocol.
+
+GitHub-hosted Ubuntu runners may reject RootlessKit's nested user-namespace
+creation with operation not permitted even when the same Compose succeeds
+on an isolated Docker Desktop host. Node CI keeps source tests and both image
+builds mandatory. The agent-compose-smoke job first probes the actual
+RootlessKit namespace operation under the Agent's limited capabilities;
+only an explicit host-permission denial skips the runtime step with a warning,
+and any unrelated probe failure or supported-host Compose failure fails CI.
+A skipped hosted-runner smoke is NOT runtime acceptance. Do not bypass
+this restriction by making the Agent privileged, exposing host Docker, or
+changing runner host sysctls. The source task is WayLane Issue #11; the implementation is integrated
 directly into the monorepo without requiring a new pull request.
 
 ## Agent authentication: two connection modes
