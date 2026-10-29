@@ -262,3 +262,77 @@ changes report requires_restart; explicit update still replaces the child
 image. Machine metrics are collected by Agent, marked agent-runtime, and
 do not claim physical Windows host visibility under Docker Desktop.
 The control protocol uses binary Protobuf only, with gRPC bidirectional streaming and binary WebSocket adapters. SSE, text WS frames, and HTTP streaming are not control options. New Agent defaults to WS; legacy HTTPS heartbeat/desired-state APIs remain an explicit migration fallback. See shared/contracts/AGENT_CONTROL.md for v1 wire schema, port/security settings and acceptance gates.
+
+## GitHub → Coolify remote DEV Agent (non-traffic pilot)
+
+An opt-in Git-backed adapter is available in
+[services/node/docker-compose.agent.coolify.yaml](../docker-compose.agent.coolify.yaml).
+It is **not** the legacy `pasarguard-node` deployment and must not be
+substituted for that service until full VPN traffic/rollback acceptance.
+The shared panel `waylane:dev` remains an independent resource.
+
+Configure **one application per physical test node**, using the authorized
+WayLane GitHub App, branch `main`, Docker Compose build strategy, Base
+Directory `/services/node`, Compose Location
+`/docker-compose.agent.coolify.yaml`, and persist Watch Paths
+`services/node/**`. The source declares exactly two services
+(`bootstrap` + `agent`) and three private named volumes. Do **not**
+re-use an existing Agent Compose project or attach its state volume to
+a second Agent: two concurrent identities would corrupt registration.
+Coolify uses a resource-specific project name; the generic local Compose
+keeps its separate `waylane-node` default. The bootstrap exits 0;
+`exclude_from_hc` is a Coolify parser-only extension to avoid counting
+a completed bootstrap as an unhealthy long-lived service.
+
+Set **only the following real operator values**:
+
+| Key | Decision | Origin |
+| --- | --- | --- |
+| `WAYLANE_PANEL_URL` | Required, full trusted HTTPS origin, no path | Existing WayLane frontend public domain |
+| `WAYLANE_AGENT_NAME` | Editable short node/host label | Unique name for the selected test server |
+| `WAYLANE_DISCOVERY_TOKEN` | Optional, copy-once private secret | Panel Nodes → create Discovery invitation |
+| `WAYLANE_AGENT_TOKEN` | Optional, copy-once private secret | Panel Nodes → create directly approved Agent |
+| `WAYLANE_CONTROL_TRANSPORT` | `ws` by default; optionally `grpc` | One chosen binary control transport |
+| `WAYLANE_CONTROL_GRPC_TARGET` | Optional; required only with `grpc` | Reachable TLS gRPC panel target |
+
+Provide exactly **one** initial registration credential:
+`WAYLANE_DISCOVERY_TOKEN` **or** `WAYLANE_AGENT_TOKEN`, never both.
+Store the one-time token as a protected, runtime-only Coolify variable;
+disable Buildtime/Preview exposure where not needed. Once the Agent has
+registered and written its durable private identity into `agent-state`,
+the initial token can be emptied before a later redeploy. The private
+identity volume must persist. Never copy the secret into Git, logs,
+screenshots or another node.
+
+The remote adapter forces `WAYLANE_DEV_ALLOW_HTTP=false` and
+`WAYLANE_CONTROL_GRPC_DEV_INSECURE=false`: no plaintext fallback
+or self-signed certificate bypass. For `ws`, the Agent initiates a
+`wss://<panel-domain>/api/agent/control/ws` binary Protobuf session using
+its per-Agent credential; enrollment still uses `/api/agent/enroll`.
+The panel's same-origin Nginx frontend proxies that path to the backend.
+The Agent requires **outbound** DNS, HTTPS and time synchronization;
+it exposes no management domain, Docker socket, host ports or ingress
+through this Compose. The correct `WAYLANE_PANEL_URL` is the actual
+frontend HTTPS domain, **not** the private `waylane-api` alias.
+
+Before a first pilot, verify Coolify's parsed/deployable Compose on the
+target host: the bootstrap is one-shot/privileged, the Agent is
+unprivileged UID 1000 with its private rootless volumes, both have
+their expected Dockerfile build contexts, the bootstrap is excluded
+from aggregate health, and no host Docker socket/host port is mounted.
+Do not infer success from YAML/source CI or from a Coolify `finished`
+deployment alone. Verify that bootstrap completed 0, Agent healthy,
+HTTPS/WSS handshake authenticated, correct approved registration/last
+heartbeat in the panel, identity persistence after one controlled
+Agent restart, and no unexpected legacy node/traffic change.
+
+**Current blocker for real VPN clients:** nested rootless bridge and
+TCP/UDP ingress are not production-accepted, nor are multi-engine
+management, complete PasarGuard Xray parity or WireGuard/AmneziaWG
+traffic. A remote node Agent registration proves only control-plane
+connectivity, **not** that existing user subscriptions can be safely
+switched to that Agent. Keep the legacy PasarGuard deployment and its
+persistent key/certificate volume untouched. Auto-deploy from
+`services/node/**` should only be enabled for an accepted isolated
+DEV Agent; otherwise leave it disabled until controlled restart,
+state persistence and child Xray preservation are proven.

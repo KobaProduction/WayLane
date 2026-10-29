@@ -1,0 +1,44 @@
+# Git-backed Coolify pilot for exactly one autonomous WayLane Node Agent.
+# Base Directory: /services/node; Compose Location: /docker-compose.agent.coolify.yaml
+# GitHub App main; Watch Paths: services/node/** (persist in Coolify).
+# This opt-in deployment does NOT replace the legacy PasarGuard node/traffic.
+x-watch-path-coolify:
+  - "services/node/**"
+
+services:
+  bootstrap:
+    extends:
+      file: ./docker-compose.agent.yaml
+      service: bootstrap
+    # Match the inherited network-less privileged one-shot initialization.
+    network_mode: none
+    # Coolify-specific: a completed bootstrap must not mark the Agent unhealthy.
+    exclude_from_hc: true
+
+  agent:
+    extends:
+      file: ./docker-compose.agent.yaml
+      service: agent
+    # Re-declare interpolation for the Coolify Compose ENV parser under extends.
+    environment:
+      WAYLANE_PANEL_URL: ${WAYLANE_PANEL_URL:?}
+      WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:-}
+      WAYLANE_AGENT_TOKEN: ${WAYLANE_AGENT_TOKEN:-}
+      WAYLANE_CONTROL_TRANSPORT: ${WAYLANE_CONTROL_TRANSPORT:-ws}
+      WAYLANE_CONTROL_GRPC_TARGET: ${WAYLANE_CONTROL_GRPC_TARGET:-}
+      WAYLANE_AGENT_NAME: ${WAYLANE_AGENT_NAME:-waylane-node}
+      # Remote deployment always requires authenticated TLS.
+      WAYLANE_DEV_ALLOW_HTTP: "false"
+      WAYLANE_CONTROL_GRPC_DEV_INSECURE: "false"
+      HOME: /home/rootless
+      XDG_RUNTIME_DIR: /run/user/1000
+      DOCKER_TLS_CERTDIR: ""
+      WAYLANE_AGENT_STATE_DIR: /var/lib/waylane-agent
+      WAYLANE_ROOTLESS_SOCKET: /run/user/1000/docker.sock
+
+# extends merges services, not the original top-level named volumes.
+# Do not set a fixed Compose project name: Coolify namespaces each node resource.
+volumes:
+  agent-state: {}
+  rootless-data: {}
+  rootless-run: {}

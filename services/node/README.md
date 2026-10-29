@@ -1,8 +1,8 @@
 # WayLane Node
 
-**Owner:** Intens · **License:** GPL-3.0 (upstream-derived)
+**Project:** WayLane · **Legacy node license:** GPL-3.0 (upstream-derived)
 
-WayLane Node is the Go-based VPN node agent for WayLane Backend. This starting source is based on the verified PasarGuard Node snapshot.
+This directory contains two distinct node runtimes: the legacy PasarGuard-compatible Go VPN node and the separate autonomous WayLane Node Agent. The legacy implementation originates from the verified PasarGuard Node snapshot.
 
 **Available today:** Xray-core, WireGuard, gRPC/REST node control, node/user synchronization, health reporting and statistics.
 
@@ -32,10 +32,15 @@ Tests: `./scripts/verify.sh` provisions a pinned checksum-verified Xray executab
 
 An independent opt-in two-service deployment adds a privileged one-shot
 `bootstrap` and an autonomous non-privileged `agent`. The agent starts and
-supervises its own rootless Docker and persists its private socket/state. The
-panel will eventually ask the agent to manage independently packaged Xray,
-sing-box, WireGuard, AmneziaWG and extension engines. Today it only provides
-discovery, authenticated heartbeat and daemon inspection; child-engine
-installation, configuration, upgrades and rollback are deliberately deferred.
+supervises its own rootless Docker and persists its private socket/state.
+Discovery/direct-token registration and Protobuf binary WS/gRPC control are
+implemented; a single DEV Xray child supports desired-state deploy/update,
+restart/stop and per-inbound user replacement. Multi-core drivers, public
+TCP/UDP ingress, full PasarGuard parity and production VPN traffic are not
+accepted.
+
 Canonical architectural contract: [agent/README.md](agent/README.md).
+For a separate Git-backed **Coolify DEV pilot**, use
+[docker-compose.agent.coolify.yaml](docker-compose.agent.coolify.yaml) and the
+[Agent Coolify deployment guide](agent/README.md#github--coolify-remote-dev-agent-non-traffic-pilot).
 The old node and its deployment are not replaced.

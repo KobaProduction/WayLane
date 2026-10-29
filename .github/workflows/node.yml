@@ -71,6 +71,22 @@ jobs:
           set -euo pipefail
           docker compose -p waylane-agent-ci -f services/node/docker-compose.agent.yaml config --format json |
             python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert set(s)=={"bootstrap","agent"}, set(s); assert s["bootstrap"]["privileged"] is True; assert not s["agent"].get("privileged",False); assert all("/var/run/docker.sock" not in str(m) and "/run/docker.sock" not in str(m) for c in s.values() for m in c.get("volumes",[]))'
+          # Coolify-only exclude_from_hc is not a native Docker Compose key.
+          # Keep that exact directive in the source, replace it only in the
+          # temporary CI copy with an inert x- extension for native validation.
+          python3 - <<'PYCOMPOSE'
+          from pathlib import Path
+          path = Path("services/node/docker-compose.agent.coolify.yaml")
+          source = path.read_text()
+          assert source.count("    exclude_from_hc: true\n") == 1
+          assert "    network_mode: none\n" in source
+          Path("services/node/.agent.coolify.native-check.yaml").write_text(
+              source.replace("    exclude_from_hc: true\n", "    x-coolify-exclude-from-health: true\n")
+          )
+          PYCOMPOSE
+          trap 'rm -f services/node/.agent.coolify.native-check.yaml' EXIT
+          docker compose -p waylane-agent-ci -f services/node/.agent.coolify.native-check.yaml config --format json |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert not s["agent"].get("privileged",False); assert s["agent"]["environment"]["WAYLANE_CONTROL_TRANSPORT"]=="ws"; assert s["agent"]["environment"]["WAYLANE_DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values())'
       # Hosted Linux runners may forbid creation of nested user namespaces.
       # Probe precisely the RootlessKit operation; do not grant privileges to
       # the Agent or alter host sysctls to make a runner accept it.
