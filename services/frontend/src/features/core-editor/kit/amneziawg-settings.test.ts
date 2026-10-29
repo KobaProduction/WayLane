@@ -70,3 +70,16 @@ test('unknown AWG options are rejected; plain WG draft never emits AWG params', 
   const invalid = { ...awg, extra: { ...awg.extra, amnezia: { ...getAmneziaSettings(awg), unknown: 'bad' } } }
   assert.ok(validateAmneziaSettings(invalid).length > 0)
 })
+
+
+test('AWG is the preferred new core profile; explicit plain WG remains available', () => {
+  const preferred = applyAmneziaPreset(createNewWireGuardDraft())
+  const saved = getWireGuardPersistConfig(preferred)
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  if (!saved.ok) return
+  assert.equal(saved.config.engine, 'amneziawg')
+  const plain = setAmneziaMode(preferred, false)
+  assert.equal(isAmneziaDraft(plain), false)
+  assert.equal(getWireGuardPersistConfig(plain).ok, true)
+  assert.equal(draftToPersistedConfig(plain).amnezia, undefined)
+})

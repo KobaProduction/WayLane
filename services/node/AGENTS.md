@@ -1,6 +1,6 @@
 # WayLane autonomous Node
 
-The only Node implementation is this Go module, built from `cmd/node`.
+The only Node implementation is this Go module, built from the module root.
 Read root `AGENTS.md`, `services/node/README.md`,
 `deploy/node/README.md` and relevant AI Agent Workflow skills.
 

@@ -42,7 +42,7 @@ def observed_ip(request: Request) -> str | None:
 class InvitationInput(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     lifetime_hours: int | None = Field(default=None, ge=1, le=8760)
-    auto_approve: bool = True
+    auto_approve: bool = False
 
 
 @node_registry_router.post("/classic", status_code=201)

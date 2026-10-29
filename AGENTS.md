@@ -14,7 +14,7 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: one autonomous Go Node module (single `cmd/node`),
+- services/node/: one autonomous Go Node module (single Go entrypoint),
   rootless child container control, bootstrap and WSS/Protobuf. Source,
   not a deployment manifest.
 - deploy/node/{classic,discovery}/: separate Git-backed deployment owners,
@@ -34,7 +34,7 @@ No production DNS, data, token or routing changes before authorized cutover.
 Read `services/node/AGENTS.md` and `services/node/README.md`
 before changing the autonomous Node. Each Node deployment entrypoint has **exactly two services**:
 a one-shot privileged `bootstrap` preparing private volumes, then one
-non-privileged autonomous `agent` service running the sole `cmd/node`
+non-privileged autonomous `agent` service running the sole Node
 program. The Node supervises its own embedded rootless Docker daemon
 through a private Unix socket. Neither host systemd,
 a separate Compose Docker sidecar, nor the host/system Docker socket belongs

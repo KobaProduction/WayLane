@@ -54,8 +54,9 @@ def test_control_protobuf_is_one_binary_websocket_envelope(tmp_path):
     descriptor = descriptor_pb2.FileDescriptorSet.FromString(output.read_bytes()).file[0]
     assert descriptor.package == "waylane.control.v1"
     assert not descriptor.service
+    assert control_pb2.DESCRIPTOR.GetOptions().go_package == descriptor.options.go_package
     assert descriptor.options.go_package == (
-        "github.com/KobaProduction/waylane/services/node/cmd/node/controlpb;controlpb"
+        "github.com/KobaProduction/waylane/services/node/controlpb;controlpb"
     )
     assert set(control_pb2.Envelope.DESCRIPTOR.fields_by_name) == {
         "protocol_version", "node_uuid", "message_id", "kind",

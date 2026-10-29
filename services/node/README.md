@@ -1,6 +1,6 @@
 # WayLane Node
 
-A single autonomous Go program at `cmd/node/` manages the Node and its
+A single autonomous Go program at `services/node/` manages the Node and its
 independent VPN core containers using a private rootless Docker daemon.
 
 ## Runtime
@@ -10,8 +10,15 @@ independent VPN core containers using a private rootless Docker daemon.
 - `node.Dockerfile`: one unprivileged long-lived Node with its own
   RootlessKit and private Docker socket.
 - `go.mod`: minimal dependencies for binary WebSocket and Protobuf.
-- `cmd/node/`: Node registration, telemetry, desired state, Xray child
+- Root Go sources: Node registration, telemetry, desired state, Xray child
   lifecycle and persistent identity.
+
+**Core priority:** AmneziaWG 3.1 is the next target engine; plain WireGuard
+is a compatibility profile, not a second independent control stack. Backend
+validation and the Core Editor support AWG configuration, but this Node
+currently executes only Xray. Do not assign AWG capabilities or route client
+traffic until a rootless TUN/UDP, lifecycle and peer-sync acceptance passes.
+Plain WireGuard clients are compatible only when AWG obfuscation is disabled.
 
 The Node initiates a single full-duplex WSS session to the Control Panel
 using the configured `CONTROL_PANEL_URL`. Commands and telemetry use

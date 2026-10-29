@@ -438,7 +438,7 @@ export default function CoreEditorPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="xray">Xray</SelectItem>
-                <SelectItem value="wg">WireGuard</SelectItem>
+                <SelectItem value="wg">AmneziaWG / WireGuard</SelectItem>
               </SelectContent>
             </Select>
           </div>

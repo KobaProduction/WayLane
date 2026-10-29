@@ -50,7 +50,11 @@ The control session supports:
 Bounded server queues protect memory. The Node persists its applied
 generation; repeated commands after reconnect must not execute again.
 Unknown versions/cores, stale generations, wrong identities, revoked
-credentials and text frames are rejected. The control channel never
+credentials and text frames are rejected. AmneziaWG 3.1 is the prioritized
+next core (with plain WireGuard supported only when obfuscation is disabled),
+but `awg/default` is reserved, not advertised or accepted by this Xray-only
+Node yet. Do not send AWG desired commands until the driver and isolated
+TUN/UDP tests are complete. The control channel never
 carries client VPN traffic and does not publish child core TCP/UDP ports.
 
 ## Deploy and acceptance

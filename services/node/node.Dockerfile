@@ -3,8 +3,8 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
 COPY services/node/go.mod services/node/go.sum ./
-COPY services/node/cmd/node ./cmd/node
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/waylane-node ./cmd/node
+COPY services/node/*.go ./
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/waylane-node .
 
 # Official RootlessKit + dockerd + CLI IN SAME agent container.
 FROM docker:29.5-dind-rootless

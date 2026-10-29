@@ -58,17 +58,17 @@ def test_bootstrap_is_a_single_root_script_with_no_separate_source_folder():
     assert "COPY services/node/bootstrap.sh" in dockerfile
     assert "ENTRYPOINT" in dockerfile
     assert not (node / "agent").exists(), "No nested agent Go module or source directory"
-    assert (node / "cmd/node/main.go").is_file()
+    assert (node / "main.go").is_file()
     assert (node / "node.Dockerfile").is_file()
     image = (node / "node.Dockerfile").read_text()
     assert "COPY services/node/go.mod services/node/go.sum" in image
-    assert "COPY services/node/cmd/node" in image
+    assert "COPY services/node/*.go" in image
     assert "go build -trimpath" in image
     assert not (node / "cmd/agent").exists()
     assert not (node / "backend").exists()
     assert not (node / "controller").exists()
     assert not (node / "common").exists()
-    assert not (node / "cmd/node/go.mod").exists()
+    assert not (node / "cmd/go.mod").exists()
 
 
 def test_classic_and_discovery_share_identical_node_runtime_and_security():

@@ -2,7 +2,7 @@
 
 **Deployment definitions live here; runtime source remains in
 `services/node/`: a small `bootstrap.sh`, `bootstrap.Dockerfile` and
-`cmd/agent/` built by `node.Dockerfile`.**
+the Go main package built by `node.Dockerfile`.**
 
 A Node is one installation comprising exactly two outer Compose services:
 a privileged **one-shot bootstrap** followed by one non-root **Node**

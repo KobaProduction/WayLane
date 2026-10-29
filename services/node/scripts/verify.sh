@@ -5,6 +5,6 @@ command -v go >/dev/null || { echo "Go 1.27+ required" >&2; exit 2; }
 go mod verify
 go test -count=1 ./...
 go vet ./...
-go build -trimpath -o /dev/null ./cmd/node
+go build -trimpath -o /dev/null .
 sh -n bootstrap.sh
 echo "WayLane autonomous Node source gate passed"
