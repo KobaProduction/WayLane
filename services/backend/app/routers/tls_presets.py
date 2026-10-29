@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.db.models import CoreConfig, Node
 from app.db.tls import tls_bindings, tls_presets, agent_tls_bindings
-from .agent_xray_resources import queue_xray_refresh
+from .node_xray_resources import queue_xray_refresh
 from app.models.admin import AdminDetails
 from app.operation import OperatorType
 from app.operation.node import NodeOperation

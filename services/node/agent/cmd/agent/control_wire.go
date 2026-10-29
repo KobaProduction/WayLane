@@ -1,7 +1,7 @@
 package main
 
-// A single protobuf wire envelope is used unchanged on binary WS frames and
-// gRPC stream messages. This hand-written wire adapter implements the checked-in
+// A single protobuf wire envelope is exchanged over binary WebSocket frames.
+// This hand-written wire format implements the checked-in
 // control.proto schema without a protoc binary in the build toolchain.
 import (
 	"errors"
@@ -136,24 +136,4 @@ func (m *controlEnvelope) UnmarshalBinary(raw []byte) error {
 		return fmt.Errorf("unsupported or invalid protobuf control envelope")
 	}
 	return nil
-}
-
-// gRPC's ForceCodec accepts the same protobuf message bytes as the WS frames.
-// The registered method on the Python server uses generated protobuf Envelope.
-type controlWireCodec struct{}
-
-func (controlWireCodec) Name() string { return "proto" }
-func (controlWireCodec) Marshal(v any) ([]byte, error) {
-	m, ok := v.(*controlEnvelope)
-	if !ok {
-		return nil, errors.New("unexpected grpc control payload")
-	}
-	return m.MarshalBinary()
-}
-func (controlWireCodec) Unmarshal(data []byte, v any) error {
-	m, ok := v.(*controlEnvelope)
-	if !ok {
-		return errors.New("unexpected grpc control result")
-	}
-	return m.UnmarshalBinary(data)
 }

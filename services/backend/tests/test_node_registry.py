@@ -12,8 +12,8 @@ from starlette.requests import Request
 
 from app.db.base import Base
 from app.db.models import node_agent_registrations
-from app.routers.node_discovery import (
-    DirectAgentInput, Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_direct_agent,
+from app.routers.node_registry import (
+    Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_classic_node,
     XrayDesiredInput, XrayReport, set_desired_xray, get_desired_xray, agent_xray_desired, agent_xray_report,
     enroll, heartbeat, list_registrations, list_invitations, revoke, revoke_invitation,
 )
@@ -21,7 +21,7 @@ from app.routers.node_discovery import (
 
 def client_request() -> Request:
     return Request({
-        "type": "http", "method": "POST", "path": "/api/agent/enroll",
+        "type": "http", "method": "POST", "path": "/api/node-control/enroll",
         "client": ("203.0.113.19", 45123),
         "headers": [(b"x-forwarded-for", b"8.8.8.8")],
     })
@@ -47,8 +47,8 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
                 assert invitation["expires_at"] is None
                 assert invitation["auto_approve"] is True
                 assert invitations["invitations"][0]["auto_approve"] == "1"
-                body = Enrollment(node_uuid=uuid, agent_secret=credential,
-                                  display_name="test-node", agent_version="0.1.0")
+                body = Enrollment(node_uuid=uuid, node_secret=credential,
+                                  display_name="test-node", node_version="0.1.0")
                 with pytest.raises(HTTPException) as wrong:
                     await enroll(body, client_request(), x_discovery_token="bogus", db=db)
                 assert wrong.value.status_code == 401
@@ -59,28 +59,29 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
                 assert repeat["status"] == "approved"
 
                 with pytest.raises(HTTPException) as takeover:
-                    await enroll(body.model_copy(update={"agent_secret":secrets.token_urlsafe(32)}),
+                    await enroll(body.model_copy(update={"node_secret":secrets.token_urlsafe(32)}),
                                  client_request(), x_discovery_token=token, db=db)
                 assert takeover.value.status_code == 409
 
-                update = Heartbeat(node_uuid=uuid, agent_version="0.1.0",
+                update = Heartbeat(node_uuid=uuid, node_version="0.1.0",
                                    reported_ipv4="8.8.4.4", capabilities=["docker.rootless.inspect"])
                 with pytest.raises(HTTPException) as invalid:
-                    await heartbeat(update, client_request(), x_agent_secret="wrong", db=db)
+                    await heartbeat(update, client_request(), x_node_secret="wrong", db=db)
                 assert invalid.value.status_code == 401
 
-                first = await heartbeat(update, client_request(), x_agent_secret=credential, db=db)
+                first = await heartbeat(update, client_request(), x_node_secret=credential, db=db)
                 assert first == {"status":"approved", "allowed_operations":[]}
                 rows = await list_registrations(db=db, _=object())
-                assert len(rows["registrations"]) == 1
-                assert rows["registrations"][0]["observed_ip"] == "203.0.113.19"
-                assert rows["registrations"][0]["reported_ipv4"] == "8.8.4.4"
-                assert "secret_hash" not in rows["registrations"][0]
-                assert "token_hash" not in rows["registrations"][0]
+                assert len(rows["nodes"]) == 1
+                assert rows["nodes"][0]["observed_ip"] == "203.0.113.19"
+                assert rows["nodes"][0]["connection_mode"] == "discovery"
+                assert rows["nodes"][0]["reported_ipv4"] == "8.8.4.4"
+                assert "secret_hash" not in rows["nodes"][0]
+                assert "token_hash" not in rows["nodes"][0]
 
                 approved = await approve(uuid, db=db, _=object())
                 assert approved["status"] == "approved"
-                second = await heartbeat(update, client_request(), x_agent_secret=credential, db=db)
+                second = await heartbeat(update, client_request(), x_node_secret=credential, db=db)
                 assert second["status"] == "approved"
                 assert second["allowed_operations"] == []
                 await revoke_invitation(invitation["id"], db=db, _=object())
@@ -88,12 +89,12 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
                 with pytest.raises(HTTPException) as no_new_join:
                     await enroll(Enrollment(
                         node_uuid=uuid4(), display_name="another-node",
-                        agent_secret=secrets.token_urlsafe(32), agent_version="0.1.0",
+                        node_secret=secrets.token_urlsafe(32), node_version="0.1.0",
                     ), client_request(), x_discovery_token=token, db=db)
                 assert no_new_join.value.status_code == 401
                 await revoke(uuid, db=db, _=object())
                 with pytest.raises(HTTPException) as revoked:
-                    await heartbeat(update, client_request(), x_agent_secret=credential, db=db)
+                    await heartbeat(update, client_request(), x_node_secret=credential, db=db)
                 assert revoked.value.status_code == 403
                 with pytest.raises(HTTPException) as cannot_reenroll:
                     await enroll(body, client_request(), x_discovery_token=token, db=db)
@@ -107,14 +108,14 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
 
 
 def test_agent_runtime_metrics_validation():
-    from app.routers.node_discovery import NodeMachineMetrics
+    from app.routers.node_registry import NodeMachineMetrics
     valid = NodeMachineMetrics(
         hostname="qa-agent", os="linux", arch="amd64",
         cpu_logical_count=4, memory_total_bytes=4 * 1024**3,
         memory_available_bytes=2 * 1024**3, disk_total_bytes=100 * 1024**3,
         disk_free_bytes=80 * 1024**3, load_1=0.25, uptime_seconds=90,
     )
-    assert Heartbeat(node_uuid=uuid4(),agent_version="0.1.0",machine_metrics=valid).machine_metrics.scope == "agent-runtime"
+    assert Heartbeat(node_uuid=uuid4(),node_version="0.1.0",machine_metrics=valid).machine_metrics.scope == "agent-runtime"
     with pytest.raises(ValidationError):
         NodeMachineMetrics(hostname="invalid",os="linux",arch="amd64",cpu_logical_count=-1,
             memory_total_bytes=0,memory_available_bytes=0,disk_total_bytes=0,disk_free_bytes=0,
@@ -128,11 +129,11 @@ def test_agent_runtime_metrics_validation():
 def test_agent_ip_and_input_validation():
     for bad in ["127.0.0.1", "10.0.0.2", "not-an-ip", "fe80::1", "::1"]:
         with pytest.raises(ValidationError):
-            Heartbeat(node_uuid=uuid4(), agent_version="0.1.0", reported_ipv4=bad)
+            Heartbeat(node_uuid=uuid4(), node_version="0.1.0", reported_ipv4=bad)
     with pytest.raises(ValidationError):
-        Heartbeat(node_uuid=uuid4(), agent_version="0.1.0", capabilities=["a", "a"])
+        Heartbeat(node_uuid=uuid4(), node_version="0.1.0", capabilities=["a", "a"])
     with pytest.raises(ValidationError):
-        Enrollment(node_uuid=uuid4(), display_name="node", agent_version="0.1.0", agent_secret="predictable")
+        Enrollment(node_uuid=uuid4(), display_name="node", node_version="0.1.0", node_secret="predictable")
 
 
 def test_manual_discovery_and_ip_preserved_on_temporary_lookup_failure(tmp_path):
@@ -152,25 +153,25 @@ def test_manual_discovery_and_ip_preserved_on_temporary_lookup_failure(tmp_path)
                 invitations = await list_invitations(db=db, _=object())
                 assert invitations["invitations"][0]["auto_approve"] == "0"
                 body = Enrollment(node_uuid=uuid, display_name="manual-node",
-                                  agent_version="0.1.0", agent_secret=credential)
+                                  node_version="0.1.0", node_secret=credential)
                 first = await enroll(body, client_request(),
                                      x_discovery_token=invitation["discovery_token"], db=db)
                 assert first["status"] == "pending"
-                valid = Heartbeat(node_uuid=uuid, agent_version="0.1.0",
+                valid = Heartbeat(node_uuid=uuid, node_version="0.1.0",
                                   reported_ipv4="8.8.8.8")
-                await heartbeat(valid, client_request(), x_agent_secret=credential, db=db)
-                missing = Heartbeat(node_uuid=uuid, agent_version="0.1.0")
-                result = await heartbeat(missing, client_request(), x_agent_secret=credential, db=db)
+                await heartbeat(valid, client_request(), x_node_secret=credential, db=db)
+                missing = Heartbeat(node_uuid=uuid, node_version="0.1.0")
+                result = await heartbeat(missing, client_request(), x_node_secret=credential, db=db)
                 assert result == {"status": "pending", "allowed_operations": []}
                 row = (await db.execute(select(node_agent_registrations))).mappings().one()
                 assert row["reported_ipv4"] == "8.8.8.8"
-                changed = Heartbeat(node_uuid=uuid, agent_version="0.1.0",
+                changed = Heartbeat(node_uuid=uuid, node_version="0.1.0",
                                     reported_ipv4="1.1.1.1")
-                await heartbeat(changed, client_request(), x_agent_secret=credential, db=db)
+                await heartbeat(changed, client_request(), x_node_secret=credential, db=db)
                 row = (await db.execute(select(node_agent_registrations))).mappings().one()
                 assert row["reported_ipv4"] == "1.1.1.1"
                 await approve(uuid, db=db, _=object())
-                result = await heartbeat(missing, client_request(), x_agent_secret=credential, db=db)
+                result = await heartbeat(missing, client_request(), x_node_secret=credential, db=db)
                 assert result == {"status": "approved", "allowed_operations": []}
         finally:
             await engine.dispose()
@@ -186,50 +187,53 @@ def test_direct_agent_token_registration_and_revocation(tmp_path):
         factory = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with factory() as db:
-                direct = await create_direct_agent(DirectAgentInput(display_name="direct-qa-node"),
-                                                   db=db, _=object())
+                direct = await create_classic_node(db=db, _=object())
                 assert direct["status"] == "approved"
-                assert direct["agent_token"].startswith("wl_agent_")
-                assert len(direct["agent_token"]) == 89
-                assert direct["agent_token"].startswith("wl_agent_" + direct["node_uuid"] + "_")
+                assert direct["node_token"].startswith("wl_node_")
+                assert len(direct["node_token"]) == 88
+                assert direct["node_token"].startswith("wl_node_" + direct["node_uuid"] + "_")
                 preheartbeat = (await db.execute(select(node_agent_registrations).where(
                     node_agent_registrations.c.node_uuid == direct["node_uuid"]))).mappings().one()
+                assert preheartbeat["display_name"] == "node-" + direct["node_uuid"]
                 assert preheartbeat["last_seen_at"] is None
                 assert not direct["node_uuid"].startswith("wl_disc_")
                 direct_uuid = direct["node_uuid"]
 
                 status = await heartbeat(
-                    Heartbeat(node_uuid=direct_uuid, agent_version="0.1.0",
+                    Heartbeat(node_uuid=direct_uuid, node_version="0.1.0",
                               reported_ipv4="8.8.4.4", capabilities=["docker.rootless.inspect"]),
-                    client_request(), x_agent_secret=direct["agent_token"], db=db)
+                    client_request(), x_node_secret=direct["node_token"], db=db)
                 assert status == {"status": "approved", "allowed_operations": []}
                 listing = await list_registrations(db=db, _=object())
-                assert len(listing["registrations"]) == 1
-                assert listing["registrations"][0]["enrollment_mode"] == "direct"
-                assert listing["registrations"][0]["reported_ipv4"] == "8.8.4.4"
-                assert "agent_token" not in listing["registrations"][0]
-                assert "secret_hash" not in listing["registrations"][0]
+                assert len(listing["nodes"]) == 1
+                assert listing["nodes"][0]["connection_mode"] == "classic"
+                assert listing["nodes"][0]["reported_ipv4"] == "8.8.4.4"
+                assert "node_token" not in listing["nodes"][0]
+                assert "secret_hash" not in listing["nodes"][0]
 
                 with pytest.raises(HTTPException) as bad:
-                    await heartbeat(Heartbeat(node_uuid=direct_uuid, agent_version="0.1.0"),
-                                    client_request(), x_agent_secret="invalid", db=db)
+                    await heartbeat(Heartbeat(node_uuid=direct_uuid, node_version="0.1.0"),
+                                    client_request(), x_node_secret="invalid", db=db)
                 assert bad.value.status_code == 401
 
                 await revoke(direct_uuid, db=db, _=object())
                 with pytest.raises(HTTPException) as revoked:
-                    await heartbeat(Heartbeat(node_uuid=direct_uuid, agent_version="0.1.0"),
-                                    client_request(), x_agent_secret=direct["agent_token"], db=db)
+                    await heartbeat(Heartbeat(node_uuid=direct_uuid, node_version="0.1.0"),
+                                    client_request(), x_node_secret=direct["node_token"], db=db)
                 assert revoked.value.status_code == 403
 
-                other = await create_direct_agent(DirectAgentInput(display_name="direct-qa-node"),
-                                                  db=db, _=object())
+                unnamed = await create_classic_node(db=db, _=object())
+                unnamed_row = (await db.execute(select(node_agent_registrations).where(
+                    node_agent_registrations.c.node_uuid == unnamed["node_uuid"]))).mappings().one()
+                assert unnamed_row["display_name"] == "node-" + unnamed["node_uuid"]
+                other = await create_classic_node(db=db, _=object())
                 assert other["node_uuid"] != direct_uuid
-                assert other["agent_token"] != direct["agent_token"]
-                assert (await list_registrations(db=db, _=object()))["registrations"][0]["enrollment_mode"] == "direct"
+                assert other["node_token"] != direct["node_token"]
+                assert (await list_registrations(db=db, _=object()))["nodes"][0]["connection_mode"] == "classic"
                 stored = (await db.execute(select(node_agent_registrations).where(
                     node_agent_registrations.c.node_uuid == direct_uuid))).mappings().one()
                 assert stored["invitation_id"] is None
-                assert stored["secret_hash"] != direct["agent_token"]
+                assert stored["secret_hash"] != direct["node_token"]
         finally:
             await engine.dispose()
     asyncio.run(run())
@@ -244,8 +248,7 @@ def test_xray_desired_generation_and_authentication(tmp_path):
         factory = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with factory() as db:
-                agent = await create_direct_agent(DirectAgentInput(display_name="xray-qa"),
-                                                  db=db, _=object())
+                agent = await create_classic_node(db=db, _=object())
                 node_uuid = UUID(agent["node_uuid"])
                 config = {"inbounds": [{"listen": "127.0.0.1", "port": 18443,
                                        "protocol": "socks", "settings": {"auth": "password",
@@ -258,15 +261,15 @@ def test_xray_desired_generation_and_authentication(tmp_path):
                     db=db, _=object())
                 assert desired["generation"] == 1 and desired["image_version"] == "26.10.21"
                 with pytest.raises(HTTPException) as missing_auth:
-                    await agent_xray_desired(node_uuid, x_agent_secret="wrong", db=db)
+                    await agent_xray_desired(node_uuid, x_node_secret="wrong", db=db)
                 assert missing_auth.value.status_code == 401
                 fetched = await agent_xray_desired(
-                    node_uuid, x_agent_secret=agent["agent_token"], db=db)
+                    node_uuid, x_node_secret=agent["node_token"], db=db)
                 assert fetched["config"] == config
                 assert fetched["action"] == "deploy"
                 reported = await agent_xray_report(
                     XrayReport(node_uuid=node_uuid, generation=1, status="running"),
-                    x_agent_secret=agent["agent_token"], db=db)
+                    x_node_secret=agent["node_token"], db=db)
                 assert reported["accepted"]
                 panel = await get_desired_xray(node_uuid, db=db, _=object())
                 assert panel["runtime_status"] == "running"
@@ -280,7 +283,7 @@ def test_xray_desired_generation_and_authentication(tmp_path):
                 with pytest.raises(HTTPException) as stale:
                     await agent_xray_report(
                         XrayReport(node_uuid=node_uuid, generation=1, status="running"),
-                        x_agent_secret=agent["agent_token"], db=db)
+                        x_node_secret=agent["node_token"], db=db)
                 assert stale.value.status_code == 409
                 with pytest.raises(ValidationError):
                     XrayDesiredInput(action="deploy", image_version="latest", config=config)
@@ -288,7 +291,7 @@ def test_xray_desired_generation_and_authentication(tmp_path):
                     XrayDesiredInput(action="deploy", image_version="26.10.21;rm", config=config)
                 await revoke(node_uuid, db=db, _=object())
                 with pytest.raises(HTTPException) as denied:
-                    await agent_xray_desired(node_uuid, x_agent_secret=agent["agent_token"], db=db)
+                    await agent_xray_desired(node_uuid, x_node_secret=agent["node_token"], db=db)
                 assert denied.value.status_code == 403
                 with pytest.raises(HTTPException) as no_update:
                     await set_desired_xray(node_uuid, XrayDesiredInput(action="restart"),
@@ -297,3 +300,13 @@ def test_xray_desired_generation_and_authentication(tmp_path):
         finally:
             await engine.dispose()
     asyncio.run(run())
+
+
+def test_node_registry_has_no_compatibility_routes():
+    from app.routers.node_registry import node_registry_router, node_control_router
+    paths = {route.path for route in [*node_registry_router.routes, *node_control_router.routes]}
+    assert {"/api/node-registry/classic", "/api/node-registry/nodes",
+            "/api/node-registry/discovery-tokens",
+            "/api/node-registry/discovery-tokens/{invitation_id}/revoke",
+            "/api/node-registry/nodes/{node_uuid}/xray"} <= paths
+    assert not any(p.startswith("/api/agent") or p.startswith("/api/node-discovery") for p in paths)

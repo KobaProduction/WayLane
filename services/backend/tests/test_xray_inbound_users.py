@@ -8,9 +8,9 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.base import Base
-from app.routers.node_discovery import (
-    DirectAgentInput, XrayDesiredInput, XrayInboundUsersInput, XrayReport,
-    agent_xray_desired, agent_xray_report, create_direct_agent,
+from app.routers.node_registry import (
+    XrayDesiredInput, XrayInboundUsersInput, XrayReport,
+    agent_xray_desired, agent_xray_report, create_classic_node,
     get_desired_xray, list_xray_inbounds, revoke, set_desired_xray, sync_xray_inbound_users,
 )
 from app.routers.xray_inbound_users import replace_inbound_users
@@ -63,13 +63,13 @@ def test_user_change_is_generation_guarded_and_authenticated(tmp_path):
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with sessions() as db:
-                node = await create_direct_agent(DirectAgentInput(display_name="qa"), db=db, _=object())
+                node = await create_classic_node(db=db, _=object())
                 uid = UUID(node["node_uuid"])
                 created = await set_desired_xray(uid, XrayDesiredInput(
                     action="deploy", config=baseline()), db=db, _=object())
                 assert created["generation"] == 1
                 await agent_xray_report(XrayReport(node_uuid=uid, generation=1, status="running"),
-                                        x_agent_secret=node["agent_token"], db=db)
+                                        x_node_secret=node["node_token"], db=db)
                 first = await sync_xray_inbound_users(uid, "qa-socks", XrayInboundUsersInput(
                     expected_generation=1, users=[{"user": "next", "pass": "strong-qa-secret"}]),
                     db=db, _=object())
@@ -87,14 +87,14 @@ def test_user_change_is_generation_guarded_and_authenticated(tmp_path):
                 assert inbound_list["inbounds"][0]["user_count"] == 1
                 assert inbound_list["inbounds"][0]["identities"] == ["next"]
                 assert "strong-qa-secret" not in str(inbound_list)
-                desired = await agent_xray_desired(uid, x_agent_secret=node["agent_token"], db=db)
+                desired = await agent_xray_desired(uid, x_node_secret=node["node_token"], db=db)
                 assert desired["generation"] == 2
                 assert desired["config"]["inbounds"][0]["settings"]["accounts"][0]["user"] == "next"
                 assert desired["config"]["inbounds"][1] == baseline()["inbounds"][1]
                 admin_view = await get_desired_xray(uid, db=db, _=object())
                 assert "config" not in admin_view
                 await agent_xray_report(XrayReport(node_uuid=uid, generation=2, status="running"),
-                                        x_agent_secret=node["agent_token"], db=db)
+                                        x_node_secret=node["node_token"], db=db)
                 assert (await get_desired_xray(uid, db=db, _=object()))["applied_generation"] == 2
                 with pytest.raises(HTTPException) as invalid_tag:
                     await sync_xray_inbound_users(uid, "missing", XrayInboundUsersInput(

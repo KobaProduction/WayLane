@@ -48,12 +48,9 @@ func parseProcMemory(source string) (uint64, uint64) {
 // Docker Desktop provides the Linux Agent's runtime and its private state
 // filesystem, not physical Windows host statistics.
 func collectNodeRuntimeMetrics(stateDir string) nodeRuntimeMetrics {
-	name, _ := os.Hostname()
-	if name == "" {
-		name = "node-unknown"
-	}
-	if len(name) > 128 {
-		name = name[:128]
+	name, err := nodeHostName()
+	if err != nil {
+		name = "unknown-host"
 	}
 	cpu := runtime.NumCPU()
 	if cpu <= 0 {

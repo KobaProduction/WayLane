@@ -1,4 +1,4 @@
-# Experimental WayLane Node Agent: EXACTLY bootstrap and agent.
+# WayLane Node: bootstrap + internal controller agent, with private VPN cores.
 # Bootstrap prepares private volumes; Go Agent supervises embedded rootless Docker.
 # This profile grants nested namespace exceptions; production security and VPN traffic are NOT accepted.
 name: waylane-node
@@ -38,24 +38,24 @@ services:
       HOME: /home/rootless
       XDG_RUNTIME_DIR: /run/user/1000
       DOCKER_TLS_CERTDIR: ""
-      WAYLANE_PANEL_URL: ${WAYLANE_PANEL_URL:?HTTPS panel URL required}
+      CONTROL_PANEL_URL: ${CONTROL_PANEL_URL:?}
       # Choose ONE of Discovery or direct Agent token; leave both empty only
       # after a registered identity is safely persisted in agent-state.
-      WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:-}
-      WAYLANE_AGENT_TOKEN: ${WAYLANE_AGENT_TOKEN:-}
-      WAYLANE_DEV_ALLOW_HTTP: ${WAYLANE_DEV_ALLOW_HTTP:-false}
-      # Binary protobuf over WSS by default. gRPC is an explicit alternative;
-      # legacy HTTPS control is opt-in only for migration/rollback.
-      WAYLANE_CONTROL_TRANSPORT: ${WAYLANE_CONTROL_TRANSPORT:-ws}
-      WAYLANE_CONTROL_GRPC_TARGET: ${WAYLANE_CONTROL_GRPC_TARGET:-}
-      WAYLANE_CONTROL_GRPC_DEV_INSECURE: ${WAYLANE_CONTROL_GRPC_DEV_INSECURE:-false}
-      WAYLANE_AGENT_NAME: ${WAYLANE_AGENT_NAME:-waylane-node}
-      WAYLANE_AGENT_STATE_DIR: /var/lib/waylane-agent
-      WAYLANE_ROOTLESS_SOCKET: /run/user/1000/docker.sock
+      DISCOVERY_TOKEN: ${DISCOVERY_TOKEN:-}
+      NODE_TOKEN: ${NODE_TOKEN:-}
+      DEV_ALLOW_HTTP: ${DEV_ALLOW_HTTP:-false}
+      # One authenticated WebSocket, binary Protobuf frames only.
+      NODE_STATE_DIR: /var/lib/waylane-agent
+      ROOTLESS_SOCKET: /run/user/1000/docker.sock
     volumes:
       - agent-state:/var/lib/waylane-agent
       - rootless-data:/home/rootless/.local/share/docker
       - rootless-run:/run/user/1000
+      # Read host-machine identity, not the container hostname; no host Docker socket.
+      - type: bind
+        source: /etc/hostname
+        target: /etc/waylane/host-hostname
+        read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=32m
     pids_limit: 512

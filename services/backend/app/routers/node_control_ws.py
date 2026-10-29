@@ -5,15 +5,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.agent_binary_control import MAX_BINARY_FRAME, AgentBinarySession, check_agent, decode_frame
+from app.node_binary_control import MAX_BINARY_FRAME, AgentBinarySession, check_agent, decode_frame
 
-router = APIRouter(prefix="/api/agent", tags=["Node agent binary control"])
+router = APIRouter(prefix="/api/node-control", tags=["Node agent binary control"])
 
 
 @router.websocket("/control/ws")
 async def control_websocket(ws: WebSocket):
     uuid = ws.query_params.get("node_uuid", "")
-    secret = ws.headers.get("x-agent-secret", "")
+    secret = ws.headers.get("x-node-secret", "")
     if ws.headers.get("origin"):
         # Agent uses a native client. Never accept browser-origin credential reuse.
         await ws.close(code=1008)

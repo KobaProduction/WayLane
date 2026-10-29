@@ -6,7 +6,7 @@
 host networking, certificates, or core lifecycle to WayLane Node Agent.
 
 WayLane Node Agent is an **opt-in experiment** deployed with
-`docker-compose.agent.yaml`. It contains only a one-shot privileged bootstrap
+`docker-compose.node.yaml`. It contains only a one-shot privileged bootstrap
 plus one autonomous, non-privileged Go agent with an embedded rootless Docker
 engine. No host systemd, no rootful host socket, no third rootless-engine service.
 The panel talks only to the agent. Future independent Xray/sing-box/WireGuard/

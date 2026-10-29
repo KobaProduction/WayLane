@@ -61,13 +61,13 @@ func TestAPIUsesDedicatedCredentialsWithoutLeakingThem(t *testing.T) {
 	const token = "wl_disc_TEST_PRIVATE_DO_NOT_LOG"
 	const secret = "agent-identity-secret"
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/agent/") {
+		if !strings.HasPrefix(r.URL.Path, "/api/node-control/") {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		if r.URL.Path == "/api/agent/enroll" && r.Header.Get("X-Discovery-Token") != token {
+		if r.URL.Path == "/api/node-control/enroll" && r.Header.Get("X-Discovery-Token") != token {
 			t.Error("missing invitation")
 		}
-		if r.URL.Path == "/api/agent/heartbeat" && (r.Header.Get("X-Agent-Secret") != secret || r.Header.Get("X-Discovery-Token") != "") {
+		if r.URL.Path == "/api/node-control/heartbeat" && (r.Header.Get("X-Node-Secret") != secret || r.Header.Get("X-Discovery-Token") != "") {
 			t.Error("unexpected heartbeat authentication")
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -75,8 +75,8 @@ func TestAPIUsesDedicatedCredentialsWithoutLeakingThem(t *testing.T) {
 	}))
 	defer srv.Close()
 	for _, tc := range []struct{ path, header, credential string }{
-		{"/api/agent/enroll", "X-Discovery-Token", token},
-		{"/api/agent/heartbeat", "X-Agent-Secret", secret},
+		{"/api/node-control/enroll", "X-Discovery-Token", token},
+		{"/api/node-control/heartbeat", "X-Node-Secret", secret},
 	} {
 		reply, err := post(context.Background(), srv.Client(), srv.URL, tc.path, tc.header, tc.credential, map[string]any{"node_uuid": "synthetic"})
 		if err != nil || reply.Status != "pending" {
@@ -116,9 +116,23 @@ func TestRootlessDaemonRejectsRootfulUnixSocket(t *testing.T) {
 	}
 }
 
+func TestManagedNodeTokenPrefix(t *testing.T) {
+	const uuid = "0192b532-184f-41bc-9952-78e15b14cc55"
+	const nonce = "0123456789012345678901234567890123456789012"
+	actual, err := directTokenUUID("wl_node_" + uuid + "_" + nonce)
+	if err != nil || actual != uuid {
+		t.Fatalf("classic node token: %s %v", actual, err)
+	}
+	for _, prefix := range []string{"wl_agent_", "wl_disc_"} {
+		if _, err := directTokenUUID(prefix + uuid + "_" + nonce); err == nil {
+			t.Fatalf("unsupported token type %s accepted", prefix)
+		}
+	}
+}
+
 func TestDirectAgentTokenIdentityAndModeSelection(t *testing.T) {
 	const uuid = "0192b532-184f-41bc-9952-78e15b14cc55"
-	const directToken = "wl_agent_" + uuid + "_0123456789012345678901234567890123456789012"
+	const directToken = "wl_node_" + uuid + "_0123456789012345678901234567890123456789012"
 	dir := filepath.Join(t.TempDir(), "direct")
 	ident, err := prepareIdentity(dir, "", directToken)
 	if err != nil || ident.UUID != uuid || ident.Secret != directToken || !ident.Registered {
@@ -130,8 +144,8 @@ func TestDirectAgentTokenIdentityAndModeSelection(t *testing.T) {
 	for _, bad := range []struct{ discovery, token string }{
 		{"wl_disc_abc", directToken},
 		{"", "invalid"},
-		{"", "wl_agent_" + uuid + "_bad"},
-		{"", "wl_agent_00000000-0000-0000-0000-000000000000_0123456789012345678901234567890123456789012"},
+		{"", "wl_node_" + uuid + "_bad"},
+		{"", "wl_node_00000000-0000-0000-0000-000000000000_0123456789012345678901234567890123456789012"},
 	} {
 		if _, err := prepareIdentity(dir, bad.discovery, bad.token); err == nil {
 			t.Errorf("bad mode accepted: %+v", bad)
@@ -195,5 +209,42 @@ func TestLocalHTTPOnlyWithExplicitDevelopmentGate(t *testing.T) {
 		if _, err := panelOrigin(bad, true); err == nil {
 			t.Errorf("unsafe DEV endpoint accepted: %s", bad)
 		}
+	}
+}
+
+func TestObsoletePersistedManagedNodeSecretIsRejected(t *testing.T) {
+	const uuid = "0192b532-184f-41bc-9952-78e15b14cc55"
+	dir := filepath.Join(t.TempDir(), "node-identity")
+	obsolete := identity{UUID: uuid, Secret: "wl_agent_" + uuid + "_0123456789012345678901234567890123456789012", Registered: true}
+	if err := writeIdentity(dir, obsolete); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareIdentity(dir, "", ""); err == nil {
+		t.Fatal("old persisted Agent token accepted by strict Node runtime")
+	}
+}
+
+func TestNodeDefaultsToHostMachineName(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "host-hostname")
+	if err := os.WriteFile(filename, []byte("eu-latvia-vpn1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := nodeHostNameFromFile(filename)
+	if err != nil || actual != "eu-latvia-vpn1" {
+		t.Fatalf("real hostname: %q %v", actual, err)
+	}
+	for _, invalid := range []string{"", "bad host", "../escape", strings.Repeat("a", 129)} {
+		if err := os.WriteFile(filename, []byte(invalid), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := nodeHostNameFromFile(filename); err == nil {
+			t.Fatalf("invalid hostname %q accepted", invalid)
+		}
+	}
+	if err := os.Remove(filename); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nodeHostNameFromFile(filename); err == nil {
+		t.Fatal("missing host /etc/hostname mount must fail closed")
 	}
 }

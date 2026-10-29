@@ -16,8 +16,8 @@ from . import (
     host_balancer,
     hwid,
     node,
-    node_discovery,
-    agent_control_ws,
+    node_registry,
+    node_control_ws,
     passkey,
     settings,
     tls_presets,
@@ -50,9 +50,9 @@ routers = [
     host.router,
     host_balancer.router,
     node.router,
-    node_discovery.router,
-    node_discovery.agent_router,
-    agent_control_ws.router,
+    node_registry.node_registry_router,
+    node_registry.node_control_router,
+    node_control_ws.router,
     user.router,
     subscription.router,
     subscription_firewall.router,
@@ -65,6 +65,3 @@ for router in routers:
     api_router.include_router(router)
 
 __all__ = ["api_router"]
-
-# Register optional gRPC server with the normal backend lifespan.
-from app import agent_grpc_control as _agent_grpc_control  # noqa: F401
