@@ -77,6 +77,23 @@ protected by `app/db/migrations/legacy_history_sha256.json` and the verify
 script, so future modifications cannot silently rewrite migration history.
 
 
+## API key format and migration
+
+New administrative API keys use `waylane_<UUIDv4>`; the shortened admin list
+representation fits the existing 16-character database column. Newly created
+and rotated keys follow this format, and authorization rejects the historical
+`pg_key_<UUIDv4>` prefix. Previously issued keys **cannot be renamed** because
+only their hashes are stored: reissue or rotate keys and update clients
+explicitly before deploying this breaking change. No existing database keys,
+client credentials or running VPN nodes are changed by this source update.
+
+The bundled legacy NodeService RPC was also renamed to the
+`waylane.node.v1` protobuf package and gRPC service path in both the Go node
+and the Python bridge. Deploy both sides together; older node binaries or
+clients using `service.NodeService` are intentionally incompatible.
+The autonomous Agent's separate `waylane.control.v1` protocol is unchanged.
+Original upstream copyright notices and AGPL/GPL licensing are preserved.
+
 ## First local development owner (CLI)
 
 After starting the isolated development PostgreSQL on `127.0.0.1:15432`

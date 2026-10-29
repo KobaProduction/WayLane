@@ -83,7 +83,7 @@ def seed_api_key(admin_id: int) -> int:
                 admin_id=admin_id,
                 name=unique_name("bulk_api_key"),
                 key_hash=f"test_hash_{uuid4().hex}",
-                api_key_trimmed="pg_key_abc***xyz",
+                api_key_trimmed="waylane_ab***xyz",
             )
             session.add(db_key)
             await session.commit()

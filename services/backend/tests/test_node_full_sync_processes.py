@@ -36,8 +36,8 @@ class Receiver:
 
     def __mapping__(self):
         return {
-            "/service.NodeService/SyncUsers": Handler(self.full, Cardinality.UNARY_UNARY, service.Users, service.Empty),
-            "/service.NodeService/SyncUsersChunked": Handler(
+            "/waylane.node.v1.NodeService/SyncUsers": Handler(self.full, Cardinality.UNARY_UNARY, service.Users, service.Empty),
+            "/waylane.node.v1.NodeService/SyncUsersChunked": Handler(
                 self.chunked, Cardinality.STREAM_UNARY, service.UsersChunk, service.Empty
             ),
         }

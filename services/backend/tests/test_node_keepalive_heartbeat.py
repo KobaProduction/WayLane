@@ -287,7 +287,7 @@ async def test_heartbeat_sends_get_base_info_over_grpc(monkeypatch):
     class Receiver:
         def __mapping__(self):
             return {
-                "/service.NodeService/GetBaseInfo": Handler(
+                "/waylane.node.v1.NodeService/GetBaseInfo": Handler(
                     get_base_info, Cardinality.UNARY_UNARY, service.Empty, service.BaseInfoResponse
                 )
             }

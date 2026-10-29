@@ -155,7 +155,7 @@ func logRequest(ctx context.Context, method string, err error) {
 		clientIP = p.Addr.String()
 	}
 
-	logEntry := fmt.Sprintf("IP: %s, Method: %s,", clientIP, strings.TrimPrefix(method, "/service.NodeService/"))
+	logEntry := fmt.Sprintf("IP: %s, Method: %s,", clientIP, strings.TrimPrefix(method, "/waylane.node.v1.NodeService/"))
 
 	// Log based on the response status
 	if err != nil {
@@ -194,7 +194,7 @@ func LoggingStreamInterceptor(s *Service) grpc.StreamServerInterceptor {
 		if p, ok := peer.FromContext(ss.Context()); ok {
 			clientIP = p.Addr.String()
 		}
-		log.Printf("Trying To Open Stream Connection, IP: %s, Method: %s,", clientIP, strings.TrimPrefix(info.FullMethod, "/service.NodeService/"))
+		log.Printf("Trying To Open Stream Connection, IP: %s, Method: %s,", clientIP, strings.TrimPrefix(info.FullMethod, "/waylane.node.v1.NodeService/"))
 
 		// Handle the request
 		err := handler(srv, ss)
@@ -207,22 +207,22 @@ func LoggingStreamInterceptor(s *Service) grpc.StreamServerInterceptor {
 }
 
 var backendMethods = map[string]bool{
-	"/service.NodeService/GetStats":                 true,
-	"/service.NodeService/GetUserOnlineStats":       true,
-	"/service.NodeService/GetUserOnlineIpListStats": true,
-	"/service.NodeService/GetBackendStats":          true,
-	"/service.NodeService/GetSystemStats":           true,
-	"/service.NodeService/Stop":                     true,
-	"/service.NodeService/SyncUser":                 true,
-	"/service.NodeService/SyncUsers":                true,
-	"/service.NodeService/SyncUsersChunked":         true,
-	"/service.NodeService/GetLogs":                  true,
-	"/service.NodeService/ListRoutingRules":         true,
-	"/service.NodeService/GetBalancerInfo":          true,
-	"/service.NodeService/TestRoute":                true,
-	"/service.NodeService/AddRoutingRule":           true,
-	"/service.NodeService/RemoveRoutingRule":        true,
-	"/service.NodeService/OverrideBalancerTarget":   true,
+	"/waylane.node.v1.NodeService/GetStats":                 true,
+	"/waylane.node.v1.NodeService/GetUserOnlineStats":       true,
+	"/waylane.node.v1.NodeService/GetUserOnlineIpListStats": true,
+	"/waylane.node.v1.NodeService/GetBackendStats":          true,
+	"/waylane.node.v1.NodeService/GetSystemStats":           true,
+	"/waylane.node.v1.NodeService/Stop":                     true,
+	"/waylane.node.v1.NodeService/SyncUser":                 true,
+	"/waylane.node.v1.NodeService/SyncUsers":                true,
+	"/waylane.node.v1.NodeService/SyncUsersChunked":         true,
+	"/waylane.node.v1.NodeService/GetLogs":                  true,
+	"/waylane.node.v1.NodeService/ListRoutingRules":         true,
+	"/waylane.node.v1.NodeService/GetBalancerInfo":          true,
+	"/waylane.node.v1.NodeService/TestRoute":                true,
+	"/waylane.node.v1.NodeService/AddRoutingRule":           true,
+	"/waylane.node.v1.NodeService/RemoveRoutingRule":        true,
+	"/waylane.node.v1.NodeService/OverrideBalancerTarget":   true,
 }
 
 func ConditionalMiddleware(s *Service) grpc.UnaryServerInterceptor {

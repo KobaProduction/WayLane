@@ -9,14 +9,21 @@ from app.db.models import Admin, AdminStatus, APIKey, APIKeyStatus
 from app.models.api_key import APIKeyCreate
 from app.utils.crypto import api_key_lookup_id, hash_api_key, verify_api_key
 
+# Public API key format. Keep masked keys within APIKey.api_key_trimmed VARCHAR(16).
+API_KEY_PREFIX = "waylane_"
+
+
+def _generate_api_key() -> tuple[str, str]:
+    raw_uuid = str(uuid.uuid4())
+    return f"{API_KEY_PREFIX}{raw_uuid}", f"{API_KEY_PREFIX}{raw_uuid[:2]}***{raw_uuid[-3:]}"
+
 
 async def create_api_key(
     db: AsyncSession,
     admin_id: int,
     model: APIKeyCreate,
 ) -> tuple[str, APIKey]:
-    raw_uuid = str(uuid.uuid4())
-    raw_key = f"pg_key_{raw_uuid}"
+    raw_key, trimmed_key = _generate_api_key()
     db_key = APIKey(
         admin_id=admin_id,
         permissions={} if model.inherit_permissions else model.permissions.model_dump(exclude_none=True),
@@ -24,7 +31,7 @@ async def create_api_key(
         name=model.name,
         note=model.note,
         key_hash=hash_api_key(raw_key),
-        api_key_trimmed=f"pg_key_{raw_uuid[:3]}***{raw_uuid[-3:]}",
+        api_key_trimmed=trimmed_key,
         expire_date=model.expire_date,
     )
     db.add(db_key)
@@ -106,10 +113,9 @@ async def delete_api_key(db: AsyncSession, db_key: APIKey) -> None:
 
 
 async def revoke_api_key(db: AsyncSession, db_key: APIKey) -> tuple[str, APIKey]:
-    raw_uuid = str(uuid.uuid4())
-    raw_key = f"pg_key_{raw_uuid}"
+    raw_key, trimmed_key = _generate_api_key()
     db_key.key_hash = hash_api_key(raw_key)
-    db_key.api_key_trimmed = f"pg_key_{raw_uuid[:3]}***{raw_uuid[-3:]}"
+    db_key.api_key_trimmed = trimmed_key
     db_key.revoked_at = dt.now(UTC)
     db_key.status = APIKeyStatus.active
     await db.flush()
