@@ -20,11 +20,7 @@ config = context.config
 if not config.get_main_option("sqlalchemy.url"):
     # Alembic/DDL must use the direct PostgreSQL DSN, never the pooled
     # connection when the operator configured a separate migration endpoint.
-    migration_url = (
-        os.getenv("POSTGRES_MIGRATION_URL")
-        or os.getenv("SQLALCHEMY_MIGRATION_DATABASE_URL")
-        or database_settings.url
-    )
+    migration_url = os.getenv("SQLALCHEMY_MIGRATION_DATABASE_URL") or database_settings.url
     config.set_main_option("sqlalchemy.url", migration_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.

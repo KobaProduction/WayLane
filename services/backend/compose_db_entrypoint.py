@@ -25,53 +25,58 @@ def resolved_database_name() -> str:
     )
 
 
+def _postgres_port() -> int:
+    """Use the same explicit PostgreSQL port for runtime and migrations."""
+    value = os.getenv("POSTGRES_PORT", "5432")
+    if not value.isdecimal() or not 1 <= int(value) <= 65535:
+        raise SystemExit("POSTGRES_PORT must be an integer between 1 and 65535")
+    return int(value)
+
+
+def _postgres_host(value: str, setting: str) -> str:
+    """Validate a bare database host, never an operator-provided URL."""
+    value = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        raise SystemExit(f"{setting} must be a hostname or IPv4 address")
+    return value
+
+
 def configure_database_url_from_components() -> None:
-    """Configure separate runtime and migration DSNs without exposing credentials.
-
-    The managed/full stack uses existing POSTGRES_USER/POSTGRES_PASSWORD names.
-    The external two-service stack uses resource-scoped POSTGRES_USERNAME and
-    POSTGRES_PASSWORD, with optional explicit POSTGRES_URL overrides.
-    """
-    runtime_override = os.getenv("POSTGRES_URL")
-    migration_override = os.getenv("POSTGRES_MIGRATION_URL") or os.getenv("SQLALCHEMY_MIGRATION_DATABASE_URL")
-
+    """Build internal SQLAlchemy DSNs using the VPN Core-style host/port inputs."""
     username = os.getenv("POSTGRES_USERNAME") or os.getenv("POSTGRES_USER", "")
     password = os.getenv("POSTGRES_PASSWORD", "")
     database = resolved_database_name()
 
-    if not username and not runtime_override:
-        runtime_override = os.getenv("SQLALCHEMY_DATABASE_URL")
+    if not username or not password:
+        # Only the already-supported standalone backend mode accepts a
+        # preassembled SQLAlchemy DSN; grouped Compose never exposes one.
+        legacy_url = os.getenv("SQLALCHEMY_DATABASE_URL")
+        if legacy_url and not username and not password:
+            os.environ["SQLALCHEMY_MIGRATION_DATABASE_URL"] = (
+                os.getenv("SQLALCHEMY_MIGRATION_DATABASE_URL") or legacy_url
+            )
+            return
+        raise SystemExit("POSTGRES_USERNAME and POSTGRES_PASSWORD are required")
 
-    if not runtime_override:
-        if not username or not password:
-            raise SystemExit("PostgreSQL credentials or POSTGRES_URL must be configured")
-        runtime_url = URL.create(
+    host = _postgres_host(os.getenv("POSTGRES_HOST") or "database", "POSTGRES_HOST")
+    migration_host = _postgres_host(
+        os.getenv("POSTGRES_MIGRATION_HOST") or host,
+        "POSTGRES_MIGRATION_HOST",
+    )
+    port = _postgres_port()
+
+    def build_dsn(hostname: str) -> str:
+        return URL.create(
             "postgresql+asyncpg",
             username=username,
             password=password,
-            host=os.getenv("POSTGRES_HOST", "database"),
-            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            host=hostname,
+            port=port,
             database=database,
         ).render_as_string(hide_password=False)
-    else:
-        runtime_url = runtime_override
 
-    if migration_override:
-        migration_url = migration_override
-    elif username and password:
-        migration_url = URL.create(
-            "postgresql+asyncpg",
-            username=username,
-            password=password,
-            host=os.getenv("POSTGRES_MIGRATION_HOST", os.getenv("POSTGRES_HOST", "database")),
-            port=int(os.getenv("POSTGRES_MIGRATION_PORT", os.getenv("POSTGRES_PORT", "5432"))),
-            database=database,
-        ).render_as_string(hide_password=False)
-    else:
-        migration_url = runtime_url
-
-    os.environ["SQLALCHEMY_DATABASE_URL"] = runtime_url
-    os.environ["SQLALCHEMY_MIGRATION_DATABASE_URL"] = migration_url
+    os.environ["SQLALCHEMY_DATABASE_URL"] = build_dsn(host)
+    os.environ["SQLALCHEMY_MIGRATION_DATABASE_URL"] = build_dsn(migration_host)
 
 
 async def ensure_database_exists() -> None:
@@ -84,8 +89,8 @@ async def ensure_database_exists() -> None:
 
     # Use PostgreSQL directly for DDL; the normal application DSN uses PgBouncer.
     connection = await asyncpg.connect(
-        host="postgres",
-        port=5432,
+        host=_postgres_host(os.getenv("POSTGRES_MIGRATION_HOST") or "postgres", "POSTGRES_MIGRATION_HOST"),
+        port=_postgres_port(),
         user=username,
         password=password,
         database="postgres",

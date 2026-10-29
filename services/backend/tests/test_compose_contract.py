@@ -34,6 +34,7 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     assert "ports" not in pool
     assert pool["user"] == "10001:10001"
     assert services["backend"]["environment"]["POSTGRES_HOST"] == "database"
+    assert services["backend"]["environment"]["POSTGRES_PORT"] == "5432"
     assert services["backend"]["environment"]["POSTGRES_MIGRATION_HOST"] == "postgres"
     assert "postgres" not in services["backend"]["depends_on"]
     assert services["backend"]["depends_on"]["pgbouncer"]["condition"] == "service_healthy"
@@ -78,6 +79,8 @@ def test_bundled_postgres_dsn_handles_uri_reserved_password(monkeypatch):
     monkeypatch.setenv("POSTGRES_PASSWORD", "ab:@/#!+%&£")
     monkeypatch.setenv("POSTGRES_DB", "custom-db")
     monkeypatch.setenv("POSTGRES_HOST", "database")
+    monkeypatch.setenv("POSTGRES_PORT", "5432")
+    monkeypatch.setenv("POSTGRES_MIGRATION_HOST", "postgres")
 
     class Executed(Exception):
         pass
@@ -222,6 +225,7 @@ def test_managed_backend_pooler_is_private_and_shares_only_approved_credentials(
     assert "ports" not in services["pgbouncer"]
     assert services["pgbouncer"]["networks"]["database"]["aliases"] == ["database"]
     assert services["backend"]["environment"]["POSTGRES_HOST"] == "database"
+    assert services["backend"]["environment"]["POSTGRES_PORT"] == "5432"
     assert services["backend"]["environment"]["POSTGRES_MIGRATION_HOST"] == "postgres"
     assert services["backend"]["ports"] == ["127.0.0.1:8000:8000"]
     assert services["postgres"]["volumes"] == ["postgres_data:/var/lib/postgresql/data"]

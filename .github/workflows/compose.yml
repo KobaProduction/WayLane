@@ -154,7 +154,7 @@ jobs:
 
           async def check():
               connection = await asyncpg.connect(
-                  host=os.environ["POSTGRES_HOST"],
+                  host="database",
                   port=5432,
                   user=os.environ["POSTGRES_USER"],
                   password=os.environ["POSTGRES_PASSWORD"],

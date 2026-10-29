@@ -46,27 +46,26 @@ for DDL. No separate database schema or login is invented.
 
 ### Database input contract
 
-You may supply **either** full URLs or connection components:
+Use the same operator-facing database primitives as VPN Core: a database
+identity, a hostname, and a port. WayLane runs migrations in the backend
+startup, so an optional separate direct-PostgreSQL hostname is used for
+Alembic. Both connections share the same port by default.
 
 | Resource variable | Default | Meaning |
 | --- | --- | --- |
-| `POSTGRES_USERNAME` | empty | Database login if URLs are constructed |
-| `POSTGRES_PASSWORD` | empty | Protected database password if constructing URLs |
+| `POSTGRES_USERNAME` | empty | PostgreSQL login; can reference Shared Variables |
+| `POSTGRES_PASSWORD` | empty | Protected PostgreSQL password |
 | `POSTGRES_DATABASE` | `waylane` | Logical database name |
-| `POSTGRES_HOST` | `database` | Normal runtime target, typically PgBouncer |
-| `POSTGRES_PORT` | `5432` | Normal runtime port |
-| `POSTGRES_MIGRATION_HOST` | `postgres` | Direct PostgreSQL target for migrations |
-| `POSTGRES_MIGRATION_PORT` | `5432` | Direct PostgreSQL port |
-| `POSTGRES_URL` | empty | Optional complete runtime `postgresql+asyncpg://...` DSN; overrides components |
-| `POSTGRES_MIGRATION_URL` | empty | Optional complete direct migration DSN |
+| `POSTGRES_HOST` | `database` | Runtime hostname, typically PgBouncer |
+| `POSTGRES_PORT` | `5432` | Port for both runtime and migrations |
+| `POSTGRES_MIGRATION_HOST` | `postgres` | Direct PostgreSQL hostname for migrations |
 
-With components, the backend builds both URLs safely using SQLAlchemy's
-URL encoder. With `POSTGRES_URL` but no component credentials, an empty
-`POSTGRES_MIGRATION_URL` defaults to the **same runtime URL**. With
-components, an empty migration URL uses the separately configurable migration
-host, so the normal pattern is **PgBouncer `database:5432` for queries** and
-**PostgreSQL `postgres:5432` for migrations**. A setup without PgBouncer
-can set both hosts/URLs to the same direct PostgreSQL service.
+**No operator-facing URLs** are used. Both full SQLAlchemy DSNs are built
+internally using the same credentials, database and port. For installations
+without PgBouncer, set `POSTGRES_MIGRATION_HOST` to the same value as
+`POSTGRES_HOST`. If the migration hostname is empty in the backend, it
+falls back to the runtime hostname; the external Compose defaults to
+`postgres` for the PgBouncer scenario.
 
 The backend does **not** provision, recreate, or rename the external database.
 Its `POSTGRES_AUTO_CREATE_DB` remains false. Startup migrations operate
@@ -81,9 +80,8 @@ POSTGRES_USERNAME={{environment.WAYLANE_POSTGRES_USERNAME}}
 POSTGRES_PASSWORD={{environment.WAYLANE_POSTGRES_PASSWORD}}
 POSTGRES_DATABASE=waylane
 POSTGRES_HOST=database
+POSTGRES_PORT=5432
 POSTGRES_MIGRATION_HOST=postgres
-POSTGRES_URL=
-POSTGRES_MIGRATION_URL=
 ```
 
 Do not pass these reference strings as literal Compose values. Coolify must
