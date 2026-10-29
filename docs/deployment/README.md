@@ -56,3 +56,17 @@ independent Watch Paths and an externally owned database/API balancer.
 Exact external variable contract, commands, security and source ownership:
 deploy/compose/README.md. Actual Coolify parser resolution, Shared secrets,
 domain generation and persistence must be verified before live deployment.
+
+## Experimental WayLane Node Agent (not the legacy node)
+
+The existing Node row above describes **legacy** `services/node/Dockerfile`
+and host-network node deployment. Do not apply those assumptions to Node
+WayLane Agent. The optional `services/node/docker-compose.agent.yaml` is one
+independent **two-service** deployment: an exited privileged bootstrap plus
+an autonomous non-privileged agent that supervises its own embedded rootless
+Docker daemon. It has **no systemd, extra Compose rootless-engine service or
+host Docker socket**. Future independently deployable VPN engine containers
+are managed exclusively by the agent, but their lifecycle and real traffic
+have not yet been implemented or accepted. This manifest is generic Compose;
+no Coolify v2 resource, ENV or managed-domain contract has been approved.
+Canonical details and runtime gates: `services/node/agent/README.md`.

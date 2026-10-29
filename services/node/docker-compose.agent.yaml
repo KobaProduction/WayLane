@@ -1,0 +1,71 @@
+# Experimental WayLane Node Agent: EXACTLY bootstrap and agent.
+# Bootstrap prepares private volumes; Go Agent supervises embedded rootless Docker.
+# This profile grants nested namespace exceptions; production security and VPN traffic are NOT accepted.
+name: waylane-node
+services:
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: services/node/bootstrap/Dockerfile
+    user: "0:0"
+    privileged: true
+    restart: "no"
+    network_mode: none
+    read_only: true
+    volumes:
+      - agent-state:/bootstrap/agent-state
+      - rootless-data:/bootstrap/docker-data
+      - rootless-run:/bootstrap/docker-run
+  agent:
+    build:
+      context: ../..
+      dockerfile: services/node/agent/Dockerfile
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      HOME: /home/rootless
+      XDG_RUNTIME_DIR: /run/user/1000
+      DOCKER_TLS_CERTDIR: ""
+      WAYLANE_PANEL_URL: ${WAYLANE_PANEL_URL:?HTTPS panel URL required}
+      # Choose ONE of Discovery or direct Agent token; leave both empty only
+      # after a registered identity is safely persisted in agent-state.
+      WAYLANE_DISCOVERY_TOKEN: ${WAYLANE_DISCOVERY_TOKEN:-}
+      WAYLANE_AGENT_TOKEN: ${WAYLANE_AGENT_TOKEN:-}
+      WAYLANE_DEV_ALLOW_HTTP: ${WAYLANE_DEV_ALLOW_HTTP:-false}
+      # Binary protobuf over WSS by default. gRPC is an explicit alternative;
+      # legacy HTTPS control is opt-in only for migration/rollback.
+      WAYLANE_CONTROL_TRANSPORT: ${WAYLANE_CONTROL_TRANSPORT:-ws}
+      WAYLANE_CONTROL_GRPC_TARGET: ${WAYLANE_CONTROL_GRPC_TARGET:-}
+      WAYLANE_CONTROL_GRPC_DEV_INSECURE: ${WAYLANE_CONTROL_GRPC_DEV_INSECURE:-false}
+      WAYLANE_AGENT_NAME: ${WAYLANE_AGENT_NAME:-waylane-node}
+      WAYLANE_AGENT_STATE_DIR: /var/lib/waylane-agent
+      WAYLANE_ROOTLESS_SOCKET: /run/user/1000/docker.sock
+    volumes:
+      - agent-state:/var/lib/waylane-agent
+      - rootless-data:/home/rootless/.local/share/docker
+      - rootless-run:/run/user/1000
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=32m
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "docker -H unix:///run/user/1000/docker.sock info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless"]
+      interval: 10s
+      timeout: 5s
+      start_period: 45s
+      retries: 5
+volumes:
+  agent-state: {}
+  rootless-data: {}
+  rootless-run: {}

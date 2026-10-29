@@ -1,21 +1,26 @@
-# WayLane Node — agent map
+# WayLane Node — agent routing
 
-Source: https://github.com/KobaProduction/waylane (services/node/)
+Canonical source: https://github.com/KobaProduction/WayLane/tree/main/services/node
+The deleted standalone node repository is not an active source or release authority.
+Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
 
-Reusable engineering guidance: https://github.com/ArthurKoba/ai-agent-workflow
-Read the workflow AGENTS.md; load relevant Git, software-engineering and
-services-deployment skills only. Experimental AmneziaWG 3.1 runs solely by
-explicit engine=amneziawg; legacy kernel WG must remain the default. Consult
-DEPLOYMENT.md and pinned upstream AmneziaWG attribution before changing it.
+## Two independent node lifecycles
 
-## Code and contracts
-- `cmd/node/`: agent entry point.
-- `backend/xray/`, `backend/wireguard/`: current engines, including
-  opt-in userspace AmneziaWG 3.1 via the WG bridge and UAPI.
-- `controller/`: gRPC and REST integration.
-- `common/service.proto`: compatibility contract.
-- `scripts/verify.sh`: tests, vet and build.
-- `scripts/prepare-test-runtime.sh`: pinned test-only dependencies.
-- `UPSTREAM.md` and `LICENSING.md`: source provenance and license scope.
+- Legacy `cmd/node/`, `controller/`, `backend/xray/`, `backend/wireguard/`:
+  one existing PasarGuard-compatible node process, host networking and
+  NET_ADMIN requirements; `DEPLOYMENT.md` owns this runtime's acceptance.
+  Kernel WireGuard remains the default; AmneziaWG 3.1 is opt-in and requires
+  separate real-traffic verification (Issue #7).
+- New `bootstrap/`, `agent/`, `docker-compose.agent.yaml`: experimental
+  WayLane Node Agent. **Read the complete `agent/README.md` as its authoritative
+  lifecycle and topology contract before changing any of these files.**
+  Exactly two Compose services, one-shot privileged bootstrap and autonomous
+  non-privileged Go agent supervising its private embedded rootless Docker.
+  No host systemd, independent rootless-engine Compose service, or host Docker
+  socket. Panel-agent is the only intended management relationship. Single Xray DEV child is implemented, but full legacy user/stats/routing
+  parity and additional engines are deferred and not accepted.
 
-Retain required node/protocol compatibility; do not change production nodes without approval.
+`common/service.proto` remains the compatibility contract;
+`scripts/verify.sh` runs source gates. Preserve provenance/licenses in
+`UPSTREAM.md` and `LICENSING.md`. No production node migration without
+explicit acceptance.

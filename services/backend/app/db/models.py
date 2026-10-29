@@ -12,6 +12,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     Table,
     Text,
@@ -682,6 +683,58 @@ class NodeStatus(str, Enum):
     error = "error"
     disabled = "disabled"
     limited = "limited"
+
+
+# Additive WayLane Agent identity; no mutation of the existing Node model.
+node_discovery_invitations = Table(
+    "node_discovery_invitations", Base.metadata,
+    Column("id", SqliteCompatibleBigInteger, primary_key=True, autoincrement=True),
+    Column("token_hash", String(64), unique=True, nullable=False),
+    Column("label", String(120), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True)),
+    Column("revoked", String(1), server_default="0", nullable=False),
+    Column("auto_approve", String(1), server_default="0", nullable=False),
+)
+
+node_agent_registrations = Table(
+    "node_agent_registrations", Base.metadata,
+    Column("node_uuid", String(36), primary_key=True),
+    Column("secret_hash", String(64), nullable=False),
+    Column("invitation_id", SqliteCompatibleBigInteger,
+           ForeignKey("node_discovery_invitations.id", ondelete="RESTRICT"), nullable=True),
+    Column("legacy_node_id", SqliteCompatibleBigInteger, ForeignKey("nodes.id", ondelete="SET NULL"), unique=True),
+    Column("display_name", String(128), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("agent_version", String(32), nullable=False),
+    Column("observed_ip", String(45)),
+    Column("reported_ipv4", String(45)),
+    Column("reported_ipv6", String(45)),
+    Column("capabilities", JSON(), nullable=False),
+    Column("machine_metrics", JSON(), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True)),
+)
+Index("ix_node_agent_registrations_status", node_agent_registrations.c.status)
+
+# Desired Xray state is separate from legacy Node/Core records.
+# Only the authenticated Agent may reconcile this on its private Docker.
+node_agent_xray_desired = Table(
+    "node_agent_xray_desired", Base.metadata,
+    Column("node_uuid", String(36),
+           ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    Column("generation", Integer, nullable=False),
+    Column("action", String(16), nullable=False),
+    Column("image_version", String(32), nullable=False),
+    Column("config", JSON(), nullable=True),
+    Column("region", String(64), nullable=True),
+    Column("applied_generation", Integer, nullable=False, server_default="0"),
+    Column("runtime_status", String(16), nullable=False, server_default="pending"),
+    Column("last_error", String(300), nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("reported_at", DateTime(timezone=True), nullable=True),
+)
+
 
 
 class Node(Base, CreatedAtUTCMixin):

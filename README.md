@@ -9,7 +9,7 @@ GitHub source for all three services is KobaProduction/WayLane.
 | --- | --- | --- |
 | services/backend/ | Python 3.14, FastAPI, scheduler, node RPC | independent Coolify backend |
 | services/frontend/ | React/Bun, static Nginx | independent Coolify frontend |
-| services/node/ | Go, Xray, kernel WireGuard and opt-in AmneziaWG 3.1 | independently deployed VPN nodes; rootless hardening pending |
+| services/node/ | Legacy Go node (Xray, WireGuard, opt-in AWG 3.1) + separate WayLane Agent prototype | independently deployed; experimental agent owns rootless Docker and one Xray DEV child |
 | services/external/ | managed PostgreSQL, ingress, API balancer, OTLP | separately owned infrastructure |
 | shared/contracts/ | narrowly shared wire DTOs | docs / protocol checks |
 
@@ -37,8 +37,19 @@ backend/frontend with external DB and API ingress. The deployment inputs,
 credentials, smoke commands and security constraints are documented at
 [deploy/compose/README.md](deploy/compose/README.md).
 
-For Intens VPN, the active Git-backed deployment definitions live in
+For Intens VPN, deployment definitions live in
 [intens-cloud/infrastructure/deploy/vpn/waylane](https://gitlab.com/intens-cloud/infrastructure/-/tree/master/deploy/vpn/waylane).
-That resource uses external PostgreSQL/PgBouncer and is distinct from the
-customer Web App and VPN Core. The backend/frontend build inputs come
-from this monorepo, not deleted standalone repositories.
+The backend and frontend build inputs belong to this monorepo; the customer
+Web App and VPN Core are separate services.
+
+## WayLane Node Agent (opt-in, experimental)
+
+The new node uses one Compose resource with exactly two services:
+one-shot privileged `bootstrap` and autonomous non-privileged `agent`.
+The agent owns its private embedded rootless Docker daemon and controls
+a single Xray DEV child; binary WebSocket and gRPC control transports
+are implemented in source, but end-to-end acceptance and public VPN traffic
+have not been demonstrated for this merged revision. Other engines and
+networking/privilege hardening remain future work.
+The legacy Go node is preserved independently until migration acceptance.
+See [services/node/agent/README.md](services/node/agent/README.md).

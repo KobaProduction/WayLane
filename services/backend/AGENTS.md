@@ -1,6 +1,6 @@
 # WayLane Backend — agent map
 
-Source: https://github.com/KobaProduction/waylane (services/backend/)
+Source: https://github.com/KobaProduction/WayLane/tree/main/services/backend
 
 Reusable engineering guidance: https://github.com/ArthurKoba/ai-agent-workflow
 Read the upstream workflow AGENTS.md and load only task-relevant skills.
@@ -15,3 +15,7 @@ Read the upstream workflow AGENTS.md and load only task-relevant skills.
 - Shared Intens contracts: `intens-cloud/infrastructure`.
 
 Preserve API and migration compatibility; do not change production without authorization.
+
+WayLane Node Agent discovery API, migrations and IP observation registry belong to
+`app/routers/node_discovery.py`. Registration must not silently mutate
+legacy `nodes`, hosts, certificates or subscription endpoints.

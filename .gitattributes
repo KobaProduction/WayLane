@@ -1,0 +1,2 @@
+# Windows checkouts must not convert Linux container shell entrypoints to CRLF.
+services/node/bootstrap/*.sh text eol=lf

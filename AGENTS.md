@@ -1,9 +1,9 @@
 # WayLane monorepo — service owners
 
-KobaProduction/waylane main is the authoritative source layout following
+KobaProduction/WayLane main is the authoritative source layout following
 monorepo merge. All active source, CI, release and Coolify build contexts must use this single monorepo.
-Former split repositories are not active source authorities and must not be used
-for builds, release checks or deployments; removal requires repository administration.
+The former frontend and node repositories have been removed. No separate
+repository is authoritative for backend/frontend/node builds or deployments.
 
 Read ArthurKoba/ai-agent-workflow/AGENTS.md and the skill for the task.
 Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
@@ -14,8 +14,9 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: Go VPN agent, Xray and WireGuard; currently NET_ADMIN/host-network dependent,
-  independently deployed and never a sidecar in frontend/backend.
+- services/node/: separately deployed legacy Go VPN node plus an opt-in WayLane Node Agent prototype.
+  The legacy node remains host-network/NET_ADMIN dependent; do not ascribe those
+  privileges or its single-core lifecycle to WayLane Node Agent.
 - services/external/: approved contracts for separate PostgreSQL,
   API load balancer/ingress, external SigNoz OTLP endpoints.
 - shared/contracts/: narrowly scoped protocol DTOs, no ORM imports.
@@ -24,3 +25,22 @@ Each internal service owns its Dockerfile, dependencies, tests and deployment.
 CI and Coolify Watch Paths must scope independently to each module.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
+
+## WayLane Node Agent architecture authority
+
+Read `services/node/AGENTS.md` and `services/node/agent/README.md` before
+changing the autonomous agent-based node. Its single Compose entrypoint has **exactly two services**:
+a one-shot privileged `bootstrap` preparing private volumes, then one
+non-privileged autonomous `agent`. The agent supervises its own embedded
+rootless Docker daemon through a private Unix socket. Neither host systemd,
+a separate Compose Docker sidecar, nor the host/system Docker socket belongs
+in this architecture. Only the agent communicates with the panel; the agent
+now owns a single DEV Xray child (deploy/pull/update/restart/stop,
+per-inbound account updates), while PasarGuard parity, multi-engine drivers,
+public UDP/TCP ingress and production traffic are **not** shipped.
+The security/runtime pilot is not accepted by source CI alone.
+
+The control channel and Node-versus-Core ownership contract is
+documented in shared/contracts/AGENT_CONTROL.md. One Agent owns machine
+telemetry; child cores own only their separate service traffic and state.
+The Node control protocol is **binary Protobuf only**: gRPC bidirectional streaming or binary WebSocket. SSE, HTTP streaming and JSON frames are not supported control transports. New Agent defaults to binary WS; legacy HTTP control remains explicit for staged rollback. See shared/contracts/AGENT_CONTROL.md; production gRPC/WS interop acceptance is separate.

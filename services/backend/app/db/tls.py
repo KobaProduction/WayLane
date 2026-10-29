@@ -29,3 +29,14 @@ tls_bindings = sa.Table(
     sa.Column("inbound_tag", sa.String(256), nullable=False),
     sa.UniqueConstraint("node_id", "inbound_tag", name="uq_tls_bindings_node_inbound"),
 )
+
+# Autonomous Agent bindings are separate from legacy node/core bindings.
+# Secret material stays in tls_presets; never copy it into desired Xray JSON.
+agent_tls_bindings = sa.Table(
+    "node_agent_tls_bindings", Base.metadata,
+    sa.Column("node_uuid", sa.String(36), sa.ForeignKey(
+        "node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    sa.Column("inbound_tag", sa.String(256), primary_key=True),
+    sa.Column("preset_id", sa.String(36), sa.ForeignKey(
+        "tls_presets.id", ondelete="RESTRICT"), nullable=False),
+)

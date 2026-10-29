@@ -41,7 +41,7 @@ dependencies = [
     "aiorwlock>=1.5.0",
     "typer>=0.27.3",
     "grpclib>=0.4.9",
-    "protobuf>=6.33.6",
+    "protobuf>=6.33.6,<7",
     "python-socks[asyncio]>=2.8.1",
     "nats-py>=2.16.0",
     "webauthn>=3.0.1",
@@ -50,6 +50,8 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.38,<2",
     "opentelemetry-instrumentation-fastapi>=0.59b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.59b0",
+    "grpcio>=1.81.1,<2",
+    "websockets>=15,<17",
 ]
 
 [tool.ruff]
@@ -84,6 +86,7 @@ docstring-code-line-length = "dynamic"
 
 [dependency-groups]
 dev = [
+    "grpcio-tools>=1.81,<2",
     "psycopg[binary]>=3.3.6",
     "pymysql>=1.2.3",
     "pytest>=9.1.1",
