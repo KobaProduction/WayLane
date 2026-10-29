@@ -29,6 +29,21 @@ former standalone repositories were retired. Do not restore their links
 in current runtime or release consumers.
 Read docs/deployment/README.md for gates and topology.
 
+## Licensing and WayLane identities
+
+The existing upstream licenses remain in force: AGPL-3.0 for imported
+panel/frontend and vendored configuration kits; GPL-3.0 for the imported node
+and bundled Python bridge. Their source attribution and license texts remain
+unchanged. The repository's original MIT `LICENSE` does not relicense any
+upstream-derived source. See each component's `LICENSING.md`.
+
+Administrative keys issued after this change are `waylane_<UUIDv4>`.
+The bundled Go NodeService and Python bridge use the WayLane-native
+`waylane.node.v1.NodeService` RPC identity; previously deployed clients and
+API keys with PasarGuard identifiers will no longer authenticate/connect.
+Rotate administrative keys and deploy both RPC sides together before using
+this version. **This source change does not deploy or migrate running nodes.**
+
 ## Deployment options
 
 Use ordinary Compose or Coolify adapters for either a self-contained

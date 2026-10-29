@@ -20,7 +20,7 @@ Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
   socket. Panel-agent is the only intended management relationship. Single Xray DEV child is implemented, but full legacy user/stats/routing
   parity and additional engines are deferred and not accepted.
 
-`common/service.proto` remains the compatibility contract;
+`common/service.proto` is now a WayLane-native RPC contract, paired with the bundled Python bridge;
 `scripts/verify.sh` runs source gates. Preserve provenance/licenses in
 `UPSTREAM.md` and `LICENSING.md`. No production node migration without
 explicit acceptance.

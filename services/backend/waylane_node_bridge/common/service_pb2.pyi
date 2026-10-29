@@ -41,7 +41,7 @@ class BaseInfoResponse(_message.Message):
     started: bool
     core_version: str
     node_version: str
-    def __init__(self, started: bool = ..., core_version: _Optional[str] = ..., node_version: _Optional[str] = ...) -> None: ...
+    def __init__(self, started: _Optional[bool] = ..., core_version: _Optional[str] = ..., node_version: _Optional[str] = ...) -> None: ...
 
 class Backend(_message.Message):
     __slots__ = ("type", "config", "users", "keep_alive", "exclude_inbounds")
@@ -89,7 +89,7 @@ class StatRequest(_message.Message):
     name: str
     reset: bool
     type: StatType
-    def __init__(self, name: _Optional[str] = ..., reset: bool = ..., type: _Optional[_Union[StatType, str]] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., reset: _Optional[bool] = ..., type: _Optional[_Union[StatType, str]] = ...) -> None: ...
 
 class OnlineStatResponse(_message.Message):
     __slots__ = ("name", "value")
@@ -130,7 +130,7 @@ class Latency(_message.Message):
     last_seen_time: int
     last_try_time: int
     source: str
-    def __init__(self, name: _Optional[str] = ..., alive: bool = ..., delay: _Optional[int] = ..., link: _Optional[str] = ..., last_seen_time: _Optional[int] = ..., last_try_time: _Optional[int] = ..., source: _Optional[str] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., alive: _Optional[bool] = ..., delay: _Optional[int] = ..., link: _Optional[str] = ..., last_seen_time: _Optional[int] = ..., last_try_time: _Optional[int] = ..., source: _Optional[str] = ...) -> None: ...
 
 class LatencyRequest(_message.Message):
     __slots__ = ("name",)
@@ -215,12 +215,14 @@ class Shadowsocks(_message.Message):
     def __init__(self, password: _Optional[str] = ..., method: _Optional[str] = ...) -> None: ...
 
 class Wireguard(_message.Message):
-    __slots__ = ("public_key", "peer_ips")
+    __slots__ = ("public_key", "peer_ips", "pre_shared_key")
     PUBLIC_KEY_FIELD_NUMBER: _ClassVar[int]
     PEER_IPS_FIELD_NUMBER: _ClassVar[int]
+    PRE_SHARED_KEY_FIELD_NUMBER: _ClassVar[int]
     public_key: str
     peer_ips: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, public_key: _Optional[str] = ..., peer_ips: _Optional[_Iterable[str]] = ...) -> None: ...
+    pre_shared_key: str
+    def __init__(self, public_key: _Optional[str] = ..., peer_ips: _Optional[_Iterable[str]] = ..., pre_shared_key: _Optional[str] = ...) -> None: ...
 
 class Hysteria(_message.Message):
     __slots__ = ("auth",)
@@ -275,7 +277,7 @@ class UsersChunk(_message.Message):
     users: _containers.RepeatedCompositeFieldContainer[User]
     index: int
     last: bool
-    def __init__(self, users: _Optional[_Iterable[_Union[User, _Mapping]]] = ..., index: _Optional[int] = ..., last: bool = ...) -> None: ...
+    def __init__(self, users: _Optional[_Iterable[_Union[User, _Mapping]]] = ..., index: _Optional[int] = ..., last: _Optional[bool] = ...) -> None: ...
 
 class RoutingRule(_message.Message):
     __slots__ = ("outbound_tag", "rule_tag")
@@ -334,7 +336,7 @@ class TestRouteRequest(_message.Message):
     attributes: _containers.ScalarMap[str, str]
     field_selectors: _containers.RepeatedScalarFieldContainer[str]
     publish_result: bool
-    def __init__(self, inbound_tag: _Optional[str] = ..., network: _Optional[str] = ..., target_ip: _Optional[str] = ..., target_domain: _Optional[str] = ..., target_port: _Optional[int] = ..., protocol: _Optional[str] = ..., user: _Optional[str] = ..., attributes: _Optional[_Mapping[str, str]] = ..., field_selectors: _Optional[_Iterable[str]] = ..., publish_result: bool = ...) -> None: ...
+    def __init__(self, inbound_tag: _Optional[str] = ..., network: _Optional[str] = ..., target_ip: _Optional[str] = ..., target_domain: _Optional[str] = ..., target_port: _Optional[int] = ..., protocol: _Optional[str] = ..., user: _Optional[str] = ..., attributes: _Optional[_Mapping[str, str]] = ..., field_selectors: _Optional[_Iterable[str]] = ..., publish_result: _Optional[bool] = ...) -> None: ...
 
 class RouteResult(_message.Message):
     __slots__ = ("outbound_tag", "outbound_group_tags", "inbound_tag", "network", "target_domain")
@@ -356,7 +358,7 @@ class AddRoutingRuleRequest(_message.Message):
     SHOULD_RESET_FIELD_NUMBER: _ClassVar[int]
     rule: str
     should_reset: bool
-    def __init__(self, rule: _Optional[str] = ..., should_reset: bool = ...) -> None: ...
+    def __init__(self, rule: _Optional[str] = ..., should_reset: _Optional[bool] = ...) -> None: ...
 
 class RemoveRoutingRuleRequest(_message.Message):
     __slots__ = ("rule_tag",)

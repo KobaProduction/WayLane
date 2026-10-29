@@ -38,7 +38,7 @@ async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstr
 
         def __mapping__(self):
             return {
-                "/service.NodeService/SyncUsersChunked": Handler(
+                "/waylane.node.v1.NodeService/SyncUsersChunked": Handler(
                     self.receive, Cardinality.STREAM_UNARY, service.UsersChunk, service.Empty
                 )
             }

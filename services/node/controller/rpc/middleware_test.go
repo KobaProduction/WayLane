@@ -17,12 +17,12 @@ import (
 
 func TestRoutingMethodsAreBackendGated(t *testing.T) {
 	methods := []string{
-		"/service.NodeService/ListRoutingRules",
-		"/service.NodeService/GetBalancerInfo",
-		"/service.NodeService/TestRoute",
-		"/service.NodeService/AddRoutingRule",
-		"/service.NodeService/RemoveRoutingRule",
-		"/service.NodeService/OverrideBalancerTarget",
+		"/waylane.node.v1.NodeService/ListRoutingRules",
+		"/waylane.node.v1.NodeService/GetBalancerInfo",
+		"/waylane.node.v1.NodeService/TestRoute",
+		"/waylane.node.v1.NodeService/AddRoutingRule",
+		"/waylane.node.v1.NodeService/RemoveRoutingRule",
+		"/waylane.node.v1.NodeService/OverrideBalancerTarget",
 	}
 	for _, m := range methods {
 		if !backendMethods[m] {
@@ -55,7 +55,7 @@ func (f *fakeServerStream) Context() context.Context { return f.ctx }
 func TestKeepAliveRefreshedWhenAuthenticatedCallArrives(t *testing.T) {
 	s, key := newKeepAliveTestService(t)
 
-	info := &grpc.UnaryServerInfo{FullMethod: "/service.NodeService/GetBaseInfo"}
+	info := &grpc.UnaryServerInfo{FullMethod: "/waylane.node.v1.NodeService/GetBaseInfo"}
 	var atArrival time.Time
 	_, err := ConditionalMiddleware(s)(withAPIKey(key.String()), &common.Empty{}, info, func(context.Context, any) (any, error) {
 		atArrival = s.LastRequest()
@@ -72,7 +72,7 @@ func TestKeepAliveRefreshedWhenAuthenticatedCallArrives(t *testing.T) {
 func TestKeepAliveRefreshedWhenBackendGateRejects(t *testing.T) {
 	s, key := newKeepAliveTestService(t)
 
-	info := &grpc.UnaryServerInfo{FullMethod: "/service.NodeService/GetBackendStats"}
+	info := &grpc.UnaryServerInfo{FullMethod: "/waylane.node.v1.NodeService/GetBackendStats"}
 	_, err := ConditionalMiddleware(s)(withAPIKey(key.String()), &common.Empty{}, info, func(context.Context, any) (any, error) {
 		t.Error("handler ran without a backend")
 		return nil, nil
@@ -94,8 +94,8 @@ func TestKeepAliveNotRefreshedWithoutValidKey(t *testing.T) {
 		"not a uuid":    withAPIKey("not-a-uuid"),
 		"wrong key":     withAPIKey(uuid.NewString()),
 	}
-	info := &grpc.UnaryServerInfo{FullMethod: "/service.NodeService/GetBaseInfo"}
-	streamInfo := &grpc.StreamServerInfo{FullMethod: "/service.NodeService/GetLogs", IsServerStream: true}
+	info := &grpc.UnaryServerInfo{FullMethod: "/waylane.node.v1.NodeService/GetBaseInfo"}
+	streamInfo := &grpc.StreamServerInfo{FullMethod: "/waylane.node.v1.NodeService/GetLogs", IsServerStream: true}
 	for name, ctx := range cases {
 		_, err := ConditionalMiddleware(s)(ctx, &common.Empty{}, info, func(context.Context, any) (any, error) {
 			return &common.Empty{}, nil
@@ -119,7 +119,7 @@ func TestKeepAliveRefreshedWhenStreamOpensAndEnds(t *testing.T) {
 	s, key := newKeepAliveTestService(t)
 
 	// An ungated method, so the handler runs without a backend.
-	info := &grpc.StreamServerInfo{FullMethod: "/service.NodeService/Ungated", IsServerStream: true}
+	info := &grpc.StreamServerInfo{FullMethod: "/waylane.node.v1.NodeService/Ungated", IsServerStream: true}
 	var atArrival time.Time
 	err := ConditionalStreamMiddleware(s)(nil, &fakeServerStream{ctx: withAPIKey(key.String())}, info, func(any, grpc.ServerStream) error {
 		atArrival = s.LastRequest()

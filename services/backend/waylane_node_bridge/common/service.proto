@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package service;
+package waylane.node.v1;
 
-option go_package = "github.com/pasarguard/node/common";
+option go_package = "github.com/KobaProduction/waylane/services/node/common";
 
 message Empty {}
 
@@ -131,6 +131,7 @@ message Shadowsocks {
 message Wireguard {
   string public_key = 1;
   repeated string peer_ips = 2;
+  string pre_shared_key = 3;
 }
 
 message Hysteria {

@@ -16,7 +16,7 @@ from app.db.crud.admin import (
     get_admin_by_id as get_admin_by_id_crud,
     get_admin_by_telegram_id,
 )
-from app.db.crud.api_key import get_api_key_by_raw_key
+from app.db.crud.api_key import API_KEY_PREFIX, get_api_key_by_raw_key
 from app.db.models import Admin, AdminUsageLogs, User
 from app.models.admin import AdminDetails, AdminRoleData, AdminStatus, AdminValidationResult, verify_password
 from app.models.admin_role import RoleAccess, RoleFeatures, RoleLimits, RolePermissions
@@ -95,10 +95,10 @@ async def _get_admin_from_api_key_internal(
     if not raw_key:
         return
 
-    if not raw_key.startswith("pg_key_"):
+    if not raw_key.startswith(API_KEY_PREFIX):
         return
 
-    uuid_str = raw_key[7:]
+    uuid_str = raw_key[len(API_KEY_PREFIX) :]
     try:
         parsed_key = UUID(uuid_str)
     except ValueError:
