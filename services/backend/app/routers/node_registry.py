@@ -20,10 +20,10 @@ from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
 from .authentication import require_permission
 from .xray_inbound_users import replace_inbound_users
-from .agent_xray_resources import (agent_tls_material, queue_xray_refresh, replace_routing, routing_from_editor, xray_tls_inbound)
+from .node_xray_resources import (agent_tls_material, queue_xray_refresh, replace_routing, routing_from_editor, xray_tls_inbound)
 
-router = APIRouter(prefix="/api/node-discovery", tags=["Node discovery"])
-agent_router = APIRouter(prefix="/api/agent", tags=["Node agent"])
+node_control_router = APIRouter(prefix="/api/node-control", tags=["Node control"])
+node_registry_router = APIRouter(prefix="/api/node-registry", tags=["Nodes"])
 
 
 def digest(raw: str) -> str:
@@ -45,34 +45,34 @@ class InvitationInput(BaseModel):
     auto_approve: bool = True
 
 
-class DirectAgentInput(BaseModel):
+class ManagedNodeInput(BaseModel):
     display_name: str = Field(min_length=1, max_length=128)
 
 
-@router.post("/registrations/direct", status_code=201)
-async def create_direct_agent(body: DirectAgentInput, db: AsyncSession = Depends(get_db),
+@node_registry_router.post("/managed", status_code=201)
+async def create_direct_agent(body: ManagedNodeInput, db: AsyncSession = Depends(get_db),
                               _: AdminDetails = Depends(require_permission("nodes", "create"))):
     """Create an explicitly approved node with its own one-time agent token."""
     now = datetime.now(UTC)
     node_uuid = uuid4()
-    raw = "wl_agent_" + str(node_uuid) + "_" + secrets.token_urlsafe(32)
+    raw = "wl_node_" + str(node_uuid) + "_" + secrets.token_urlsafe(32)
     await db.execute(insert(node_agent_registrations).values(
         node_uuid=str(node_uuid), secret_hash=digest(raw),
         invitation_id=None, display_name=body.display_name,
         agent_version="unknown", status="approved",
         capabilities=[], created_at=now, last_seen_at=None))
     await db.commit()
-    return {"node_uuid": str(node_uuid), "agent_token": raw, "status": "approved"}
+    return {"node_uuid": str(node_uuid), "node_token": raw, "status": "approved"}
 
 
 class Enrollment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     node_uuid: UUID
     display_name: str = Field(min_length=1, max_length=128)
-    agent_secret: str = Field(min_length=43, max_length=128)
-    agent_version: str = Field(min_length=1, max_length=32)
+    node_secret: str = Field(min_length=43, max_length=128)
+    node_version: str = Field(min_length=1, max_length=32)
 
-    @field_validator("agent_secret")
+    @field_validator("node_secret")
     @classmethod
     def secure_identity(cls, raw: str) -> str:
         try:
@@ -102,7 +102,7 @@ class NodeMachineMetrics(BaseModel):
 class Heartbeat(BaseModel):
     model_config = ConfigDict(extra="forbid")
     node_uuid: UUID
-    agent_version: str = Field(min_length=1, max_length=32)
+    node_version: str = Field(min_length=1, max_length=32)
     reported_ipv4: str | None = None
     reported_ipv6: str | None = None
     capabilities: list[str] = Field(default_factory=list, max_length=32)
@@ -130,7 +130,7 @@ class Heartbeat(BaseModel):
         return names
 
 
-@router.post("/invitations", status_code=201)
+@node_registry_router.post("/discovery-tokens", status_code=201)
 async def create_invitation(body: InvitationInput, db: AsyncSession = Depends(get_db),
                             _: AdminDetails = Depends(require_permission("nodes", "create"))):
     raw = "wl_disc_" + secrets.token_urlsafe(32)
@@ -145,7 +145,7 @@ async def create_invitation(body: InvitationInput, db: AsyncSession = Depends(ge
             "expires_at": expires, "auto_approve": body.auto_approve}
 
 
-@router.get("/invitations")
+@node_registry_router.get("/discovery-tokens")
 async def list_invitations(db: AsyncSession = Depends(get_db),
                            _: AdminDetails = Depends(require_permission("nodes", "read"))):
     data = await db.execute(select(
@@ -156,7 +156,7 @@ async def list_invitations(db: AsyncSession = Depends(get_db),
     return {"invitations": [dict(row) for row in data.mappings()]}
 
 
-@router.post("/invitations/{invitation_id}/revoke")
+@node_registry_router.post("/discovery-tokens/{invitation_id}/revoke")
 async def revoke_invitation(invitation_id: int, db: AsyncSession = Depends(get_db),
                             _: AdminDetails = Depends(require_permission("nodes", "update"))):
     result = await db.execute(update(node_discovery_invitations).where(
@@ -167,7 +167,7 @@ async def revoke_invitation(invitation_id: int, db: AsyncSession = Depends(get_d
     return {"revoked": True}
 
 
-@router.get("/registrations")
+@node_registry_router.get("/nodes")
 async def list_registrations(db: AsyncSession = Depends(get_db),
                              _: AdminDetails = Depends(require_permission("nodes", "read"))):
     columns = [
@@ -183,39 +183,40 @@ async def list_registrations(db: AsyncSession = Depends(get_db),
     result = []
     for row in rows:
         entry = dict(row)
-        entry["enrollment_mode"] = "direct" if entry.pop("invitation_id") is None else "discovery"
+        entry["connection_mode"] = "managed" if entry.pop("invitation_id") is None else "discovery"
+        entry["node_version"] = entry.pop("agent_version")
         result.append(entry)
-    return {"registrations": result}
+    return {"nodes": result}
 
 
-@router.post("/registrations/{node_uuid}/approve")
+@node_registry_router.post("/nodes/{node_uuid}/approve")
 async def approve(node_uuid: UUID, db: AsyncSession = Depends(get_db),
                   _: AdminDetails = Depends(require_permission("nodes", "update"))):
     await begin_immediate_if_sqlite(db)
     row = (await db.execute(select(node_agent_registrations.c.status).where(
         node_agent_registrations.c.node_uuid == str(node_uuid)))).scalar_one_or_none()
     if row is None:
-        raise HTTPException(404, "Unknown agent identity")
+        raise HTTPException(404, "Unknown node identity")
     if row == "revoked":
-        raise HTTPException(409, "Revoked agent cannot be reapproved")
+        raise HTTPException(409, "Revoked node cannot be reapproved")
     await db.execute(update(node_agent_registrations).where(
         node_agent_registrations.c.node_uuid == str(node_uuid)).values(status="approved"))
     await db.commit()
     return {"status": "approved", "node_uuid": str(node_uuid)}
 
 
-@router.post("/registrations/{node_uuid}/revoke")
+@node_registry_router.post("/nodes/{node_uuid}/revoke")
 async def revoke(node_uuid: UUID, db: AsyncSession = Depends(get_db),
                  _: AdminDetails = Depends(require_permission("nodes", "update"))):
     result = await db.execute(update(node_agent_registrations).where(
         node_agent_registrations.c.node_uuid == str(node_uuid)).values(status="revoked"))
     if not result.rowcount:
-        raise HTTPException(404, "Unknown agent identity")
+        raise HTTPException(404, "Unknown node identity")
     await db.commit()
     return {"status": "revoked"}
 
 
-@agent_router.post("/enroll", status_code=201)
+@node_control_router.post("/enroll", status_code=201)
 async def enroll(body: Enrollment, request: Request, x_discovery_token: str = Header(),
                  db: AsyncSession = Depends(get_db)):
     if not x_discovery_token.startswith("wl_disc_") or len(x_discovery_token) > 100:
@@ -232,10 +233,10 @@ async def enroll(body: Enrollment, request: Request, x_discovery_token: str = He
     prior = (await db.execute(select(node_agent_registrations).where(
         node_agent_registrations.c.node_uuid == str(body.node_uuid)))).mappings().one_or_none()
     if prior is not None:
-        if prior["invitation_id"] != invitation["id"] or not hmac.compare_digest(prior["secret_hash"], digest(body.agent_secret)):
+        if prior["invitation_id"] != invitation["id"] or not hmac.compare_digest(prior["secret_hash"], digest(body.node_secret)):
             raise HTTPException(409, "Identity already belongs to another registration")
         if prior["status"] == "revoked":
-            raise HTTPException(403, "Agent revoked")
+            raise HTTPException(403, "Node revoked")
         return {"node_uuid": str(body.node_uuid), "status": prior["status"]}
     registered = await db.scalar(select(func.count()).select_from(node_agent_registrations).where(
         node_agent_registrations.c.invitation_id == invitation["id"]))
@@ -243,9 +244,9 @@ async def enroll(body: Enrollment, request: Request, x_discovery_token: str = He
         raise HTTPException(429, "Invitation enrollment limit reached")
     try:
         await db.execute(insert(node_agent_registrations).values(
-            node_uuid=str(body.node_uuid), secret_hash=digest(body.agent_secret),
+            node_uuid=str(body.node_uuid), secret_hash=digest(body.node_secret),
             invitation_id=invitation["id"], display_name=body.display_name,
-            agent_version=body.agent_version,
+            agent_version=body.node_version,
             status="approved" if invitation["auto_approve"] == "1" else "pending",
             observed_ip=observed_ip(request), capabilities=[], created_at=now, last_seen_at=now))
         await db.commit()
@@ -256,21 +257,22 @@ async def enroll(body: Enrollment, request: Request, x_discovery_token: str = He
             "status": "approved" if invitation["auto_approve"] == "1" else "pending"}
 
 
-@agent_router.post("/heartbeat")
-async def heartbeat(body: Heartbeat, request: Request, x_agent_secret: str = Header(),
+@node_control_router.post("/heartbeat")
+async def heartbeat(body: Heartbeat, request: Request, x_node_secret: str = Header(),
                     db: AsyncSession = Depends(get_db)):
-    if len(x_agent_secret) > 128:
-        raise HTTPException(401, "Invalid agent credentials")
+    if len(x_node_secret) > 128 or x_node_secret.startswith("wl_agent_"):
+        raise HTTPException(401, "Invalid node credentials")
     row = (await db.execute(select(node_agent_registrations).where(
         node_agent_registrations.c.node_uuid == str(body.node_uuid)))).mappings().one_or_none()
-    if row is None or not hmac.compare_digest(row["secret_hash"], digest(x_agent_secret)):
-        raise HTTPException(401, "Invalid agent credentials")
+    if (row is None or (row["invitation_id"] is None and not x_node_secret.startswith(f"wl_node_{body.node_uuid}_"))
+            or not hmac.compare_digest(row["secret_hash"], digest(x_node_secret))):
+        raise HTTPException(401, "Invalid node credentials")
     if row["status"] == "revoked":
-        raise HTTPException(403, "Agent revoked")
+        raise HTTPException(403, "Node revoked")
     # A transient IP lookup failure is NOT evidence that the prior public
     # address disappeared. Keep last-known values until a new valid IP arrives.
     changes = {
-        "agent_version": body.agent_version,
+        "agent_version": body.node_version,
         "observed_ip": observed_ip(request),
         "capabilities": body.capabilities,
         "last_seen_at": datetime.now(UTC),
@@ -327,18 +329,19 @@ class XrayReport(BaseModel):
 
 
 async def valid_agent(db: AsyncSession, node_uuid: UUID, agent_secret: str):
-    if not agent_secret or len(agent_secret) > 128:
-        raise HTTPException(401, "Invalid Agent credential")
+    if not agent_secret or len(agent_secret) > 128 or agent_secret.startswith("wl_agent_"):
+        raise HTTPException(401, "Invalid node credential")
     row = (await db.execute(select(node_agent_registrations).where(
         node_agent_registrations.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
-    if row is None or not hmac.compare_digest(row["secret_hash"], digest(agent_secret)):
-        raise HTTPException(401, "Invalid Agent credential")
+    if (row is None or (row["invitation_id"] is None and not agent_secret.startswith(f"wl_node_{node_uuid}_"))
+            or not hmac.compare_digest(row["secret_hash"], digest(agent_secret))):
+        raise HTTPException(401, "Invalid node credential")
     if row["status"] != "approved":
-        raise HTTPException(403, "Agent not approved")
+        raise HTTPException(403, "Node not approved")
     return row
 
 
-@router.put("/registrations/{node_uuid}/xray")
+@node_registry_router.put("/nodes/{node_uuid}/xray")
 async def set_desired_xray(
     node_uuid: UUID, body: XrayDesiredInput, db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("nodes", "update_core")),
@@ -347,7 +350,7 @@ async def set_desired_xray(
     node = (await db.execute(select(node_agent_registrations.c.status).where(
         node_agent_registrations.c.node_uuid == str(node_uuid)))).scalar_one_or_none()
     if node != "approved":
-        raise HTTPException(409, "Only approved autonomous Agents accept Xray changes")
+        raise HTTPException(409, "Only approved Nodes accept Xray changes")
     previous = (await db.execute(select(node_agent_xray_desired).where(
         node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
     if body.action == "reconfigure":
@@ -405,7 +408,7 @@ async def _mutable_xray(db: AsyncSession, node_uuid: UUID, expected_generation: 
     return desired
 
 
-@router.put("/registrations/{node_uuid}/xray/routing/from-core")
+@node_registry_router.put("/nodes/{node_uuid}/xray/routing/from-core")
 async def sync_editor_routing(
     node_uuid: UUID, body: EditorRoutingInput,
     db: AsyncSession = Depends(get_db),
@@ -428,7 +431,7 @@ async def sync_editor_routing(
             "core_id": body.core_id, "rule_count": len(routing["rules"])}
 
 
-@router.get("/registrations/{node_uuid}/xray/tls")
+@node_registry_router.get("/nodes/{node_uuid}/xray/tls")
 async def list_agent_tls_bindings(
     node_uuid: UUID, db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("nodes", "read")),
@@ -444,7 +447,7 @@ async def list_agent_tls_bindings(
                                    "revision", "fingerprint_sha256", "not_after"), row)) for row in rows]}
 
 
-@router.put("/registrations/{node_uuid}/xray/tls/{inbound_tag}")
+@node_registry_router.put("/nodes/{node_uuid}/xray/tls/{inbound_tag}")
 async def bind_agent_tls(
     node_uuid: UUID, inbound_tag: str, body: AgentTLSBindingInput,
     db: AsyncSession = Depends(get_db),
@@ -474,7 +477,7 @@ async def bind_agent_tls(
             "generation": desired["generation"] + 1, "status": "pending"}
 
 
-@router.delete("/registrations/{node_uuid}/xray/tls/{inbound_tag}")
+@node_registry_router.delete("/nodes/{node_uuid}/xray/tls/{inbound_tag}")
 async def unbind_agent_tls(
     node_uuid: UUID, inbound_tag: str, expected_generation: int,
     db: AsyncSession = Depends(get_db),
@@ -492,7 +495,7 @@ async def unbind_agent_tls(
     return {"removed": inbound_tag, "generation": desired["generation"] + 1}
 
 
-@router.get("/registrations/{node_uuid}/xray/inbounds")
+@node_registry_router.get("/nodes/{node_uuid}/xray/inbounds")
 async def list_xray_inbounds(
     node_uuid: UUID, db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("nodes", "read")),
@@ -528,7 +531,7 @@ class XrayInboundUsersInput(BaseModel):
     expected_generation: int = Field(ge=1)
 
 
-@router.put("/registrations/{node_uuid}/xray/inbounds/{inbound_tag}/users")
+@node_registry_router.put("/nodes/{node_uuid}/xray/inbounds/{inbound_tag}/users")
 async def sync_xray_inbound_users(
     node_uuid: UUID, inbound_tag: str, body: XrayInboundUsersInput,
     db: AsyncSession = Depends(get_db),
@@ -566,7 +569,7 @@ async def sync_xray_inbound_users(
             "inbound_tag": inbound_tag, "user_count": len(body.users)}
 
 
-@router.get("/registrations/{node_uuid}/xray")
+@node_registry_router.get("/nodes/{node_uuid}/xray")
 async def get_desired_xray(
     node_uuid: UUID, db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("nodes", "read")),
@@ -582,12 +585,11 @@ async def get_desired_xray(
             "reported_at": entry["reported_at"]}
 
 
-@agent_router.get("/xray/desired")
 async def agent_xray_desired(
-    node_uuid: UUID, x_agent_secret: str = Header(),
+    node_uuid: UUID, x_node_secret: str = Header(),
     db: AsyncSession = Depends(get_db),
 ):
-    await valid_agent(db, node_uuid, x_agent_secret)
+    await valid_agent(db, node_uuid, x_node_secret)
     entry = (await db.execute(select(node_agent_xray_desired).where(
         node_agent_xray_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
     if entry is None:
@@ -599,12 +601,11 @@ async def agent_xray_desired(
             "tls_certificates": await agent_tls_material(db, str(node_uuid))}
 
 
-@agent_router.post("/xray/report")
 async def agent_xray_report(
-    body: XrayReport, x_agent_secret: str = Header(),
+    body: XrayReport, x_node_secret: str = Header(),
     db: AsyncSession = Depends(get_db),
 ):
-    await valid_agent(db, body.node_uuid, x_agent_secret)
+    await valid_agent(db, body.node_uuid, x_node_secret)
     await begin_immediate_if_sqlite(db)
     entry = (await db.execute(select(node_agent_xray_desired).where(
         node_agent_xray_desired.c.node_uuid == str(body.node_uuid)))).mappings().one_or_none()

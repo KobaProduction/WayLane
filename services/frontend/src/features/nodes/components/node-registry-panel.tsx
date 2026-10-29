@@ -70,10 +70,10 @@ type NodeRuntimeMetrics = {
 
 type Registration = {
   node_uuid: string
-  enrollment_mode: 'direct' | 'discovery'
+  connection_mode: 'managed' | 'discovery'
   display_name: string
   status: 'pending' | 'approved' | 'revoked'
-  agent_version: string
+  node_version: string
   observed_ip: string | null
   reported_ipv4: string | null
   reported_ipv6: string | null
@@ -82,7 +82,7 @@ type Registration = {
   machine_metrics: NodeRuntimeMetrics | null
 }
 
-/** Optional Agent registry, separate from the existing legacy node cards. */
+/** Modern WayLane Node registry; legacy PasarGuard node cards remain separate. */
 export default function NodeDiscoveryPanel() {
   const { admin } = useAdmin()
   const canRead = hasPermission(admin, 'nodes', 'read')
@@ -92,7 +92,8 @@ export default function NodeDiscoveryPanel() {
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [label, setLabel] = useState('')
   const [directName, setDirectName] = useState('')
-  const [directCredentials, setDirectCredentials] = useState<{ node_uuid: string; agent_token: string } | null>(null)
+  const [directCredentials, setDirectCredentials] = useState<{ node_uuid: string; node_token: string } | null>(null)
+  const [registrationMode, setRegistrationMode] = useState<'managed' | 'discovery'>('managed')
   const [autoApprove, setAutoApprove] = useState(true)
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(false)
@@ -120,14 +121,14 @@ export default function NodeDiscoveryPanel() {
   const refresh = async () => {
     try {
       const [result, invites] = await Promise.all([
-        $fetch<{ registrations: Registration[] }>('/api/node-discovery/registrations'),
-        $fetch<{ invitations: Invitation[] }>('/api/node-discovery/invitations'),
+        $fetch<{ nodes: Registration[] }>('/api/node-registry/nodes'),
+        $fetch<{ invitations: Invitation[] }>('/api/node-registry/discovery-tokens'),
       ])
-      setEntries(result.registrations)
+      setEntries(result.nodes)
       setInvitations(invites.invitations)
       setError('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load discovered agents')
+      setError(e instanceof Error ? e.message : 'Не удалось загрузить ноды')
     }
   }
 
@@ -146,7 +147,7 @@ export default function NodeDiscoveryPanel() {
     setLoading(true)
     setToken('')
     try {
-      const response = await $fetch<{ discovery_token: string }>('/api/node-discovery/invitations', {
+      const response = await $fetch<{ discovery_token: string }>('/api/node-registry/discovery-tokens', {
         method: 'POST', body: { label: label.trim(), auto_approve: autoApprove },
       })
       setToken(response.discovery_token)
@@ -163,15 +164,15 @@ export default function NodeDiscoveryPanel() {
     setLoading(true)
     setDirectCredentials(null)
     try {
-      const reply = await $fetch<{ node_uuid: string; agent_token: string }>('/api/node-discovery/registrations/direct', {
+      const reply = await $fetch<{ node_uuid: string; node_token: string }>('/api/node-registry/managed', {
         method: 'POST', body: { display_name: directName.trim() },
       })
       setDirectCredentials(reply)
       setDirectName('')
       await refresh()
-      toast.success('Прямой Agent-токен создан')
+      toast.success('Управляемая нода создана; сохраните её токен')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось создать прямой Agent-токен')
+      toast.error(e instanceof Error ? e.message : 'Не удалось создать управляемую ноду')
     } finally { setLoading(false) }
   }
 
@@ -179,7 +180,7 @@ export default function NodeDiscoveryPanel() {
     if (!canApprove) return
     setLoading(true)
     try {
-      await $fetch('/api/node-discovery/invitations/' + id + '/revoke', { method: 'POST' })
+      await $fetch('/api/node-registry/discovery-tokens/' + id + '/revoke', { method: 'POST' })
       await refresh()
       toast.success('Discovery invitation revoked')
     } catch (e) {
@@ -191,18 +192,18 @@ export default function NodeDiscoveryPanel() {
     if (!canApprove) return
     setLoading(true)
     try {
-      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/' + operation, { method: 'POST' })
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/' + operation, { method: 'POST' })
       await refresh()
-      toast.success(operation === 'approve' ? 'Agent approved' : 'Agent revoked')
+      toast.success(operation === 'approve' ? 'Нода подтверждена' : 'Нода отозвана')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to update agent')
+      toast.error(e instanceof Error ? e.message : 'Не удалось изменить статус ноды')
     } finally { setLoading(false) }
   }
 
 
   const readXray = async (uuid: string) => {
     try {
-      const state = await $fetch<XrayStatus>('/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray')
+      const state = await $fetch<XrayStatus>('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray')
       setXrayStates(prev => ({ ...prev, [uuid]: state }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось получить статус Xray')
@@ -212,7 +213,7 @@ export default function NodeDiscoveryPanel() {
   const readXrayInbounds = async (uuid: string) => {
     try {
       const response = await $fetch<{ inbounds: XrayInboundInfo[] }>(
-        '/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray/inbounds')
+        '/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray/inbounds')
       setXrayInboundStates(previous => ({ ...previous, [uuid]: response.inbounds }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось прочитать Xray inbounds')
@@ -222,7 +223,7 @@ export default function NodeDiscoveryPanel() {
   const refreshTLSBindings = async (uuid: string) => {
     try {
       const response = await $fetch<{ bindings: AgentTLSBinding[] }>(
-        '/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray/tls')
+        '/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray/tls')
       setAgentTLSBindings(previous => ({ ...previous, [uuid]: response.bindings }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось получить TLS-привязки')
@@ -238,7 +239,7 @@ export default function NodeDiscoveryPanel() {
     }
     setXrayBusy(true)
     try {
-      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) +
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) +
         '/xray/routing/from-core', {
         method: 'PUT', body: { core_id: coreId, expected_generation: generation },
       })
@@ -257,11 +258,11 @@ export default function NodeDiscoveryPanel() {
     }
     setXrayBusy(true)
     try {
-      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) +
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) +
         '/xray/tls/' + encodeURIComponent(tlsInboundTag.trim()), {
         method: 'PUT', body: { preset_id: tlsPresetId, expected_generation: generation },
       })
-      toast.success('TLS-пресет привязан; новая конфигурация отправлена Agent')
+      toast.success('TLS-пресет привязан; новая конфигурация отправлена ноде')
       await readXray(uuid)
       await refreshTLSBindings(uuid)
     } catch (e) {
@@ -300,10 +301,10 @@ export default function NodeDiscoveryPanel() {
           payload.config = parsed as Record<string, unknown>
         }
       }
-      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) + '/xray', {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray', {
         method: 'PUT', body: payload,
       })
-      toast.success('Операция поставлена в желаемое состояние Agent')
+      toast.success('Операция Xray поставлена в очередь ноды')
       await readXray(uuid)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось отправить команду Xray')
@@ -322,7 +323,7 @@ export default function NodeDiscoveryPanel() {
       }
       if (!xrayInboundTag.trim()) throw new Error('Укажите tag inbound')
       if (users.length === 0 && !window.confirm('Удалить всех пользователей из выбранного inbound?')) return
-      await $fetch('/api/node-discovery/registrations/' + encodeURIComponent(uuid) +
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) +
         '/xray/inbounds/' + encodeURIComponent(xrayInboundTag.trim()) + '/users', {
         method: 'PUT', body: { expected_generation: expectedGeneration, users },
       })
@@ -339,77 +340,102 @@ export default function NodeDiscoveryPanel() {
   return (
     <Card className="mb-5">
       <CardHeader>
-        <CardTitle>WayLane Agent — подключения</CardTitle>
+        <CardTitle>Управление нодами</CardTitle>
         <CardDescription>
-          Подключение через Discovery-токен или индивидуальный Agent-токен. Адреса обновляются через heartbeat.
-          Управление VPN-ядрами пока не включено, существующие хосты и подписки не изменяются.
+          Нода устанавливается на сервер и включает bootstrap, управляющий процесс и отдельные VPN-ядра.
+          Выберите способ регистрации: управляемая панелью нода или самостоятельное подключение через Discovery.
+          Уже работающие legacy-ноды и клиентский трафик не переключаются автоматически.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {canCreate && (
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              className="min-w-0 flex-1"
-              aria-label="Discovery invitation name"
-              placeholder="Название токена для группы нод"
-              value={label}
-              onChange={e => setLabel(e.target.value)}
-              maxLength={120}
-            />
-            <Button type="button" onClick={() => void invite()} disabled={loading || !label.trim()} className="w-full sm:w-auto">
-              Создать токен
+        <div className="flex flex-col gap-3 rounded-md border p-3">
+          <p className="text-sm font-medium">Способ подключения новой ноды</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="Способ регистрации ноды">
+            <Button type="button" variant={registrationMode === 'managed' ? 'default' : 'outline'}
+              onClick={() => setRegistrationMode('managed')}>
+              Управляемая панелью
+            </Button>
+            <Button type="button" variant={registrationMode === 'discovery' ? 'default' : 'outline'}
+              onClick={() => setRegistrationMode('discovery')}>
+              Discovery
             </Button>
           </div>
-        )}
-        {canCreate && (
-          <label className="flex items-start gap-2 text-sm">
-            <Checkbox checked={autoApprove} onCheckedChange={checked => setAutoApprove(checked === true)} />
-            <span>Автоматически подключать новые агенты с этим токеном (без разрешения на управление VPN-ядрами)</span>
-          </label>
-        )}
-        {token && (
-          <div className="min-w-0 space-y-2 rounded-md border p-3">
-            <p className="text-sm">Скопируйте токен сейчас. В панели хранится только его хеш; повторно показать значение нельзя.</p>
-            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-              <Input aria-label="New discovery token" className="min-w-0 flex-1 font-mono text-xs" value={token} readOnly type="password" />
-              <Button variant="outline" type="button" onClick={() => void navigator.clipboard.writeText(token)}>Копировать</Button>
-              <Button variant="ghost" type="button" onClick={() => setToken('')}>Скрыть</Button>
+          {registrationMode === 'managed' ? (
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-xs">
+                Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN.
+                Используйте docker-compose.node.managed.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
+              </p>
+              {canCreate && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input aria-label="Название управляемой ноды" placeholder="Имя ноды" value={directName}
+                    maxLength={128} onChange={e => setDirectName(e.target.value)} className="min-w-0 flex-1" />
+                  <Button type="button" disabled={loading || !directName.trim()} onClick={() => void createDirect()}>
+                    Создать ноду
+                  </Button>
+                </div>
+              )}
+              {directCredentials && (
+                <div className="space-y-2 rounded-md border p-3">
+                  <p className="text-sm">Токен отображается один раз. Сохраните его в защищённой переменной Coolify.</p>
+                  <p className="break-all font-mono text-xs">UUID: {directCredentials.node_uuid}</p>
+                  <Input aria-label="Токен управляемой ноды" type="password" readOnly value={directCredentials.node_token}
+                    className="font-mono text-xs" />
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm"
+                      onClick={() => void navigator.clipboard.writeText('NODE_TOKEN=' + directCredentials.node_token)}>
+                      Копировать NODE_TOKEN
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setDirectCredentials(null)}>Скрыть</Button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
-        <div className="space-y-3 border-t pt-4">
-          <p className="text-sm font-medium">Прямое подключение по индивидуальному Agent-токену</p>
-          {canCreate && (
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                aria-label="Direct agent name"
-                placeholder="Название агента"
-                value={directName}
-                maxLength={128}
-                onChange={e => setDirectName(e.target.value)}
-                className="min-w-0 flex-1"
-              />
-              <Button type="button" onClick={() => void createDirect()} disabled={loading || !directName.trim()}>
-                Создать Agent-токен
-              </Button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-xs">
+                Нода сама регистрируется по Discovery-токену. Используйте docker-compose.node.discovery.coolify.yaml.
+                Новые ноды можно подтверждать автоматически или вручную.
+              </p>
+              {canCreate && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input className="min-w-0 flex-1" aria-label="Название Discovery-группы"
+                    placeholder="Группа или приглашение" value={label}
+                    onChange={e => setLabel(e.target.value)} maxLength={120} />
+                  <Button type="button" onClick={() => void invite()} disabled={loading || !label.trim()} className="w-full sm:w-auto">
+                    Создать Discovery-токен
+                  </Button>
+                </div>
+              )}
+              {canCreate && (
+                <label className="flex items-start gap-2 text-sm">
+                  <Checkbox checked={autoApprove} onCheckedChange={checked => setAutoApprove(checked === true)} />
+                  <span>Подтверждать новые ноды автоматически (это не разрешает управление VPN-ядрами)</span>
+                </label>
+              )}
+              {token && (
+                <div className="min-w-0 space-y-2 rounded-md border p-3">
+                  <p className="text-sm">Токен отображается один раз. В панели хранится только его хеш.</p>
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+                    <Input aria-label="Discovery-токен" className="min-w-0 flex-1 font-mono text-xs"
+                      value={token} readOnly type="password" />
+                    <Button variant="outline" type="button"
+                      onClick={() => void navigator.clipboard.writeText('DISCOVERY_TOKEN=' + token)}>
+                      Копировать DISCOVERY_TOKEN
+                    </Button>
+                    <Button variant="ghost" type="button" onClick={() => setToken('')}>Скрыть</Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-          {directCredentials && (
-            <div className="space-y-2 rounded-md border p-3">
-              <p className="text-sm">Сохраните идентификатор и токен сейчас. Сам токен повторно не отображается.</p>
-              <p className="break-all font-mono text-xs">UUID ноды: {directCredentials.node_uuid}</p>
-              <Input aria-label="Direct agent token" type="password" readOnly value={directCredentials.agent_token} className="font-mono text-xs" />
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm"
-                  onClick={() => void navigator.clipboard.writeText(
-                    'WAYLANE_AGENT_TOKEN=' + directCredentials.agent_token
-                  )}>Копировать Agent-токен</Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setDirectCredentials(null)}>Скрыть</Button>
-              </div>
-            </div>
-          )}
+          <p className="text-muted-foreground text-xs">
+            По умолчанию — бинарный gRPC (требуется доступный TLS gRPC endpoint панели).
+            Если этот канал недоступен, укажите CONTROL_TRANSPORT=ws — существующий HTTPS-адрес панели
+            используется для защищённого WebSocket. Переключение транспорта не происходит автоматически.
+          </p>
         </div>
-        {invitations.length > 0 && (
+        {registrationMode === 'discovery' && invitations.length > 0 && (
           <div className="space-y-2">
             <p className="text-sm font-medium">Discovery-токены ({invitations.length})</p>
             {invitations.map(item => (
@@ -427,7 +453,7 @@ export default function NodeDiscoveryPanel() {
           </div>
         )}
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium">Подключённые и обнаруженные агенты ({entries.length})</span>
+          <span className="text-sm font-medium">Подключённые и обнаруженные ноды ({entries.length})</span>
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>Обновить</Button>
         </div>
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
@@ -439,19 +465,19 @@ export default function NodeDiscoveryPanel() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="min-w-0 break-words text-sm font-medium">{node.display_name}</span>
                   <Badge variant="secondary">{node.status}</Badge>
-                  <Badge variant="outline">{node.enrollment_mode === 'direct' ? 'Agent-токен' : 'Discovery'}</Badge>
+                  <Badge variant="outline">{node.connection_mode === 'managed' ? 'Управляемая' : 'Discovery'}</Badge>
                 </div>
                 <p className="text-muted-foreground break-all font-mono text-xs">{node.node_uuid}</p>
                 <p className="text-muted-foreground break-words text-xs">
-                  Agent {node.agent_version} · {node.last_seen_at ? 'Был на связи' : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
+                  Управляющий процесс {node.node_version} · {node.last_seen_at ? 'Был на связи' : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
                 </p>
                 {node.machine_metrics && (
                   <p className="text-muted-foreground break-words text-xs">
-                    Agent runtime ({node.machine_metrics.scope}): {node.machine_metrics.os}/{node.machine_metrics.arch}
+                    Окружение ноды ({node.machine_metrics.scope}): {node.machine_metrics.os}/{node.machine_metrics.arch}
                     {' · '}CPU {node.machine_metrics.cpu_logical_count}
                     {' · '}RAM {Math.round(node.machine_metrics.memory_total_bytes / 1024 / 1024)} MiB
                     {' · '}load {node.machine_metrics.load_1.toFixed(2)}
-                    {' · '}agent container {node.machine_metrics.hostname}
+                    {' · '}контейнер {node.machine_metrics.hostname}
                   </p>
                 )}
               </div>
@@ -504,7 +530,7 @@ export default function NodeDiscoveryPanel() {
                         <p className="text-sm font-medium">Маршрутизация из Core Editor</p>
                         <p className="text-muted-foreground text-xs">
                           Использует сохранённые правила, balancers и параметры маршрутизации Xray Core Editor.
-                          Остальные разделы текущего Xray Agent не изменяются.
+                          Остальные разделы текущего Xray не изменяются.
                         </p>
                         <div className="flex flex-wrap gap-2">
                           <Input aria-label="Saved Xray core ID" className="max-w-52" type="number"
@@ -546,7 +572,7 @@ export default function NodeDiscoveryPanel() {
                       </div>
                       <div className="space-y-2 border-t pt-3">
                         <p className="text-sm font-medium">Пользователи inbound (синхронизация)</p>
-                        <p className="text-muted-foreground text-xs">Заменяет аккаунты выбранного inbound, остальные inbounds и outbounds сохраняет. Пароли передаются только авторизованному Agent через API. Пустой массив удаляет всех пользователей выбранного inbound.</p>
+                        <p className="text-muted-foreground text-xs">Заменяет аккаунты выбранного inbound, остальные inbounds и outbounds сохраняет. Пароли передаются только авторизованной ноде через API. Пустой массив удаляет всех пользователей выбранного inbound.</p>
                         <div className="space-y-1 text-xs text-muted-foreground">
                           {(xrayInboundStates[node.node_uuid] || []).map(inbound => (
                             <p key={inbound.tag} className="break-all">

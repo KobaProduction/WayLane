@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -203,24 +202,25 @@ func post(ctx context.Context, client *http.Client, origin, path, header, creden
 
 var nodeUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-func directTokenUUID(agentToken string) (string, error) {
-	if !strings.HasPrefix(agentToken, "wl_agent_") {
-		return "", errors.New("invalid direct Agent token prefix")
+func directTokenUUID(nodeToken string) (string, error) {
+	const prefix = "wl_node_"
+	if !strings.HasPrefix(nodeToken, prefix) {
+		return "", errors.New("invalid managed node token prefix")
 	}
-	parts := strings.SplitN(strings.TrimPrefix(agentToken, "wl_agent_"), "_", 2)
+	parts := strings.SplitN(strings.TrimPrefix(nodeToken, prefix), "_", 2)
 	if len(parts) != 2 || !nodeUUIDPattern.MatchString(parts[0]) {
-		return "", errors.New("invalid direct Agent token identity")
+		return "", errors.New("invalid managed node identity")
 	}
 	random, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil || len(random) != 32 || len(parts[1]) != 43 {
-		return "", errors.New("direct Agent token must contain 32 random bytes")
+		return "", errors.New("managed node token must contain 32 random bytes")
 	}
 	return parts[0], nil
 }
 
 func prepareIdentity(dir, discovery, agentToken string) (identity, error) {
 	if discovery != "" && agentToken != "" {
-		return identity{}, errors.New("choose either discovery_token or agent_token, not both")
+		return identity{}, errors.New("choose either DISCOVERY_TOKEN or NODE_TOKEN, not both")
 	}
 	var tokenUUID string
 	if agentToken != "" {
@@ -235,6 +235,10 @@ func prepareIdentity(dir, discovery, agentToken string) (identity, error) {
 		return identity{}, err
 	}
 	if exists {
+		// Persisted legacy direct credentials are not accepted by the new Node protocol.
+		if strings.HasPrefix(ident.Secret, "wl_agent_") {
+			return identity{}, errors.New("obsolete node identity credential; register a new Node")
+		}
 		if agentToken != "" && !ident.Registered {
 			// Explicit direct credentials replace only a never-confirmed
 			// discovery identity. An already registered UUID is immutable.
@@ -256,7 +260,7 @@ func prepareIdentity(dir, discovery, agentToken string) (identity, error) {
 		ident = identity{UUID: tokenUUID, Secret: agentToken, Registered: true}
 	} else {
 		if len(discovery) > 100 || !strings.HasPrefix(discovery, "wl_disc_") {
-			return identity{}, errors.New("new identity requires discovery or direct agent credentials")
+			return identity{}, errors.New("new node requires DISCOVERY_TOKEN or NODE_TOKEN")
 		}
 		ident, err = newIdentity()
 		if err != nil {
@@ -269,24 +273,18 @@ func prepareIdentity(dir, discovery, agentToken string) (identity, error) {
 	return ident, nil
 }
 
-func optionalIP(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
 func run(ctx context.Context) error {
 	if os.Geteuid() == 0 {
 		return errors.New("WayLane Agent must never run as root")
 	}
-	origin, err := panelOrigin(os.Getenv("WAYLANE_PANEL_URL"), os.Getenv("WAYLANE_DEV_ALLOW_HTTP") == "true")
+	panelURL := os.Getenv("PANEL_URL")
+	origin, err := panelOrigin(panelURL, os.Getenv("DEV_ALLOW_HTTP") == "true")
 	if err != nil {
 		return err
 	}
-	token := os.Getenv("WAYLANE_DISCOVERY_TOKEN")
-	directToken := os.Getenv("WAYLANE_AGENT_TOKEN")
-	state := os.Getenv("WAYLANE_AGENT_STATE_DIR")
+	token := os.Getenv("DISCOVERY_TOKEN")
+	directToken := os.Getenv("NODE_TOKEN")
+	state := os.Getenv("NODE_STATE_DIR")
 	if state == "" {
 		return errors.New("state directory required")
 	}
@@ -294,7 +292,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	socket := os.Getenv("WAYLANE_ROOTLESS_SOCKET")
+	socket := os.Getenv("ROOTLESS_SOCKET")
 	engineExit, err := startRootlessEngine(ctx, socket)
 	if err != nil {
 		return err
@@ -302,110 +300,45 @@ func run(ctx context.Context) error {
 	if err := awaitRootlessEngine(ctx, socket, engineExit); err != nil {
 		return err
 	}
-	name := os.Getenv("WAYLANE_AGENT_NAME")
-	if name == "" || len(name) > 128 {
-		return errors.New("invalid agent name")
+	name := os.Getenv("NODE_NAME")
+	if name == "" {
+		name = "waylane-node"
+	}
+	if len(name) > 128 {
+		return errors.New("invalid node name")
 	}
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 		// Never forward discovery/agent credentials to a redirected origin.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-    controlMode := os.Getenv("WAYLANE_CONTROL_TRANSPORT")
-    if controlMode == "" {controlMode="ws"}
-    if controlMode != "legacy" {
-		if controlMode != "ws" && controlMode != "grpc" {
-			return errors.New("unsupported binary Agent transport")
-		}
-		if !ident.Registered {
-			if token == "" {
-				return errors.New("Agent enrollment required before binary control")
-			}
-			reply, err := post(ctx, client, origin, "/api/agent/enroll", "X-Discovery-Token", token, map[string]any{
-				"node_uuid": ident.UUID, "agent_secret": ident.Secret, "display_name": name, "agent_version": version,
-			})
-			if err != nil {
-				return err
-			}
-			ident.Registered = true
-			if err := writeIdentity(state, ident); err != nil {
-				return err
-			}
-			log.Printf("Agent enrolled before binary control node=%s status=%s", ident.UUID, reply.Status)
-		}
-		return runBinaryControl(ctx, origin, ident, state, socket, controlMode)
+	controlMode := os.Getenv("CONTROL_TRANSPORT")
+	if controlMode == "" {
+		controlMode = "grpc"
 	}
-	var lastPublicIPv4, lastPublicIPv6 string
-	var nextIPRefresh time.Time
-	var xrayActionActive atomic.Bool
-	syncPanel := func() error {
-		if !ident.Registered {
-			reply, err := post(ctx, client, origin, "/api/agent/enroll", "X-Discovery-Token", token, map[string]any{
-				"node_uuid": ident.UUID, "agent_secret": ident.Secret,
-				"display_name": name, "agent_version": version,
-			})
-			if err != nil {
-				return err
-			}
-			ident.Registered = true
-			if err := writeIdentity(state, ident); err != nil {
-				return err
-			}
-			log.Printf("registered node=%s status=%s", ident.UUID, reply.Status)
+	if controlMode != "ws" && controlMode != "grpc" {
+		return errors.New("CONTROL_TRANSPORT must be grpc or ws")
+	}
+	if controlMode == "grpc" && os.Getenv("GRPC_TARGET") == "" {
+		return errors.New("GRPC_TARGET is required for gRPC control")
+	}
+	if !ident.Registered {
+		if token == "" {
+			return errors.New("discovery enrollment token is required")
 		}
-		if !time.Now().Before(nextIPRefresh) {
-			v4, v6 := reportPublicIP(ctx, client)
-			if v4 != "" {
-				lastPublicIPv4 = v4
-			}
-			if v6 != "" {
-				lastPublicIPv6 = v6
-			}
-			nextIPRefresh = time.Now().Add(time.Minute)
-		}
-		reply, err := post(ctx, client, origin, "/api/agent/heartbeat", "X-Agent-Secret", ident.Secret, map[string]any{
-			"node_uuid": ident.UUID, "agent_version": version,
-			"reported_ipv4": optionalIP(lastPublicIPv4), "reported_ipv6": optionalIP(lastPublicIPv6),
-			"capabilities":    []string{"docker.rootless.inspect", "xray.live-control"},
-			"machine_metrics": collectNodeRuntimeMetrics(state),
+		reply, err := post(ctx, client, origin, "/api/node-control/enroll", "X-Discovery-Token", token, map[string]any{
+			"node_uuid": ident.UUID, "node_secret": ident.Secret, "display_name": name, "node_version": version,
 		})
 		if err != nil {
 			return err
 		}
-		if reply.Status == "approved" && xrayActionActive.CompareAndSwap(false, true) {
-			// Pulling a core image may take minutes. Keep heartbeats responsive.
-			go func() {
-				defer xrayActionActive.Store(false)
-				workCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
-				defer cancel()
-				if err := synchronizeXray(workCtx, client, origin, ident, state, socket); err != nil {
-					log.Printf("Xray desired-state synchronization failed: %v", err)
-				}
-			}()
+		ident.Registered = true
+		if err := writeIdentity(state, ident); err != nil {
+			return err
 		}
-		log.Printf("node=%s status=%s", ident.UUID, reply.Status)
-		return nil
+		log.Printf("Node registered node=%s status=%s", ident.UUID, reply.Status)
 	}
-	if err := syncPanel(); err != nil {
-		log.Printf("panel currently unavailable: %v", err)
-	}
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-engineExit:
-			return fmt.Errorf("embedded rootless Docker exited: %w", err)
-		case <-ticker.C:
-			if err := checkRootlessDocker(ctx, socket); err != nil {
-				return err
-			}
-			if err := syncPanel(); err != nil {
-				log.Printf("panel currently unavailable: %v", err)
-			}
-		}
-	}
+	return runBinaryControl(ctx, origin, ident, state, socket, controlMode)
 }
 
 func main() {

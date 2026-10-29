@@ -1,338 +1,119 @@
-# WayLane Node Agent — authoritative architecture and rollout gate
+# WayLane Node — runtime, enrollment and VPN core ownership
 
-This **experimental, opt-in** replacement is separate from the currently
-working legacy PasarGuard-compatible VPN node. It must never silently change
-existing VPN cores, IPs, certificates, hosts, subscriptions or Coolify/system
-Docker. Source tests do not authorize a production VPN traffic cutover.
+A **Node** is the deployment installed on a physical or virtual server. Its
+outer Docker Compose contains exactly two services:
 
-## Required steady state: two Compose services, one embedded daemon
+- `bootstrap`: privileged one-shot initializer of private persistent volumes
+- `agent`: non-root internal controller (UID/GID 1000), supervising the
+  RootlessKit + dockerd daemon **inside the agent container**
 
-`services/node/docker-compose.agent.yaml` is **one deployment entrypoint**:
+VPN **cores** (Xray first; other drivers pending) are independent child
+containers controlled by this internal agent. A Node can later own several
+cores. One server usually hosts one Node; two Nodes may coexist only with
+isolated Compose project names, volumes, identity, networking and ingress.
+No systemd, host Docker socket, extra rootless Compose sidecar or direct
+Panel-to-Docker control is permitted.
 
-1. `bootstrap`: a privileged **one-shot** container. It initializes/checks
-   three private named volumes (`agent-state`, `rootless-data`, `rootless-run`)
-   owned by the fixed agent UID/GID, then exits successfully. It is never a
-   long-running privileged broker. It does **not** install host software,
-   create host systemd units or manage the host rootful Docker engine.
-2. `agent`: the **only long-running Compose service**. The autonomous Go
-   WayLane Agent runs as UID/GID 1000, starts and supervises official
-   RootlessKit + dockerd **inside its own container**, and talks to it only
-   through `/run/user/1000/docker.sock`. Its Docker data and node identity
-   survive agent/container recreation through dedicated volumes.
+## Two exclusive node registration profiles
 
-There is **no third Docker Compose service**, no host systemd or `nsenter`
-provisioner, no exposed Docker TCP endpoint and no bind mount of
-`/var/run/docker.sock` (or any other host daemon socket). A daemon that is
-spawned as an **agent child process** is *not* another Compose service.
+The source of truth is **one** `services/node/docker-compose.node.yaml`
+(base runtime) with two fully separate installation entrypoints:
 
-## Panel-to-node control plane
+| Registration | Generic Compose | Coolify Compose | Credential |
+| --- | --- | --- | --- |
+| Managed by panel | `docker-compose.node.managed.yaml` | `docker-compose.node.managed.coolify.yaml` | `NODE_TOKEN` |
+| Discovery | `docker-compose.node.discovery.yaml` | `docker-compose.node.discovery.coolify.yaml` | `DISCOVERY_TOKEN` |
 
-The panel speaks to **WayLane Agent**, not directly to child VPN engines or
-the internal Docker daemon. The agent is the sole orchestrator for its node.
-Today it supports HTTPS discovery enrollment, durable UUID/per-agent secret,
-automatic registry connection for **new opt-in auto-approve invitations** (or
-manual confirmation for older/manual invitations), admin revocation,
-authenticated heartbeat, observed public egress IP and local rootless Docker
-readiness inspection. DEV now has a single pinned Xray child desired-state
-contract (deploy/pull/update/restart/stop and per-inbound user replacement).
-Enrollment alone does not authorize Docker operations or production activation.
+Both entrypoints have exactly the same runtime security, two services and
+`agent-state`, `rootless-data`, `rootless-run` private volumes.
+**Never** mount one Node's state/identity volume into a second Node.
+`bootstrap` completes 0 and exits; the long-lived internal `agent`
+runs with UID 1000 and supervises its private socket
+`/run/user/1000/docker.sock`. Coolify adapters mark the completed
+bootstrap `exclude_from_hc: true`.
 
-**Deferred engine plugin/runtime contract (design, NOT implemented):**
-The agent will use its private rootless Docker to create, configure, update,
-health-check, restart, stop and roll back separate containers for Xray,
-sing-box, WireGuard, AmneziaWG and future external/custom engines. The panel
-will express desired configuration/version and receive status **via the agent**.
-Each engine/driver must have explicit capabilities, image provenance/version,
-privilege/networking limits and independent lifecycle. Do not implement this
-future capability as a separate Compose sidecar, systemd service or direct
-panel-to-Docker API. Do not claim the original legacy node already implements
-this child-container orchestration.
+**Managed:** An authorized administrator creates a new Node in the panel
+(`POST /api/node-registry/managed`), receives the one-time `wl_node_...`
+`NODE_TOKEN` and places it in the protected deployment variable. The Node
+does not use a shared Discovery invitation; it starts with its existing UUID
+and panel-side approved registration.
 
-## Security and runtime boundaries
+**Discovery:** An authorized administrator creates a `wl_disc_...`
+invitation (`POST /api/node-registry/discovery-tokens`). The Node starts
+with `DISCOVERY_TOKEN`, creates a private UUID and node secret, enrolls
+exactly once via `POST /api/node-control/enroll` and is either automatically
+approved or awaits confirmation. Both flows use the same internal
+controller/cores once approved. A registered identity is persisted in
+`agent-state`; preserve this volume on restart. Tokens are returned once,
+never committed and never written to logs.
 
-The agent container is **not privileged** and has no host Docker socket. To
-run a nested rootless daemon on the Docker Desktop test platform, the current
-Compose explicitly grants `SETUID`/`SETGID`, mounts `/dev/net/tun` and
-sets `seccomp=unconfined` / `apparmor=unconfined`. These exceptions weaken
-isolation despite Docker reporting `rootless`; they are not a general proof
-of a safe production multi-tenant boundary. No automatic broadening of host
-privileges is authorized. The embedded daemon uses `vfs` storage. Its Docker bridge exists,
-but Docker Desktop **does not yet support running a child container on that
-bridge in this nested sandbox**: interface initialization fails while trying
-to disable IPv6 on `eth0`; creating an IPv6-enabled bridge also fails
-because `/proc/sys/net/ipv6/conf/default/forwarding` is read-only.
-The standalone agent has working outbound HTTPS through the outer Compose
-bridge. A disposable child Alpine container was able to use the inner
-`--network host` (RootlessKit private network namespace) for outbound HTTPS,
-but this is a **QA-only fallback**, not accepted isolation or VPN ingress.
+No `wl_agent_` token, prefixed `WAYLANE_AGENT_*` deployment inputs or
+old `/api/agent` / `/api/node-discovery` endpoints are supported.
+There are **no compatibility aliases or runtime downgrade modes**.
+Changing an already registered Node's UUID requires an explicit, controlled
+identity reset; do not silently rebind existing data.
 
-Do not introduce host systemd, a separate Docker daemon service or a bind of
-the host's rootful Docker socket to work around these constraints. Future VPN
-engine publishing requires a reviewed network/privilege solution and actual
-TCP/UDP connectivity checks (child → agent → host). Resource limits are also
-not yet enforced for inner containers because the current nested rootless
-daemon operates without cgroups.
+## Deployment variables
 
-The experimental agent must fail rather than use a rootful/system Docker
-socket. Keep discovery credentials separate from node identity secrets. Store
-secrets only in scoped runtime storage, never in source, built images or logs.
+Only use:
 
-## Evidence levels and required acceptance
-
-1. Source/CI: both image builds, exactly two Compose services, bootstrap
-   completion, unprivileged agent startup and rootless daemon identification.
-2. Isolated test host: clean install, repeated bootstrap, controlled restarts,
-   persisted identity and Docker data, safe failure, non-destructive rollback.
-3. Panel integration: real CA-verified HTTPS enrollment/approval/heartbeat,
-   correct IP observations and explicit administrative access controls.
-4. **Separate future work:** child VPN engine containers, networking/TUN,
-   kernel capability limits, real client traffic, core updates and rollback.
-   AmneziaWG end-to-end remains open in Issue #7.
-5. Explicit operator approval for migrations. Until then the legacy node and
-   its certificate/subscription paths remain untouched.
-
-Current Docker Desktop evidence of a running rootless daemon and a disposable
-nested container is a partial runtime probe, not acceptance of the full stack
-or of any VPN protocol.
-
-GitHub-hosted Ubuntu runners may reject RootlessKit's nested user-namespace
-creation with operation not permitted even when the same Compose succeeds
-on an isolated Docker Desktop host. Node CI keeps source tests and both image
-builds mandatory. The agent-compose-smoke job first probes the actual
-RootlessKit namespace operation under the Agent's limited capabilities;
-only an explicit host-permission denial skips the runtime step with a warning,
-and any unrelated probe failure or supported-host Compose failure fails CI.
-A skipped hosted-runner smoke is NOT runtime acceptance. Do not bypass
-this restriction by making the Agent privileged, exposing host Docker, or
-changing runner host sysctls. The source task is WayLane Issue #11; the implementation is integrated
-directly into the monorepo without requiring a new pull request.
-
-## Agent authentication: two connection modes
-
-The panel supports **two exclusive ways** to connect exactly the same WayLane
-Agent. This follows the OpenFlare distinction between a shared discovery
-invitation and a dedicated agent credential, without inheriting its VPN
-runtime or WebSocket transport.
-
-1. **Discovery:** create a reusable `wl_disc_...` token in the Nodes dashboard.
-   Set `WAYLANE_DISCOVERY_TOKEN` on a new Agent. The Agent creates its UUID and
-   private identity in `agent-state/identity.json`, enrolls once via
-   `POST /api/agent/enroll`, then uses only its individual identity on
-   authenticated heartbeat. Admin chooses auto-connect or manual approval.
-2. **Direct Agent token:** in Nodes, create a named direct agent. An
-   authorized admin receives **once** a `wl_agent_<uuid>_<random>` credential.
-   Copy **only** `WAYLANE_AGENT_TOKEN` into Agent settings; the Agent extracts
-   the UUID, saves token/UUID in its private persistent identity file and
-   immediately begins authenticated heartbeat. No Discovery invitation or
-   enrollment API call is needed. Admin may revoke the node, after which
-   heartbeats return 403. Only the token hash is persisted server-side.
-
-The two variables must **not** be provided simultaneously. Once an identity
-has been registered and safely persisted, neither initial token is required
-on a normal restart: a read-only/re-created container can reconnect from
-the persistent volume. Existing persisted identities must not silently switch
-to new credentials; an explicit identity migration/reset is required when
-changing from one registration to a different node UUID. This protects a
-valid registered agent from accidental takeover or duplicate registration.
-An **unconfirmed** Discovery identity (`Registered=false`) may be replaced by
-an explicitly supplied direct Agent token to transition an initial DEV trial
-without deleting the entire Docker state volume. An already registered
-identity cannot be rebound by changing environment variables.
-
-Every registration is only a **control-plane identity**:
-`allowed_operations: []`. Neither token activates VPN cores, grants
-Docker management rights, writes legacy host/subscription IP addresses, nor
-makes the remote panel reachable.
-
-### DEV-only local HTTP
-
-Production Agent endpoints require HTTPS with verified CA chains and reject
-redirects carrying tokens. To test a panel **on the same development computer**
-under Docker Desktop only, the opt-in combination
-`WAYLANE_PANEL_URL=http://host.docker.internal:<port>` and
-`WAYLANE_DEV_ALLOW_HTTP=true` is available. It accepts HTTP only to
-`host.docker.internal` or literal loopback hosts; arbitrary LAN/Internet
-HTTP addresses are always rejected. Never enable this mode on public,
-untrusted or production networks, because credentials are transported without
-TLS within the local Docker Desktop host link. The test panel must really
-listen on a host-accessible port: an isolated Koba Terminal loopback address
-cannot be reached from a laptop container by changing the token.
-
-## Discovery token, automatic enrollment and address changes
-
-The panel creates an invitation with a permanent, copy-once discovery token.
-For **new invitations**, auto-connect defaults to enabled; the operator may
-disable it per invitation. Existing invitations created before the additive
-`b7e10d623aa8` migration retain manual approval. Enrollment is idempotent
-for the same node UUID + private secret. Revoked nodes are never automatically
-reconnected. In either mode, `allowed_operations` remains empty; discovery
-approval NEVER authorizes engine management.
-
-The agent sends an authenticated heartbeat every 15 seconds. At most once a
-minute it determines public outbound IP via HTTPS (`api.ipify.org` for IPv4,
-`api6.ipify.org` for IPv6) with strict validation and a bounded timeout; a
-globally-routable local interface is the fallback. The registry updates IP
-automatically when a valid new address arrives. If lookup fails, the
-backend **preserves the previous address** instead of clearing it.
-
-**IP caveat:** these are *outbound egress observations*, not proof that a
-VPN listener is reachable from the Internet. NAT/CGNAT, an ingress proxy,
-local `192.168.x.x` address or port forwarding can make them differ from a
-valid public VPN endpoint. Do NOT automatically rewrite existing legacy
-`nodes.address`, host allocations, DNS or subscription endpoints from
-an unverified heartbeat. Future per-engine endpoint publication requires
-approved node binding plus network reachability acceptance.
-
-The agent requires a CA-verified HTTPS panel origin. Plain HTTP on a LAN IP
-(e.g. `192.168.1.11`) is intentionally rejected; use a test TLS origin with
-a trusted CA instead of bypassing TLS verification.
-
-## Development deployment identity
-
-This is **WayLane Node Agent**, not a separately versioned product.
-The generic Compose project is `waylane-node`. For isolated development use
-`waylane-node-dev` as the Compose project name; keep only the two service
-names `bootstrap` and `agent`. Legacy node compatibility is tracked as a
-distinct existing implementation, not by adding a version suffix to this
-agent. Do not carry old experimental Compose project names into deployments.
-Real panel enrollment requires a reachable trusted HTTPS origin and a real
-Discovery token: synthetic `.invalid` credentials test only daemon startup.
-
-## Xray DEV user synchronization
-
-Admin `PUT /api/node-discovery/registrations/{uuid}/xray/inbounds/{tag}/users`
-replaces accounts only in the named inbound using `expected_generation` for
-optimistic concurrency; an unauthorized/revoked Agent, stale generation,
-pending update, missing tag or duplicate/invalid user is rejected. Currently
-supported layouts: SOCKS `settings.accounts`; VLESS, VMess and Trojan
-`settings.clients`. Admin `GET .../xray/inbounds` returns names/counts
-without passwords. The Agent validates the updated entire Xray configuration
-and replaces the single Xray core; last running core survives invalid input.
-This still lacks PasarGuard live SyncUsers, Shadowsocks 2022, statistics,
-real region switching, multi-core drivers and accepted public UDP ingress.
-See Issue #13 for full parity. Local DEV verified authenticated TCP SOCKS5
-end-to-end; public VPN traffic is not accepted.
-
-
-## Managed TLS certificates and Core Editor routing (DEV contract)
-
-Autonomous Agents reuse **existing** WayLane resources rather than copying
-the legacy node/core database or introducing a second certificate vault.
-
-* TLS source of truth: `tls_presets`, with validated X.509 pairs, encrypted
-  private keys, preset revision and the existing ACME/webhook rotation flow.
-  `node_agent_tls_bindings` associates Agent UUID + exact TLS inbound tag
-  with an existing preset. Only an authorized Agent receives decrypted
-  certificate/key material through authenticated `GET /api/agent/xray/desired`.
-  Admin `GET .../xray/tls` lists fingerprint, revision and expiry but never
-  private keys. Bind/unbind and preset rotation increment the Xray desired
-  generation to request reconciliation; legacy TLS bindings are unaffected.
-* The Agent verifies certificate/key pairing and expiry again, writes the
-  material into mode-0600 generation-specific private files under its state
-  volume and injects Xray `certificateFile`/`keyFile` references **only in
-  a separate runtime config**. The underlying desired JSON, Agent state
-  report and admin API do not contain decrypted keys. Private runtime
-  directory is mounted read-only into the child Xray container.
-* Xray preflight runs before replacing the core; previous runtime config
-  and its generation-scoped certificate files remain available for rollback.
-  An intentionally stopped Xray is not implicitly restarted by a certificate
-  rotation. The operator must explicitly start/update it.
-* Routing is synchronized **from a saved Xray Core Editor CoreConfig** through
-  `PUT /api/node-discovery/registrations/{uuid}/xray/routing/from-core` with
-  `core_id` and `expected_generation`. The same full editor `routing`
-  object (rules, domain strategy, balancers) is used. Only `config.routing`
-  is changed; other inbounds/outbounds and users remain untouched.
-  Invalid routing/unknown outbound references are subject to Agent Xray
-  preflight and error reporting; previous core keeps serving traffic.
-
-Both operations are scoped to approved Agents and RBAC permissions, use
-optimistic generations, and never touch production legacy Node assignments.
-**Still unaccepted:** live client TLS handshake after certificate rotation,
-automatic propagation of every Core Editor save, true PasarGuard live routing
-API updates, public VPN/UDP ingress and automatic certificate cleanup/expiry
-alerts. The local DEV rollout requires a separate controlled test with a
-real TLS inbound, not only source or database migration tests.
-
-## Xray live control and machine telemetry
-
-The reconfigure desired action uses the private Xray loopback gRPC API
-from inside the child Docker container. The Xray process remains running;
-handler replacement may briefly interrupt that listener. Unsupported
-changes report requires_restart; explicit update still replaces the child
-image. Machine metrics are collected by Agent, marked agent-runtime, and
-do not claim physical Windows host visibility under Docker Desktop.
-The control protocol uses binary Protobuf only, with gRPC bidirectional streaming and binary WebSocket adapters. SSE, text WS frames, and HTTP streaming are not control options. New Agent defaults to WS; legacy HTTPS heartbeat/desired-state APIs remain an explicit migration fallback. See shared/contracts/AGENT_CONTROL.md for v1 wire schema, port/security settings and acceptance gates.
-
-## GitHub → Coolify remote DEV Agent (non-traffic pilot)
-
-An opt-in Git-backed adapter is available in
-[services/node/docker-compose.agent.coolify.yaml](../docker-compose.agent.coolify.yaml).
-It is **not** the legacy `pasarguard-node` deployment and must not be
-substituted for that service until full VPN traffic/rollback acceptance.
-The shared panel `waylane:dev` remains an independent resource.
-
-Configure **one application per physical test node**, using the authorized
-WayLane GitHub App, branch `main`, Docker Compose build strategy, Base
-Directory `/services/node`, Compose Location
-`/docker-compose.agent.coolify.yaml`, and persist Watch Paths
-`services/node/**`. The source declares exactly two services
-(`bootstrap` + `agent`) and three private named volumes. Do **not**
-re-use an existing Agent Compose project or attach its state volume to
-a second Agent: two concurrent identities would corrupt registration.
-Coolify uses a resource-specific project name; the generic local Compose
-keeps its separate `waylane-node` default. The bootstrap exits 0;
-`exclude_from_hc` is a Coolify parser-only extension to avoid counting
-a completed bootstrap as an unhealthy long-lived service.
-
-Set **only the following real operator values**:
-
-| Key | Decision | Origin |
+| Variable | Required? | Meaning |
 | --- | --- | --- |
-| `WAYLANE_PANEL_URL` | Required, full trusted HTTPS origin, no path | Existing WayLane frontend public domain |
-| `WAYLANE_AGENT_NAME` | Editable short node/host label | Unique name for the selected test server |
-| `WAYLANE_DISCOVERY_TOKEN` | Optional, copy-once private secret | Panel Nodes → create Discovery invitation |
-| `WAYLANE_AGENT_TOKEN` | Optional, copy-once private secret | Panel Nodes → create directly approved Agent |
-| `WAYLANE_CONTROL_TRANSPORT` | `ws` by default; optionally `grpc` | One chosen binary control transport |
-| `WAYLANE_CONTROL_GRPC_TARGET` | Optional; required only with `grpc` | Reachable TLS gRPC panel target |
+| `PANEL_URL` | Yes | Public HTTPS **origin** of the WayLane panel; no URL path |
+| `NODE_TOKEN` | Managed profile only | One-time private Node token |
+| `DISCOVERY_TOKEN` | Discovery profile only | One-time private invitation |
+| `NODE_NAME` | No, default `waylane-node` | Human-readable Node label |
+| `CONTROL_TRANSPORT` | No, default `grpc` | `grpc` or `ws` binary Protobuf |
+| `GRPC_TARGET` | Required for gRPC | Reachable TLS-enabled `hostname:port` control listener |
 
-Provide exactly **one** initial registration credential:
-`WAYLANE_DISCOVERY_TOKEN` **or** `WAYLANE_AGENT_TOKEN`, never both.
-Store the one-time token as a protected, runtime-only Coolify variable;
-disable Buildtime/Preview exposure where not needed. Once the Agent has
-registered and written its durable private identity into `agent-state`,
-the initial token can be emptied before a later redeploy. The private
-identity volume must persist. Never copy the secret into Git, logs,
-screenshots or another node.
+The private internal runtime uses `NODE_STATE_DIR` and
+`ROOTLESS_SOCKET`. Local Docker Desktop-only test overrides are
+`DEV_ALLOW_HTTP` / `GRPC_DEV_INSECURE`; **both are fixed false
+in the remote Coolify adapters**. Never disable certificate validation
+for remote panel URLs.
 
-The remote adapter forces `WAYLANE_DEV_ALLOW_HTTP=false` and
-`WAYLANE_CONTROL_GRPC_DEV_INSECURE=false`: no plaintext fallback
-or self-signed certificate bypass. For `ws`, the Agent initiates a
-`wss://<panel-domain>/api/agent/control/ws` binary Protobuf session using
-its per-Agent credential; enrollment still uses `/api/agent/enroll`.
-The panel's same-origin Nginx frontend proxies that path to the backend.
-The Agent requires **outbound** DNS, HTTPS and time synchronization;
-it exposes no management domain, Docker socket, host ports or ingress
-through this Compose. The correct `WAYLANE_PANEL_URL` is the actual
-frontend HTTPS domain, **not** the private `waylane-api` alias.
+The canonical protocol is `shared/contracts/NODE_CONTROL.md`. gRPC is
+full-duplex Protobuf `AgentControl.Connect`, with optional full-duplex binary
+WebSocket at `wss://<panel>/api/node-control/control/ws`. They carry the
+same `Envelope`. No text frames, SSE, JSON control, HTTP desired polling,
+or implicit fallback between transports.
 
-Before a first pilot, verify Coolify's parsed/deployable Compose on the
-target host: the bootstrap is one-shot/privileged, the Agent is
-unprivileged UID 1000 with its private rootless volumes, both have
-their expected Dockerfile build contexts, the bootstrap is excluded
-from aggregate health, and no host Docker socket/host port is mounted.
-Do not infer success from YAML/source CI or from a Coolify `finished`
-deployment alone. Verify that bootstrap completed 0, Agent healthy,
-HTTPS/WSS handshake authenticated, correct approved registration/last
-heartbeat in the panel, identity persistence after one controlled
-Agent restart, and no unexpected legacy node/traffic change.
+**Important:** The existing bundled frontend proxies WSS but does **not**
+by itself expose the separate gRPC listener. The panel backend's
+`CONTROL_GRPC_BIND` listener, trusted server certificate and an accessible
+HTTP/2 TLS ingress must be configured and verified before a remote Node
+can connect with the default `grpc`. Until that is done, an explicitly
+selected `CONTROL_TRANSPORT=ws` uses the panel's existing HTTPS origin.
+Do not claim a gRPC default means the live ingress is already configured.
 
-**Current blocker for real VPN clients:** nested rootless bridge and
-TCP/UDP ingress are not production-accepted, nor are multi-engine
-management, complete PasarGuard Xray parity or WireGuard/AmneziaWG
-traffic. A remote node Agent registration proves only control-plane
-connectivity, **not** that existing user subscriptions can be safely
-switched to that Agent. Keep the legacy PasarGuard deployment and its
-persistent key/certificate volume untouched. Auto-deploy from
-`services/node/**` should only be enabled for an accepted isolated
-DEV Agent; otherwise leave it disabled until controlled restart,
-state persistence and child Xray preservation are proven.
+## Coolify setup (per Node)
+
+- Git source: `KobaProduction/WayLane`, branch `main`, trusted GitHub App
+- Base Directory: `/services/node`
+- Compose Location: `/docker-compose.node.managed.coolify.yaml` **or**
+  `/docker-compose.node.discovery.coolify.yaml`
+- Watch Paths: `services/node/**`, persisted in Coolify (the `x-` key is
+  documentation only). Avoid automatic redeploy of unaccepted live traffic.
+- Do not assign an HTTP domain or mount `/var/run/docker.sock`. The Node
+  initiates outbound connections to the panel.
+- Keep tokens protected, runtime-only and inaccessible to image builds.
+
+## Security and acceptance
+
+The nested daemon uses limited `SETUID`/`SETGID`, `/dev/net/tun`,
+`seccomp=unconfined` and `apparmor=unconfined` in the current test setup.
+These exceptions reduce isolation. Docker Desktop's nested bridge IPv6
+sysctl restriction is still unresolved; inner host-namespace networking
+has only had isolated DEV TCP SOCKS5 acceptance, **not production VPN ingress**.
+
+Source CI/tests prove schemas, Go control, Docker images and Compose
+structure. A real isolated host pilot must separately prove bootstrap exit,
+non-root agent, private daemon health, panel TLS/auth enrollment, gRPC or
+WSS hello/ack, heartbeats, revocation, identity persistence, single Xray
+desired/application with real TCP and UDP checks, and safe rollback.
+Full PasarGuard Xray user/stats/routing parity, sing-box, WireGuard,
+AmneziaWG and multicore routing remain separate tasks. Do not stop or
+modify existing PasarGuard nodes, certificates, subscriptions and client
+routing until explicit migration acceptance.
+
+Related tasks: WayLane Issues #11, #13, #14, #15 and #17.

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -386,81 +385,4 @@ func applyXrayDesired(ctx context.Context, socket, dir string, current xrayLocal
 	next.ImageVersion = desired.ImageVersion
 	next.Config = append(json.RawMessage(nil), desired.Config...)
 	return next, nil
-}
-
-func getXrayDesired(ctx context.Context, client *http.Client, origin string, ident identity) (xrayDesired, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", origin+"/api/agent/xray/desired?node_uuid="+ident.UUID, nil)
-	if err != nil {
-		return xrayDesired{}, err
-	}
-	req.Header.Set("X-Agent-Secret", ident.Secret)
-	resp, err := client.Do(req)
-	if err != nil {
-		return xrayDesired{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return xrayDesired{}, fmt.Errorf("Xray desired-state HTTP %d", resp.StatusCode)
-	}
-	var desired xrayDesired
-	err = json.NewDecoder(io.LimitReader(resp.Body, 2000000)).Decode(&desired)
-	return desired, err
-}
-
-func reportXray(ctx context.Context, client *http.Client, origin string, ident identity, state xrayLocalState) error {
-	content, err := json.Marshal(map[string]any{
-		"node_uuid": ident.UUID, "generation": state.Generation,
-		"status": state.Status, "error": state.Error})
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", origin+"/api/agent/xray/report", bytes.NewReader(content))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Agent-Secret", ident.Secret)
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("Xray report HTTP %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func synchronizeXray(ctx context.Context, client *http.Client, origin string, ident identity, dir, socket string) error {
-	desired, err := getXrayDesired(ctx, client, origin, ident)
-	if err != nil {
-		return err
-	}
-	if !desired.Configured {
-		return nil
-	}
-	local, err := readXrayState(dir)
-	if err != nil {
-		return err
-	}
-	if desired.Generation != local.Generation {
-		result, applyErr := applyXrayDesired(ctx, socket, dir, local, desired)
-		if applyErr != nil {
-			result.Status = "error"
-			if errors.Is(applyErr, errLiveRequiresRestart) {
-				result.Status = "requires_restart"
-			}
-			// Never return raw Docker output to the panel.
-			result.Error = applyErr.Error()
-			if len(result.Error) > 290 {
-				result.Error = result.Error[:290]
-			}
-		}
-		if err := saveXrayState(dir, result); err != nil {
-			return err
-		}
-		local = result
-	}
-	// Re-reporting after an outage is idempotent; commands are not re-run.
-	return reportXray(ctx, client, origin, ident, local)
 }

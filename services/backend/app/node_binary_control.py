@@ -66,24 +66,26 @@ def decode_frame(frame: bytes) -> pb.Envelope:
 
 
 async def check_agent(node_uuid: str, secret: str) -> None:
-    if not secret or len(secret) > 128:
-        raise HTTPException(401, "Invalid Agent credential")
+    if not secret or len(secret) > 128 or secret.startswith("wl_agent_"):
+        raise HTTPException(401, "Invalid node credential")
     try:
         uuid.UUID(node_uuid)
     except (ValueError, TypeError) as exc:
-        raise HTTPException(401, "Invalid Agent identity") from exc
+        raise HTTPException(401, "Invalid node identity") from exc
     async with SessionLocal() as db:
         row = (
             await db.execute(
-                select(node_agent_registrations.c.secret_hash, node_agent_registrations.c.status).where(
+                select(node_agent_registrations.c.secret_hash, node_agent_registrations.c.status,
+                       node_agent_registrations.c.invitation_id).where(
                     node_agent_registrations.c.node_uuid == node_uuid
                 )
             )
         ).one_or_none()
-        if not row or not hmac.compare_digest(row[0], hashlib.sha256(secret.encode()).hexdigest()):
-            raise HTTPException(401, "Invalid Agent credential")
+        if (not row or (row[2] is None and not secret.startswith(f"wl_node_{node_uuid}_"))
+                or not hmac.compare_digest(row[0], hashlib.sha256(secret.encode()).hexdigest())):
+            raise HTTPException(401, "Invalid node credential")
         if row[1] != "approved":
-            raise HTTPException(403, "Agent not approved")
+            raise HTTPException(403, "Node not approved")
 
 
 class AgentBinarySession:
@@ -120,11 +122,11 @@ class AgentBinarySession:
         await check_agent(self.node_uuid, self._secret)
         if message.kind == "telemetry":
             payload = MessageToDict(message.payload, preserving_proto_field_name=True)
-            from app.routers.node_discovery import Heartbeat
+            from app.routers.node_registry import Heartbeat
 
             body = Heartbeat(node_uuid=uuid.UUID(self.node_uuid), **payload)
             changes = {
-                "agent_version": body.agent_version,
+                "agent_version": body.node_version,
                 "capabilities": body.capabilities,
                 "last_seen_at": datetime.now(UTC),
             }
@@ -204,7 +206,7 @@ class AgentBinarySession:
             )
             if not entry or entry["generation"] <= self._last_sent_generation:
                 return
-            from app.routers.agent_xray_resources import agent_tls_material
+            from app.routers.node_xray_resources import agent_tls_material
 
             desired = {
                 "configured": True,

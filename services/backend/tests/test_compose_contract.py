@@ -186,7 +186,7 @@ def test_direct_github_coolify_stack_has_no_intens_dependency():
 )
 def test_bundled_nginx_supports_binary_agent_websocket_upgrade(config):
     source = (ROOT / config).read_text()
-    route = source.split("location = /api/agent/control/ws {", 1)[1].split("location /api/", 1)[0]
+    route = source.split("location = /api/node-control/control/ws {", 1)[1].split("location /api/", 1)[0]
     assert "proxy_set_header Upgrade $http_upgrade;" in route
     assert 'proxy_set_header Connection "upgrade";' in route
     assert "proxy_http_version 1.1;" in route

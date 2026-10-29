@@ -1,0 +1,29 @@
+# Coolify: Source KobaProduction/WayLane main; Base Directory /services/node
+# Compose Location /docker-compose.node.discovery.coolify.yaml
+# Watch Paths services/node/** (save in Coolify; x-* does not configure it).
+x-watch-path-coolify:
+  - "services/node/**"
+services:
+  bootstrap:
+    extends:
+      file: ./docker-compose.node.yaml
+      service: bootstrap
+    network_mode: none
+    exclude_from_hc: true
+  agent:
+    extends:
+      file: ./docker-compose.node.yaml
+      service: agent
+    environment:
+      PANEL_URL: ${PANEL_URL:?}
+      DISCOVERY_TOKEN: ${DISCOVERY_TOKEN:?}
+      NODE_TOKEN: ""
+      NODE_NAME: ${NODE_NAME:-waylane-node}
+      CONTROL_TRANSPORT: ${CONTROL_TRANSPORT:-grpc}
+      GRPC_TARGET: ${GRPC_TARGET:-}
+      DEV_ALLOW_HTTP: "false"
+      GRPC_DEV_INSECURE: "false"
+volumes:
+  agent-state: {}
+  rootless-data: {}
+  rootless-run: {}

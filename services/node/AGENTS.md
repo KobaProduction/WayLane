@@ -11,13 +11,13 @@ Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
   NET_ADMIN requirements; `DEPLOYMENT.md` owns this runtime's acceptance.
   Kernel WireGuard remains the default; AmneziaWG 3.1 is opt-in and requires
   separate real-traffic verification (Issue #7).
-- New `bootstrap/`, `agent/`, `docker-compose.agent.yaml`: experimental
-  WayLane Node Agent. **Read the complete `agent/README.md` as its authoritative
+- New `bootstrap/`, `agent/`, `docker-compose.node.yaml`, and
+  `docker-compose.node.{managed,discovery}*.yaml`: autonomous WayLane Node. **Read the complete `agent/README.md` as its authoritative
   lifecycle and topology contract before changing any of these files.**
   Exactly two Compose services, one-shot privileged bootstrap and autonomous
   non-privileged Go agent supervising its private embedded rootless Docker.
   No host systemd, independent rootless-engine Compose service, or host Docker
-  socket. Panel-agent is the only intended management relationship. Single Xray DEV child is implemented, but full legacy user/stats/routing
+  socket. The panel communicates only with the internal node controller. Single Xray DEV child is implemented, but full legacy user/stats/routing
   parity and additional engines are deferred and not accepted.
 
 `common/service.proto` is now a WayLane-native RPC contract, paired with the bundled Python bridge;

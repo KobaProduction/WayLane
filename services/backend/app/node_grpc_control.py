@@ -9,7 +9,7 @@ from pathlib import Path
 import grpc
 from fastapi import HTTPException
 
-from app.agent_binary_control import PROTOCOL_VERSION, AgentBinarySession, check_agent
+from app.node_binary_control import PROTOCOL_VERSION, AgentBinarySession, check_agent
 from app.controlpb import control_pb2_grpc as grpc_pb
 from app.lifecycle import on_shutdown, on_startup
 
@@ -21,7 +21,7 @@ class ControlServicer(grpc_pb.AgentControlServicer):
     async def Connect(self, request_iterator, context):
         metadata = dict(context.invocation_metadata())
         node_uuid = metadata.get("x-node-uuid", "")
-        secret = metadata.get("x-agent-secret", "")
+        secret = metadata.get("x-node-secret", "")
         try:
             await check_agent(node_uuid, secret)
         except HTTPException as exc:
@@ -80,11 +80,11 @@ async def create_grpc_server(bind: str, *, cert: bytes | None = None, key: bytes
 @on_startup
 async def start_grpc_control() -> None:
     global _server
-    bind = os.getenv("WAYLANE_CONTROL_GRPC_BIND", "")
+    bind = os.getenv("CONTROL_GRPC_BIND", "")
     if not bind:
         return
-    cert_path = os.getenv("WAYLANE_CONTROL_GRPC_TLS_CERT")
-    key_path = os.getenv("WAYLANE_CONTROL_GRPC_TLS_KEY")
+    cert_path = os.getenv("CONTROL_GRPC_TLS_CERT")
+    key_path = os.getenv("CONTROL_GRPC_TLS_KEY")
     if bool(cert_path) != bool(key_path):
         raise ValueError("gRPC TLS requires both certificate and key")
     cert = await asyncio.to_thread(Path(cert_path).read_bytes) if cert_path else None

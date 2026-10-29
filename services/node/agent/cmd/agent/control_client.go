@@ -100,16 +100,16 @@ func wsControlConnect(ctx context.Context, origin string, ident identity) (binar
 	case "https":
 		panel.Scheme = "wss"
 	case "http":
-		if os.Getenv("WAYLANE_DEV_ALLOW_HTTP") != "true" {
+		if os.Getenv("DEV_ALLOW_HTTP") != "true" {
 			return nil, errors.New("insecure WS outside DEV")
 		}
 		panel.Scheme = "ws"
 	default:
 		return nil, errors.New("unrecognized URL scheme")
 	}
-	panel.Path = "/api/agent/control/ws"
+	panel.Path = "/api/node-control/control/ws"
 	panel.RawQuery = url.Values{"node_uuid": []string{ident.UUID}}.Encode()
-	headers := http.Header{"X-Agent-Secret": []string{ident.Secret}}
+	headers := http.Header{"X-Node-Secret": []string{ident.Secret}}
 	dialer := websocket.Dialer{HandshakeTimeout: 8 * time.Second, Subprotocols: []string{"waylane.pb.v1"}}
 	conn, resp, err := dialer.DialContext(ctx, panel.String(), headers)
 	if err != nil {
@@ -126,7 +126,7 @@ func wsControlConnect(ctx context.Context, origin string, ident identity) (binar
 	return &wsControlStream{ws: conn}, nil
 }
 func grpcControlConnect(ctx context.Context, ident identity) (binaryStream, error) {
-	target := os.Getenv("WAYLANE_CONTROL_GRPC_TARGET")
+	target := os.Getenv("GRPC_TARGET")
 	if target == "" || strings.Contains(target, "://") || strings.Contains(target, "/") {
 		return nil, errors.New("gRPC target must be host:port")
 	}
@@ -135,8 +135,8 @@ func grpcControlConnect(ctx context.Context, ident identity) (binaryStream, erro
 		return nil, err
 	}
 	opts := []grpc.DialOption{grpc.WithDefaultCallOptions(grpc.ForceCodec(controlWireCodec{})), grpc.WithBlock()}
-	if os.Getenv("WAYLANE_CONTROL_GRPC_DEV_INSECURE") == "true" {
-		if os.Getenv("WAYLANE_DEV_ALLOW_HTTP") != "true" || (host != "host.docker.internal" && net.ParseIP(host) == nil) {
+	if os.Getenv("GRPC_DEV_INSECURE") == "true" {
+		if os.Getenv("DEV_ALLOW_HTTP") != "true" || (host != "host.docker.internal" && net.ParseIP(host) == nil) {
 			return nil, errors.New("plaintext gRPC forbidden")
 		}
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -149,7 +149,7 @@ func grpcControlConnect(ctx context.Context, ident identity) (binaryStream, erro
 	if err != nil {
 		return nil, err
 	}
-	streamCtx := metadata.AppendToOutgoingContext(ctx, "x-node-uuid", ident.UUID, "x-agent-secret", ident.Secret)
+	streamCtx := metadata.AppendToOutgoingContext(ctx, "x-node-uuid", ident.UUID, "x-node-secret", ident.Secret)
 	stream, err := conn.NewStream(streamCtx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true},
 		"/waylane.control.v1.AgentControl/Connect")
 	if err != nil {
@@ -201,7 +201,7 @@ func controlDesiredFromPayload(payload *structpb.Struct) (xrayDesired, error) {
 	return desired, nil
 }
 func controlTelemetryPayload(state string) (map[string]any, error) {
-	raw, err := json.Marshal(map[string]any{"agent_version": version,
+	raw, err := json.Marshal(map[string]any{"node_version": version,
 		"capabilities":    []string{"docker.rootless.inspect", "xray.protobuf.binary"},
 		"machine_metrics": collectNodeRuntimeMetrics(state)})
 	if err != nil {

@@ -28,19 +28,18 @@ Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft
 
 Tests: `./scripts/verify.sh` provisions a pinned checksum-verified Xray executable and disposable TLS certs in ignored local directories before executing the existing integration tests. No production credentials are used.
 
-## Experimental WayLane Node Agent
+## WayLane Node — autonomous deployment
 
-An independent opt-in two-service deployment adds a privileged one-shot
-`bootstrap` and an autonomous non-privileged `agent`. The agent starts and
-supervises its own rootless Docker and persists its private socket/state.
-Discovery/direct-token registration and Protobuf binary WS/gRPC control are
-implemented; a single DEV Xray child supports desired-state deploy/update,
-restart/stop and per-inbound user replacement. Multi-core drivers, public
-TCP/UDP ingress, full PasarGuard parity and production VPN traffic are not
-accepted.
+A Node is a complete installation: one-shot `bootstrap`, the internal
+unprivileged `agent` controller, private rootless Docker and independent VPN
+cores. Panel-managed and Discovery are **registration methods**, not separate
+Agent products.
 
-Canonical architectural contract: [agent/README.md](agent/README.md).
-For a separate Git-backed **Coolify DEV pilot**, use
-[docker-compose.agent.coolify.yaml](docker-compose.agent.coolify.yaml) and the
-[Agent Coolify deployment guide](agent/README.md#github--coolify-remote-dev-agent-non-traffic-pilot).
-The old node and its deployment are not replaced.
+- `docker-compose.node.managed.yaml` or `docker-compose.node.managed.coolify.yaml`
+- `docker-compose.node.discovery.yaml` or `docker-compose.node.discovery.coolify.yaml`
+
+The base runtime is `docker-compose.node.yaml`. See
+[Node runtime, enrollment and core ownership](agent/README.md).
+gRPC Protobuf is the default control transport and WSS Protobuf is an
+explicit alternative. Public traffic remains unaccepted. Legacy PasarGuard
+nodes are a separate deployment, not an alternate Node-control protocol.

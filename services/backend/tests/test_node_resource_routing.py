@@ -8,12 +8,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.base import Base
 from app.db.models import CoreConfig, CoreType
-from app.routers.node_discovery import (
-    DirectAgentInput, EditorRoutingInput, XrayDesiredInput, XrayReport,
+from app.routers.node_registry import (
+    ManagedNodeInput, EditorRoutingInput, XrayDesiredInput, XrayReport,
     agent_xray_desired, agent_xray_report, create_direct_agent,
     get_desired_xray, set_desired_xray, sync_editor_routing,
 )
-from app.routers.agent_xray_resources import replace_routing
+from app.routers.node_xray_resources import replace_routing
 
 
 def qa_config():
@@ -43,11 +43,11 @@ def test_saved_routing_editor_reaches_private_agent_desired_state(tmp_path):
         sessions=async_sessionmaker(engine,expire_on_commit=False)
         try:
             async with sessions() as db:
-                agent=await create_direct_agent(DirectAgentInput(display_name="qa"),db=db,_=object())
+                agent=await create_direct_agent(ManagedNodeInput(display_name="qa"),db=db,_=object())
                 uuid=UUID(agent["node_uuid"])
                 await set_desired_xray(uuid,XrayDesiredInput(action="deploy",config=qa_config()),db=db,_=object())
                 await agent_xray_report(XrayReport(node_uuid=uuid,generation=1,status="running"),
-                                        x_agent_secret=agent["agent_token"],db=db)
+                                        x_node_secret=agent["node_token"],db=db)
                 config=qa_config()
                 config["routing"]={"domainStrategy":"IPIfNonMatch","rules":[{
                     "type":"field","domain":["domain:example.invalid"],"outboundTag":"direct"}]}
@@ -59,7 +59,7 @@ def test_saved_routing_editor_reaches_private_agent_desired_state(tmp_path):
                 with pytest.raises(HTTPException) as stale:
                     await sync_editor_routing(uuid,EditorRoutingInput(core_id=core.id,expected_generation=1),db=db,_=object())
                 assert stale.value.status_code==409
-                desired=await agent_xray_desired(uuid,x_agent_secret=agent["agent_token"],db=db)
+                desired=await agent_xray_desired(uuid,x_node_secret=agent["node_token"],db=db)
                 assert desired["config"]["routing"]==config["routing"]
                 assert desired["config"]["inbounds"]==qa_config()["inbounds"]
                 public=await get_desired_xray(uuid,db=db,_=object())
@@ -76,7 +76,7 @@ def test_tls_preset_agent_binding_keeps_key_out_of_admin_api(tmp_path, monkeypat
     from sqlalchemy import insert
     from app.db.tls import tls_presets
     from app.operation.tls_presets import encrypt_private_key
-    from app.routers.node_discovery import (
+    from app.routers.node_registry import (
         AgentTLSBindingInput, bind_agent_tls, list_agent_tls_bindings,
         revoke,
     )
@@ -88,7 +88,7 @@ def test_tls_preset_agent_binding_keeps_key_out_of_admin_api(tmp_path, monkeypat
         sessions=async_sessionmaker(engine,expire_on_commit=False)
         try:
             async with sessions() as db:
-                agent=await create_direct_agent(DirectAgentInput(display_name="tls-qa"),db=db,_=object())
+                agent=await create_direct_agent(ManagedNodeInput(display_name="tls-qa"),db=db,_=object())
                 uid=UUID(agent["node_uuid"])
                 config=qa_config()
                 config["inbounds"].append({
@@ -97,7 +97,7 @@ def test_tls_preset_agent_binding_keeps_key_out_of_admin_api(tmp_path, monkeypat
                     "streamSettings":{"security":"tls","tlsSettings":{}}})
                 await set_desired_xray(uid,XrayDesiredInput(action="deploy",config=config),db=db,_=object())
                 await agent_xray_report(XrayReport(node_uuid=uid,generation=1,status="running"),
-                                        x_agent_secret=agent["agent_token"],db=db)
+                                        x_node_secret=agent["node_token"],db=db)
                 preset_id=str(uuidlib.uuid4())
                 secret="synthetic-private-key-for-data-flow-test"
                 # Direct insert is a persistence-layer fixture only:
@@ -115,15 +115,15 @@ def test_tls_preset_agent_binding_keeps_key_out_of_admin_api(tmp_path, monkeypat
                 assert admin["bindings"][0]["preset_name"]=="unit-test-only"
                 assert secret not in str(admin)
                 assert secret not in str(await get_desired_xray(uid,db=db,_=object()))
-                material=await agent_xray_desired(uid,x_agent_secret=agent["agent_token"],db=db)
+                material=await agent_xray_desired(uid,x_node_secret=agent["node_token"],db=db)
                 assert material["tls_certificates"][0]["private_key"]==secret
                 assert secret not in str(material["config"])
                 with pytest.raises(HTTPException) as denied:
-                    await agent_xray_desired(uid,x_agent_secret="wrong",db=db)
+                    await agent_xray_desired(uid,x_node_secret="wrong",db=db)
                 assert denied.value.status_code==401
                 await revoke(uid,db=db,_=object())
                 with pytest.raises(HTTPException) as revoked:
-                    await agent_xray_desired(uid,x_agent_secret=agent["agent_token"],db=db)
+                    await agent_xray_desired(uid,x_node_secret=agent["node_token"],db=db)
                 assert revoked.value.status_code==403
         finally:
             await engine.dispose()

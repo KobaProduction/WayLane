@@ -11,7 +11,7 @@ The authoritative message schema is
 `shared/contracts/proto/waylane/control/v1/control.proto`:
 
 - **gRPC/HTTP2**: bidirectional `AgentControl.Connect(stream Envelope)`;
-- **WebSocket**: `/api/agent/control/ws?node_uuid=<uuid>`, subprotocol
+- **WebSocket**: `/api/node-control/control/ws?node_uuid=<uuid>`, subprotocol
   `waylane.pb.v1`, strictly WebSocket **binary frames** carrying the serialized
   exact same Protobuf `Envelope`;
 - text frames, JSON over WebSocket, SSE and HTTP response streaming are **not
@@ -31,24 +31,22 @@ Wrong/revoked identity is rejected. The child never receives that credential.
 
 ### Connection configuration
 
-`WAYLANE_CONTROL_TRANSPORT=ws` is the default for a **new Agent image**.
-Use `grpc` for gRPC, with `WAYLANE_CONTROL_GRPC_TARGET=host:port`.
+`CONTROL_TRANSPORT=grpc` is the default for a **new Node**.
+Set `GRPC_TARGET=host:port` to an authenticated TLS gRPC listener.
+Use `CONTROL_TRANSPORT=ws` as an explicit binary WebSocket alternative.
 The Panel's optional gRPC listener is started with
-`WAYLANE_CONTROL_GRPC_BIND=host:port` (default off). Remote gRPC listener
-**requires TLS** via `WAYLANE_CONTROL_GRPC_TLS_CERT` and
-`WAYLANE_CONTROL_GRPC_TLS_KEY`; plaintext listeners bind loopback only.
+`CONTROL_GRPC_BIND=host:port` (default off). Remote gRPC listener
+**requires TLS** via `CONTROL_GRPC_TLS_CERT` and
+`CONTROL_GRPC_TLS_KEY`; plaintext listeners bind loopback only.
 Agent gRPC verifies CA certificates by default. Docker Desktop test-only
-plaintext requires BOTH `WAYLANE_DEV_ALLOW_HTTP=true` and
-`WAYLANE_CONTROL_GRPC_DEV_INSECURE=true`.
+plaintext requires BOTH `DEV_ALLOW_HTTP=true` and
+`GRPC_DEV_INSECURE=true`.
 WebSocket derives `wss://` from the configured HTTPS Panel URL; `ws://`
 is permitted only with the explicit local development HTTP flag.
 
-`WAYLANE_CONTROL_TRANSPORT=legacy` is a **temporary explicit migration/
-rollback option**, preserving the prior HTTPS heartbeat/desired/report APIs
-while converting installations. In the new binary modes the Agent does not
-silently downgrade to HTTP control after connection failure. First-time
-Discovery enrollment still uses the existing enrollment endpoint; moving that
-bootstrap handshake to Protobuf is an open compatibility gate.
+Neither transport silently falls back. No legacy HTTP heartbeat/desired
+control transport is available; Discovery enrollment uses a separate
+authenticated HTTPS registration request.
 
 ### Semantics and bounds
 

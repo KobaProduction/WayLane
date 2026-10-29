@@ -14,7 +14,7 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: separately deployed legacy Go VPN node plus an opt-in WayLane Node Agent prototype.
+- services/node/: separately deployed legacy Go VPN node plus an autonomous WayLane Node deployment.
   The legacy node remains host-network/NET_ADMIN dependent; do not ascribe those
   privileges or its single-core lifecycle to WayLane Node Agent.
 - services/external/: approved contracts for separate PostgreSQL,
@@ -26,7 +26,7 @@ CI and Coolify Watch Paths must scope independently to each module.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
 
-## WayLane Node Agent architecture authority
+## WayLane Node architecture authority
 
 Read `services/node/AGENTS.md` and `services/node/agent/README.md` before
 changing the autonomous agent-based node. Its single Compose entrypoint has **exactly two services**:
@@ -41,6 +41,6 @@ public UDP/TCP ingress and production traffic are **not** shipped.
 The security/runtime pilot is not accepted by source CI alone.
 
 The control channel and Node-versus-Core ownership contract is
-documented in shared/contracts/AGENT_CONTROL.md. One Agent owns machine
+documented in shared/contracts/NODE_CONTROL.md. One Agent owns machine
 telemetry; child cores own only their separate service traffic and state.
-The Node control protocol is **binary Protobuf only**: gRPC bidirectional streaming or binary WebSocket. SSE, HTTP streaming and JSON frames are not supported control transports. New Agent defaults to binary WS; legacy HTTP control remains explicit for staged rollback. See shared/contracts/AGENT_CONTROL.md; production gRPC/WS interop acceptance is separate.
+The Node control protocol is **binary Protobuf only**: gRPC bidirectional streaming or binary WebSocket. SSE, HTTP streaming and JSON frames are not supported control transports. New Node defaults to binary gRPC; legacy HTTP control remains explicit for staged rollback. See shared/contracts/NODE_CONTROL.md; production gRPC/WS interop acceptance is separate.
