@@ -39,13 +39,32 @@ services:
       OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
       OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
       OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+  # Unlike local Compose, a Git-owned Coolify resource must not inherit the
+  # host-loopback port or repository-file bind mount from the local frontend.
+  # Bake the bundled reverse proxy into the frontend image instead.
   frontend:
-    extends:
-      file: docker-compose.yaml
-      service: frontend
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_API: /
+        NGINX_CONFIG: deploy/nginx.bundled.conf
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    expose:
+      - "8080"
+    networks:
+      - application
     environment:
-      # Coolify-managed public route; no new operator-supplied ENV.
-      SERVICE_FQDN_FRONTEND_8080: /
+      SERVICE_URL_FRONTEND_8080: /
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 # Compose extends merges services but does NOT import top-level declarations.
 networks:

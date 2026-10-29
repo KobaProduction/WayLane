@@ -11,10 +11,12 @@ by committing these manifests.
 
 * docker-compose.yaml — PostgreSQL 17, private PgBouncer (SCRAM/session mode),
   backend FastAPI and frontend Nginx. VPN nodes never run in this stack.
-* docker-compose.coolify.yaml — extends ordinary Compose, declares frontend
-  `SERVICE_FQDN_FRONTEND_8080: /` so Coolify creates the public domain, and
-  repeats variable discovery and top-level networks/volumes. Actual domain
-  generation requires fresh-parser acceptance in the deployed Coolify version.
+* docker-compose.coolify.yaml — extends ordinary Compose for PostgreSQL,
+  PgBouncer and backend; defines the Coolify frontend separately to avoid
+  inheriting the local-only port and Nginx file bind mount. It builds with
+  the bundled Nginx config and declares `SERVICE_URL_FRONTEND_8080: /` as
+  its sole managed public route. Network/volume declarations are repeated.
+  Actual domain generation requires fresh-parser acceptance.
 
 The backend's `POSTGRES_HOST=database` is an **internal literal** resolving to
 PgBouncer's private service-DNS alias at port 5432. PostgreSQL remains reachable
@@ -47,7 +49,7 @@ Access http://127.0.0.1:8080/. The bundled nginx proxy forwards /api/ and
 Only loopback 8080 is published; backend/database remain private. WayLane's TLS-free startup binds to the private Docker network alias waylane-api (not 0.0.0.0), allowing Nginx to reach it without exposing the API to public host interfaces.
 For public use, add an approved HTTPS edge proxy: do not expose plaintext
 admin UI to the Internet. The Coolify adapter declares the managed
-`SERVICE_FQDN_FRONTEND_8080` route for the frontend only; verify generated
+`SERVICE_URL_FRONTEND_8080` route for the frontend only; verify generated
 HTTPS routing to port 8080 against the actual Coolify parser before public use.
 Backend/PostgreSQL remain private and are not assigned managed public domains.
 Subscription URL paths carry bearer-like tokens. Bundled Nginx suppresses
@@ -64,6 +66,76 @@ The DB volume is persistent. Changing WAYLANE_POSTGRES_USERNAME,
 WAYLANE_POSTGRES_PASSWORD or WAYLANE_POSTGRES_DATABASE on an existing volume
 does NOT migrate PostgreSQL users, passwords or databases. Never use
 re-deployment as a credential-rotation shortcut: back up and migrate explicitly.
+
+## Direct GitHub → Coolify DEV deployment (independent from Intens)
+
+WayLane owns this deployment definition. No `intens-cloud/infrastructure` Git
+checkout, fixed remote GitHub SHA, `intens-vpn-*` network, external Intens
+PostgreSQL/PgBouncer, shared Intens credentials or mandatory OTLP collector are
+required. The project can run on a shared Coolify host while remaining an
+independent **application resource**. A shared physical server/Coolify instance
+is still a hosting dependency, not complete infrastructure independence.
+
+- Source: GitHub `KobaProduction/WayLane`, branch `main`, **Application**
+  with **Docker Compose (Git)** build strategy. Use the GitHub App integration
+  with repository access; choose GitHub repository webhook only if the resource
+  was created from a public Git URL/deploy key rather than the GitHub App.
+- Base Directory: `/`. Docker Compose Location:
+  `/docker-compose.coolify.yaml`. Use a separate WayLane Coolify project/
+  environment (Development) and a distinct resource from the current
+  infrastructure-sourced `waylane:dev`.
+- Auto Deploy: **Deploy on push (webhooks)**. Save these *repository-relative*
+  Watch Paths, one per line: `docker-compose.yaml`,
+  `docker-compose.coolify.yaml`, `deploy/compose/**`,
+  `services/backend/**`, `services/frontend/**`. The tracked
+  `x-watch-path-coolify` field alone does not save them in Coolify. Do not
+  watch the independent `services/node/**` lifecycle.
+- Runtime inputs are the existing approved
+  `WAYLANE_POSTGRES_USERNAME`, `WAYLANE_POSTGRES_PASSWORD` (secret)
+  and optional `WAYLANE_POSTGRES_DATABASE`. Scope their values to WayLane,
+  **not** `{{environment.*}}` references owned by Intens. No secrets in Git.
+- The stack owns its PostgreSQL 17 and private PgBouncer plus backend and
+  frontend. `postgres_data` and `backend_data` are **new, private,
+  persistent named volumes**, not the old resource's volumes. No PostgreSQL,
+  PgBouncer or backend host ports are published. Frontend only gets a managed
+  `SERVICE_URL_FRONTEND_8080` HTTPS route; the baked Nginx configuration
+  proxies same-origin `/api/` and `/sub/` to `waylane-api:8000`.
+  Verify proxy, TLS, credentials and subscription-path log redaction.
+- Internal network: default separate Compose `application` plus
+  `database` (`internal: true`). If interaction with other Coolify
+  resources on the **same server** is required, review and explicitly enable
+  `Advanced → Docker Compose → Connect to predefined network` using the
+  server's actual Coolify Destination. This requires verifying generated
+  membership and that PostgreSQL remains on a private network; selecting an
+  Environment/Destination label alone is not attachment. Never hard-code an
+  Intens-specific network into WayLane. Cross-server connectivity requires a
+  separately approved ingress or network and is not achieved by this toggle.
+
+### Cutover gate: do not replace the existing application automatically
+
+The currently running `waylane:dev` uses the GitLab infrastructure source,
+separate PostgreSQL credentials/database and a preexisting HTTPS route.
+Creating the GitHub-backed resource **does not copy** its database, owner,
+API keys, files or domain. Keep the old stack running on its existing domain
+while testing the independent resource under a **different** test domain.
+Take a verified backup of the old database/volume data. Decide between
+an explicitly empty fresh owner setup and a controlled snapshot restore;
+never run both backends as writers against the same database. Do not give
+both frontend resources the same public domain.
+
+A confirmed data migration needs a one-writer cutover, restored credentials,
+backend Alembic compatibility check, login and API/subscription acceptance,
+recorded rollback and only then moving the public route. The new backend
+requires `waylane_<UUIDv4>` API keys: old `pg_key_` tokens must be reissued
+before traffic cutover. Keep the old Coolify application and its data intact
+until acceptance, then retire it separately with operator approval.
+
+The GitHub push→webhook→deploy path is operational **only after** a Coolify
+resource has been created, GitHub App/webhook events enabled and a real
+test commit observed in the deployment logs. Source validation alone does
+not prove deployment or automatic update behavior. For production, retain
+the separately approved immutable-release policy rather than auto-deploying
+every `main` push.
 
 ## Split backend — owned PostgreSQL and PgBouncer
 

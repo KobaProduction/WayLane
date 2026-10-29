@@ -137,18 +137,56 @@ def test_coolify_watch_scopes_and_extend_source(adapter, expected, forbidden):
     watched = set(manifest["x-watch-path-coolify"])
     assert watched >= expected
     assert not (watched & forbidden)
-    assert all(s["extends"]["file"] == "docker-compose.yaml" for s in manifest["services"].values())
+    for service, definition in manifest["services"].items():
+        if adapter == "docker-compose.coolify.yaml" and service == "frontend":
+            assert "extends" not in definition  # Do not inherit local port/file mount.
+        else:
+            assert definition["extends"]["file"] == "docker-compose.yaml"
 
 
 def test_coolify_bundled_frontend_declares_only_public_managed_route():
     doc = read("docker-compose.coolify.yaml")
-    assert doc["services"]["frontend"]["environment"] == {
-        "SERVICE_FQDN_FRONTEND_8080": "/",
-    }
+    frontend = doc["services"]["frontend"]
+    assert frontend["environment"] == {"SERVICE_URL_FRONTEND_8080": "/"}
+    assert "ports" not in frontend and "volumes" not in frontend
+    assert frontend["expose"] == ["8080"]
+    assert frontend["build"]["args"]["NGINX_CONFIG"] == "deploy/nginx.bundled.conf"
+    assert frontend["networks"] == ["application"]
     assert "environment" not in doc["services"]["postgres"] or (
         "SERVICE_FQDN_POSTGRES_5432" not in doc["services"]["postgres"]["environment"]
     )
     assert "SERVICE_FQDN_BACKEND_8000" not in doc["services"]["backend"]["environment"]
+
+
+def test_direct_github_coolify_stack_has_no_intens_dependency():
+    document = read("docker-compose.coolify.yaml")
+    base = read("docker-compose.yaml")
+    text = (ROOT / "docker-compose.coolify.yaml").read_text()
+    assert "intens-" not in text
+    assert "github.com/KobaProduction" not in text
+    assert set(document["services"]) == {"postgres", "pgbouncer", "backend", "frontend"}
+    assert document["networks"]["database"]["internal"] is True
+    assert set(document["volumes"]) == {"postgres_data", "backend_data"}
+    assert all("ports" not in base["services"][name] for name in ("postgres", "pgbouncer", "backend"))
+    assert document["services"]["frontend"]["depends_on"]["backend"]["condition"] == "service_healthy"
+    assert (ROOT / "services/frontend/deploy/nginx.bundled.conf").is_file()
+    nginx = (ROOT / "services/frontend/deploy/nginx.bundled.conf").read_text()
+    assert "proxy_pass http://waylane-api:8000;" in nginx
+    assert "location /sub/" in nginx
+    assert "access_log off;" in nginx.split("location /sub/ {", 1)[1].split("location =", 1)[0]
+
+
+@pytest.mark.parametrize(
+    "config",
+    ["deploy/compose/all-in-one/nginx.conf", "services/frontend/deploy/nginx.bundled.conf"],
+)
+def test_bundled_nginx_supports_binary_agent_websocket_upgrade(config):
+    source = (ROOT / config).read_text()
+    route = source.split("location = /api/agent/control/ws {", 1)[1].split("location /api/", 1)[0]
+    assert "proxy_set_header Upgrade $http_upgrade;" in route
+    assert 'proxy_set_header Connection "upgrade";' in route
+    assert "proxy_http_version 1.1;" in route
+    assert "access_log off;" in route
 
 
 def test_bundle_subscription_access_logging_off():
