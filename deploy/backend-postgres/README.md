@@ -10,15 +10,17 @@ Compose Location `/docker-compose.coolify.yaml`. Persist repository-relative
 Watch Paths `deploy/backend-postgres/**`, `deploy/compose/pgbouncer/**`,
 `services/backend/**`; verify effective Compose after parser `extends`.
 Approve and configure the existing three bundled PostgreSQL operator keys:
-`WAYLANE_POSTGRES_USERNAME` default `waylane`, `WAYLANE_POSTGRES_PASSWORD`
-required nonempty/secret, `WAYLANE_POSTGRES_DATABASE` default `waylane`.
+`POSTGRES_USERNAME` default `waylane`, `POSTGRES_PASSWORD`
+required nonempty/secret, `POSTGRES_DATABASE` default `waylane`.
 Required+default username UI semantics still require Coolify parser acceptance;
 approval of secret storage scope is pending.
 
 PgBouncer owns `database:5432` on the internal `database` network.
 PostgreSQL owns `postgres:5432` on that same network. Only backend is attached
 to application traffic, and its host listener is loopback-only for generic
-Compose. PgBouncer session pooling and SCRAM auth use the existing PostgreSQL
+Compose. Alembic migrations use `postgres:5432` directly, while application requests
+use `database:5432` through PgBouncer. PgBouncer session pooling and
+SCRAM auth use the existing PostgreSQL
 login, no new key. No database or pooler host ports are exposed.
 
 Persistent `postgres_data` and `backend_data` named volumes are tied to

@@ -17,10 +17,10 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     doc = read("docker-compose.yaml")
     services = doc["services"]
     assert set(services) == {"postgres", "pgbouncer", "backend", "frontend"}
-    assert services["postgres"]["environment"]["POSTGRES_USER"] == "${WAYLANE_POSTGRES_USERNAME:-waylane}"
-    assert services["postgres"]["environment"]["POSTGRES_PASSWORD"] == "${WAYLANE_POSTGRES_PASSWORD:?}"
-    assert services["postgres"]["environment"]["POSTGRES_DB"] == "${WAYLANE_POSTGRES_DATABASE:-waylane}"
-    assert services["backend"]["environment"]["POSTGRES_DB"] == "${WAYLANE_POSTGRES_DATABASE:-waylane}"
+    assert services["postgres"]["environment"]["POSTGRES_USER"] == "${POSTGRES_USERNAME:-waylane}"
+    assert services["postgres"]["environment"]["POSTGRES_PASSWORD"] == "${POSTGRES_PASSWORD:?}"
+    assert services["postgres"]["environment"]["POSTGRES_DB"] == "${POSTGRES_DATABASE:-waylane}"
+    assert services["backend"]["environment"]["POSTGRES_DB"] == "${POSTGRES_DATABASE:-waylane}"
     assert services["backend"]["environment"]["POSTGRES_USER"] == services["postgres"]["environment"]["POSTGRES_USER"]
     assert services["backend"]["environment"]["POSTGRES_PASSWORD"] == services["postgres"]["environment"]["POSTGRES_PASSWORD"]
     assert "SQLALCHEMY_DATABASE_URL" not in services["backend"]["environment"]
@@ -34,6 +34,7 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     assert "ports" not in pool
     assert pool["user"] == "10001:10001"
     assert services["backend"]["environment"]["POSTGRES_HOST"] == "database"
+    assert services["backend"]["environment"]["POSTGRES_MIGRATION_HOST"] == "postgres"
     assert "postgres" not in services["backend"]["depends_on"]
     assert services["backend"]["depends_on"]["pgbouncer"]["condition"] == "service_healthy"
     assert doc["networks"]["database"]["internal"] is True
@@ -59,9 +60,9 @@ def test_extends_adapters_redeclare_top_level_networks_and_volumes():
     assert set(bundled["volumes"]) == {"postgres_data", "backend_data"}
     for service in ("postgres", "pgbouncer", "backend"):
         env = bundled["services"][service]["environment"]
-        assert env["POSTGRES_USER"] == "${WAYLANE_POSTGRES_USERNAME:-waylane}"
-        assert env["POSTGRES_PASSWORD"] == "${WAYLANE_POSTGRES_PASSWORD:?}"
-        assert env["POSTGRES_DB"] == "${WAYLANE_POSTGRES_DATABASE:-waylane}"
+        assert env["POSTGRES_USER"] == "${POSTGRES_USERNAME:-waylane}"
+        assert env["POSTGRES_PASSWORD"] == "${POSTGRES_PASSWORD:?}"
+        assert env["POSTGRES_DB"] == "${POSTGRES_DATABASE:-waylane}"
 
     backend = read("services/backend/docker-compose.coolify.yaml")
     assert "backend_data" in backend["volumes"]
@@ -221,13 +222,14 @@ def test_managed_backend_pooler_is_private_and_shares_only_approved_credentials(
     assert "ports" not in services["pgbouncer"]
     assert services["pgbouncer"]["networks"]["database"]["aliases"] == ["database"]
     assert services["backend"]["environment"]["POSTGRES_HOST"] == "database"
+    assert services["backend"]["environment"]["POSTGRES_MIGRATION_HOST"] == "postgres"
     assert services["backend"]["ports"] == ["127.0.0.1:8000:8000"]
     assert services["postgres"]["volumes"] == ["postgres_data:/var/lib/postgresql/data"]
     for service in ("postgres", "pgbouncer", "backend"):
         env = services[service]["environment"]
-        assert env["POSTGRES_PASSWORD"] == "${WAYLANE_POSTGRES_PASSWORD:?}"
-        assert env["POSTGRES_USER"] == "${WAYLANE_POSTGRES_USERNAME:-waylane}"
-        assert env["POSTGRES_DB"] == "${WAYLANE_POSTGRES_DATABASE:-waylane}"
+        assert env["POSTGRES_PASSWORD"] == "${POSTGRES_PASSWORD:?}"
+        assert env["POSTGRES_USER"] == "${POSTGRES_USERNAME:-waylane}"
+        assert env["POSTGRES_DB"] == "${POSTGRES_DATABASE:-waylane}"
     adapter = read("deploy/backend-postgres/docker-compose.coolify.yaml")
     assert set(adapter["services"]) == set(services)
     for service in services:

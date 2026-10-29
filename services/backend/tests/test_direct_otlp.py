@@ -47,30 +47,46 @@ async def test_browser_diagnostics_per_admin_rate_limit():
     browser_telemetry._events.clear()
 
 
-def test_otlp_requires_pair_and_https(monkeypatch):
+def test_otlp_endpoint_is_optional_and_bearer_is_independent(monkeypatch):
     monkeypatch.delenv("OTLP_ENDPOINT", raising=False)
-    monkeypatch.delenv("OTLP_BEARER_TOKEN", raising=False)
+    monkeypatch.setenv("OTLP_BEARER_TOKEN", "unused-without-endpoint")
     assert runtime.configure_direct_otlp() is None
-    monkeypatch.setenv("OTLP_ENDPOINT", "https://example.invalid")
-    with pytest.raises(RuntimeError):
-        runtime.configure_direct_otlp()
-    monkeypatch.setenv("OTLP_BEARER_TOKEN", "test-synthetic-token")
-    monkeypatch.setenv("OTLP_ENDPOINT", "http://192.0.2.10:4318")
-    with pytest.raises(RuntimeError):
-        runtime.configure_direct_otlp()
-    monkeypatch.setenv("OTLP_ENDPOINT", "https://user:pass@example.invalid")
-    with pytest.raises(RuntimeError):
-        runtime.configure_direct_otlp()
-    assert runtime._telemetry is None
 
-
-def test_private_collector_allows_no_token_but_public_http_is_denied(monkeypatch):
+    runtime._validate_exporter_destination("https://example.invalid", "")
+    runtime._validate_exporter_destination("https://example.invalid", "optional-token")
     runtime._validate_exporter_destination("http://otel-collector:4318", "")
+    runtime._validate_exporter_destination("http://otel-collector:4318", "optional-token")
+    runtime._validate_exporter_destination("http://10.0.0.25:4318", "")
     with pytest.raises(RuntimeError):
         runtime._validate_exporter_destination("http://example.invalid:4318", "")
     with pytest.raises(RuntimeError):
+        runtime._validate_exporter_destination("http://192.0.2.10:4318", "token")
+    with pytest.raises(RuntimeError):
+        runtime._validate_exporter_destination("https://user:pass@example.invalid", "")
+    with pytest.raises(RuntimeError):
         runtime._validate_exporter_destination("http://otel-collector:4318/?query=1", "")
+    assert runtime._telemetry is None
 
+
+def test_otlp_uses_no_auth_header_when_endpoint_is_set_but_token_is_empty(monkeypatch):
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    class ExporterCaptured(Exception):
+        pass
+
+    seen = {}
+
+    def capture(self, *args, **kwargs):
+        seen.update(kwargs)
+        raise ExporterCaptured
+
+    monkeypatch.setenv("OTLP_ENDPOINT", "https://telemetry.example.invalid")
+    monkeypatch.setenv("OTLP_BEARER_TOKEN", "")
+    monkeypatch.setattr(OTLPSpanExporter, "__init__", capture)
+    with pytest.raises(ExporterCaptured):
+        runtime.configure_direct_otlp()
+    assert seen["headers"] == {}
+    assert seen["endpoint"] == "https://telemetry.example.invalid/v1/traces"
 
 
 def test_direct_otlp_logs_traces_are_sanitized(monkeypatch):

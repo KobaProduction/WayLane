@@ -1,0 +1,42 @@
+# Existing Coolify application can use this entrypoint without a new resource.
+# The external network and DATABASE/MIGRATION URLs are operator inputs.
+x-watch-path-coolify:
+  - "deploy/external/**"
+  - "services/backend/**"
+  - "services/frontend/**"
+
+services:
+  backend:
+    extends:
+      file: ./docker-compose.yaml
+      service: backend
+    environment:
+      EXTERNAL_NETWORK_NAME: ${EXTERNAL_NETWORK_NAME:?}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: ${POSTGRES_HOST:-database}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_MIGRATION_HOST: ${POSTGRES_MIGRATION_HOST:-postgres}
+      POSTGRES_MIGRATION_PORT: ${POSTGRES_MIGRATION_PORT:-5432}
+      POSTGRES_URL: ${POSTGRES_URL:-}
+      POSTGRES_MIGRATION_URL: ${POSTGRES_MIGRATION_URL:-}
+      OTLP_ENDPOINT: ${OTEL_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTEL_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${DEPLOYMENT_ENVIRONMENT:-development}
+  frontend:
+    extends:
+      file: ./docker-compose.yaml
+      service: frontend
+    environment:
+      SERVICE_URL_FRONTEND_8080: /
+
+volumes:
+  waylane-data: {}
+networks:
+  dependencies:
+    external: true
+    name: ${EXTERNAL_NETWORK_NAME:?}
+  egress:
+    driver: bridge

@@ -5,6 +5,7 @@ of each selected log uses only event metadata; arbitrary exception messages,
 URLs, payloads and stack traces are never forwarded to SigNoz.
 """
 
+import ipaddress
 import logging
 import os
 import re
@@ -65,40 +66,37 @@ class _MetadataOnlyOTLPHandler(logging.Handler):
 
 
 def _validate_exporter_destination(endpoint: str, token: str) -> None:
-    # Only this exact internal Docker DNS endpoint is allowed without Bearer/TLS.
-    # It is reachable solely on the environment-isolated application network.
+    """Accept configured HTTPS or internal OTLP/HTTP, with optional Bearer."""
     parsed = urlparse(endpoint)
-    private_collector = (
-        parsed.scheme == "http"
-        and parsed.hostname == "otel-collector"
-        and parsed.port == 4318
-        and parsed.path in ("", "/")
-        and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
-    )
-    if not endpoint or (not token and not private_collector):
-        raise RuntimeError("OTLP_ENDPOINT and OTLP_BEARER_TOKEN must be configured together outside the private collector")
-    if not private_collector and (parsed.scheme != "https" or not parsed.hostname or parsed.username
-            or parsed.password or parsed.query or parsed.fragment):
-        # Explicitly localhost-only endpoint for synthetic integration
-        # tests (no production downgrade to HTTP).
-        if not (
-            os.getenv("WAYLANE_OTLP_LOCAL_TEST") == "1"
-            and parsed.scheme == "http"
-            and parsed.hostname in ("127.0.0.1", "localhost")
-            and not parsed.username and not parsed.password
-            and not parsed.query and not parsed.fragment
-        ):
-            raise RuntimeError("OTLP endpoint must be a credential-free HTTPS origin")
-    if "/v1/" in parsed.path:
-        raise RuntimeError("OTLP_ENDPOINT must be a base URL, not a signal-specific path")
+    host = parsed.hostname
+    if not host or parsed.scheme not in {"http", "https"} or parsed.username or parsed.password:
+        raise RuntimeError("OTLP endpoint must be a credential-free HTTP(S) URL")
+    if parsed.query or parsed.fragment or "/v1/" in parsed.path:
+        raise RuntimeError("OTLP endpoint must be a base URL without query or signal path")
 
+    if parsed.scheme == "http":
+        # HTTP is intended only for a private Docker/cluster collector.
+        # Never disclose an optional Bearer token to an arbitrary public host.
+        private_host = "." not in host or host.endswith((".internal", ".local"))
+        if not private_host:
+            try:
+                ip = ipaddress.ip_address(host)
+                private_host = any(ip in ipaddress.ip_network(cidr) for cidr in (
+                    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                ))
+            except ValueError:
+                private_host = False
+        if os.getenv("WAYLANE_OTLP_LOCAL_TEST") == "1" and host in {"127.0.0.1", "localhost"}:
+            private_host = True
+        if not private_host:
+            raise RuntimeError("Plain HTTP OTLP is permitted only on private networks; use HTTPS")
 
 
 def configure_direct_otlp():
     """Install SDK exporters once in this process.
 
-    A fixed private collector endpoint supports unauthenticated HTTP within
-    the environment network; all other endpoints require HTTPS and Bearer.
+    An empty endpoint disables export. A configured HTTPS or internal HTTP
+    endpoint works with or without Bearer; a token only adds Authorization.
     The browser never receives the token.
     """
     global _telemetry
@@ -107,7 +105,7 @@ def configure_direct_otlp():
             return _telemetry
         endpoint = os.getenv("OTLP_ENDPOINT", "").strip()
         token = os.getenv("OTLP_BEARER_TOKEN", "").strip()
-        if not endpoint and not token:
+        if not endpoint:
             return None
         _validate_exporter_destination(endpoint, token)
 

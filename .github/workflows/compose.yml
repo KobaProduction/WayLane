@@ -7,6 +7,7 @@ on:
       - docker-compose.coolify.yaml
       - "deploy/compose/**"
       - "deploy/backend-postgres/**"
+      - "deploy/external/**"
       - "services/frontend/deploy/nginx.bundled.conf"
       - "services/backend/docker-compose*.yaml"
       - "services/backend/compose_db_entrypoint.py"
@@ -19,6 +20,7 @@ on:
       - docker-compose.coolify.yaml
       - "deploy/compose/**"
       - "deploy/backend-postgres/**"
+      - "deploy/external/**"
       - "services/frontend/deploy/nginx.bundled.conf"
       - "services/backend/docker-compose*.yaml"
       - "services/backend/compose_db_entrypoint.py"
@@ -33,9 +35,10 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     env:
-      WAYLANE_POSTGRES_USERNAME: ci_waylane
-      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
-      WAYLANE_POSTGRES_DATABASE: waylane_test
+      POSTGRES_USERNAME: ci_waylane
+      POSTGRES_PASSWORD: synthetic-compose-ci-only
+      POSTGRES_DATABASE: waylane_test
+      EXTERNAL_NETWORK_NAME: ci-external-network
       DEPLOYMENT_ENVIRONMENT: development
       SQLALCHEMY_DATABASE_URL: postgresql+asyncpg://ci_waylane:synthetic-compose-ci-only@db.invalid:5432/waylane_test
       API_KEY: 9c509f4c-d643-4f16-83e7-b1615a9ee2da
@@ -49,6 +52,10 @@ jobs:
           docker compose -f docker-compose.coolify.yaml config --quiet
           docker compose -f deploy/backend-postgres/docker-compose.yaml config --quiet
           docker compose -f deploy/backend-postgres/docker-compose.coolify.yaml config --quiet
+          docker compose -f deploy/external/docker-compose.yaml config --quiet
+          docker compose -f deploy/external/docker-compose.coolify.yaml config --quiet
+          docker compose -f deploy/external/docker-compose.coolify.yaml config --format json | \
+            python3 -c 'import json,sys; c=json.load(sys.stdin); assert set(c["services"]) == {"backend","frontend"}; assert c["networks"]["dependencies"]["external"]'
           docker compose -f services/node/docker-compose.yaml config --quiet
           docker compose -f services/node/docker-compose.coolify.yaml config --quiet
           docker compose -f services/node/docker-compose.amnezia.coolify.yaml config --quiet
@@ -63,11 +70,11 @@ jobs:
       - name: Verify required DB variable enforcement
         run: |
           set -euo pipefail
-          if env -u WAYLANE_POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then
+          if env -u POSTGRES_PASSWORD docker compose -f docker-compose.yaml config --quiet >/dev/null 2>&1; then
             echo "Missing WayLane PostgreSQL password was accepted" >&2
             exit 1
           fi
-          env -u WAYLANE_POSTGRES_USERNAME -u WAYLANE_POSTGRES_DATABASE \
+          env -u POSTGRES_USERNAME -u POSTGRES_DATABASE \
             docker compose -f docker-compose.coolify.yaml config --format json | \
             python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all(s[x]["environment"]["POSTGRES_USER"]=="waylane" and s[x]["environment"]["POSTGRES_DB"]=="waylane" for x in ("postgres","backend"))'
           docker compose -f docker-compose.yaml config --format json | \
@@ -94,9 +101,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      WAYLANE_POSTGRES_USERNAME: waylane_ci
-      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
-      WAYLANE_POSTGRES_DATABASE: waylane_ci
+      POSTGRES_USERNAME: waylane_ci
+      POSTGRES_PASSWORD: synthetic-compose-ci-only
+      POSTGRES_DATABASE: waylane_ci
     steps:
       - uses: actions/checkout@v4
       - name: Build and start bundled management stack
@@ -129,9 +136,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      WAYLANE_POSTGRES_USERNAME: ci_pooler
-      WAYLANE_POSTGRES_PASSWORD: synthetic-compose-ci-only
-      WAYLANE_POSTGRES_DATABASE: ci_pooler
+      POSTGRES_USERNAME: ci_pooler
+      POSTGRES_PASSWORD: synthetic-compose-ci-only
+      POSTGRES_DATABASE: ci_pooler
     steps:
       - uses: actions/checkout@v4
       - name: Build and run isolated backend plus PostgreSQL and PgBouncer
@@ -166,3 +173,72 @@ jobs:
       - name: Remove disposable pooler stack
         if: always()
         run: docker compose -f deploy/backend-postgres/docker-compose.yaml down -v --remove-orphans
+
+  external-smoke:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      POSTGRES_USERNAME: ci_external
+      POSTGRES_PASSWORD: synthetic-compose-ci-only
+      POSTGRES_DATABASE: waylane_external
+      EXTERNAL_NETWORK_NAME: ci-external-network
+      OTEL_ENDPOINT: ""
+      OTEL_BEARER_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shared PostgreSQL and PgBouncer without a panel
+        run: |
+          set -euo pipefail
+          docker network create "$EXTERNAL_NETWORK_NAME"
+          docker compose -p waylane-db-ci -f docker-compose.yaml up -d --wait postgres pgbouncer
+          docker network connect --alias postgres "$EXTERNAL_NETWORK_NAME" waylane-db-ci-postgres-1
+          docker network connect --alias database "$EXTERNAL_NETWORK_NAME" waylane-db-ci-pgbouncer-1
+      - name: Build and boot standalone backend and frontend
+        run: |
+          set -euo pipefail
+          docker compose -p waylane-external-ci -f deploy/external/docker-compose.yaml up -d --build --wait --wait-timeout 240
+      - name: Verify both database endpoints and same-origin API
+        run: |
+          set -euo pipefail
+          docker compose -p waylane-external-ci -f deploy/external/docker-compose.yaml exec -T backend python - <<'PYSQL'
+          import asyncio
+          import os
+
+          import asyncpg
+          from sqlalchemy.engine import make_url
+          from compose_db_entrypoint import configure_database_url_from_components
+
+          configure_database_url_from_components()
+          normal = make_url(os.environ["SQLALCHEMY_DATABASE_URL"])
+          direct = make_url(os.environ["SQLALCHEMY_MIGRATION_DATABASE_URL"])
+          assert normal.host == "database"
+          assert direct.host == "postgres"
+          assert normal.database == direct.database == "waylane_external"
+
+          async def check(url):
+              conn = await asyncpg.connect(
+                  host=url.host, port=url.port or 5432,
+                  user=url.username, password=url.password, database=url.database,
+              )
+              try:
+                  assert await conn.fetchval("SELECT 1") == 1
+              finally:
+                  await conn.close()
+
+          asyncio.run(check(normal))
+          asyncio.run(check(direct))
+          PYSQL
+          docker compose -p waylane-external-ci -f deploy/external/docker-compose.yaml exec -T frontend             wget -q -O - http://127.0.0.1:8080/health | grep -q ok
+          docker compose -p waylane-external-ci -f deploy/external/docker-compose.yaml exec -T backend             curl -fsS http://waylane-api:8000/health
+      - name: Diagnostics (only on failure)
+        if: failure()
+        run: |
+          docker compose -p waylane-external-ci -f deploy/external/docker-compose.yaml ps || true
+          docker compose -p waylane-db-ci -f docker-compose.yaml ps || true
+      - name: Remove synthetic stacks and shared test network
+        if: always()
+        run: |
+          docker compose -p waylane-external-ci -f deploy/external/docker-compose.yaml down -v --remove-orphans || true
+          docker compose -p waylane-db-ci -f docker-compose.yaml down -v --remove-orphans || true
+          docker network rm ci-external-network || true

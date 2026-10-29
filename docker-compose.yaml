@@ -7,9 +7,9 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
-      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
-      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-waylane}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks: [database]
@@ -27,9 +27,9 @@ services:
     restart: unless-stopped
     user: "10001:10001"
     environment:
-      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
-      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
-      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-waylane}
     networks:
       database:
         aliases: [database]
@@ -50,18 +50,19 @@ services:
     restart: unless-stopped
     entrypoint: ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
     environment:
-      POSTGRES_USER: ${WAYLANE_POSTGRES_USERNAME:-waylane}
-      POSTGRES_PASSWORD: ${WAYLANE_POSTGRES_PASSWORD:?}
-      POSTGRES_DB: ${WAYLANE_POSTGRES_DATABASE:-waylane}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-waylane}
       POSTGRES_HOST: database
+      POSTGRES_MIGRATION_HOST: postgres
       ROLE: all-in-one
       UVICORN_HOST: waylane-api
       UVICORN_PORT: "8000"
       UVICORN_WORKERS: "1"
-      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
-      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
-      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
-      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
+      OTLP_ENDPOINT: ${OTEL_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTEL_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${DEPLOYMENT_ENVIRONMENT:-development}
     volumes:
       - backend_data:/var/lib/pasarguard
     depends_on:

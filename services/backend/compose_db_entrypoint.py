@@ -5,6 +5,7 @@ Deployment adapters may supply POSTGRES_* credentials and opt into owner-created
 database initialization. Standalone deployments continue to use their own
 SQLALCHEMY_DATABASE_URL without enabling this optional feature.
 """
+
 import asyncio
 import os
 import re
@@ -15,23 +16,62 @@ from sqlalchemy.engine import URL
 
 
 def resolved_database_name() -> str:
-    """Use the optional deployment DB name, falling back to WayLane's default."""
-    return os.getenv("WAYLANE_POSTGRES_DATABASE") or os.getenv("POSTGRES_DB") or "waylane"
+    """Resolve the schema-owning database independently of its connection path."""
+    return (
+        os.getenv("POSTGRES_DATABASE")
+        or os.getenv("WAYLANE_POSTGRES_DATABASE")
+        or os.getenv("POSTGRES_DB")
+        or "waylane"
+    )
 
 
 def configure_database_url_from_components() -> None:
-    """Recreate the API database URL for one-shot managed CLI commands."""
-    username = os.getenv("POSTGRES_USER", "")
+    """Configure separate runtime and migration DSNs without exposing credentials.
+
+    The managed/full stack uses existing POSTGRES_USER/POSTGRES_PASSWORD names.
+    The external two-service stack uses resource-scoped POSTGRES_USERNAME and
+    POSTGRES_PASSWORD, with optional explicit POSTGRES_URL overrides.
+    """
+    runtime_override = os.getenv("POSTGRES_URL")
+    migration_override = os.getenv("POSTGRES_MIGRATION_URL") or os.getenv("SQLALCHEMY_MIGRATION_DATABASE_URL")
+
+    username = os.getenv("POSTGRES_USERNAME") or os.getenv("POSTGRES_USER", "")
     password = os.getenv("POSTGRES_PASSWORD", "")
     database = resolved_database_name()
-    if not username or not password:
-        raise SystemExit("POSTGRES_USER and POSTGRES_PASSWORD must be nonempty")
-    url = URL.create(
-        "postgresql+asyncpg",
-        username=username, password=password, host=os.getenv("POSTGRES_HOST", "postgres"),
-        port=5432, database=database,
-    )
-    os.environ["SQLALCHEMY_DATABASE_URL"] = url.render_as_string(hide_password=False)
+
+    if not username and not runtime_override:
+        runtime_override = os.getenv("SQLALCHEMY_DATABASE_URL")
+
+    if not runtime_override:
+        if not username or not password:
+            raise SystemExit("PostgreSQL credentials or POSTGRES_URL must be configured")
+        runtime_url = URL.create(
+            "postgresql+asyncpg",
+            username=username,
+            password=password,
+            host=os.getenv("POSTGRES_HOST", "database"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            database=database,
+        ).render_as_string(hide_password=False)
+    else:
+        runtime_url = runtime_override
+
+    if migration_override:
+        migration_url = migration_override
+    elif username and password:
+        migration_url = URL.create(
+            "postgresql+asyncpg",
+            username=username,
+            password=password,
+            host=os.getenv("POSTGRES_MIGRATION_HOST", os.getenv("POSTGRES_HOST", "database")),
+            port=int(os.getenv("POSTGRES_MIGRATION_PORT", os.getenv("POSTGRES_PORT", "5432"))),
+            database=database,
+        ).render_as_string(hide_password=False)
+    else:
+        migration_url = runtime_url
+
+    os.environ["SQLALCHEMY_DATABASE_URL"] = runtime_url
+    os.environ["SQLALCHEMY_MIGRATION_DATABASE_URL"] = migration_url
 
 
 async def ensure_database_exists() -> None:

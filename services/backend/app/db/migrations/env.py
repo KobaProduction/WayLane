@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 from sqlalchemy import JSON
 from sqlalchemy import BigInteger
@@ -17,7 +18,14 @@ from config import database_settings
 # access to the values within the .ini file in use.
 config = context.config
 if not config.get_main_option("sqlalchemy.url"):
-    config.set_main_option("sqlalchemy.url", database_settings.url)
+    # Alembic/DDL must use the direct PostgreSQL DSN, never the pooled
+    # connection when the operator configured a separate migration endpoint.
+    migration_url = (
+        os.getenv("POSTGRES_MIGRATION_URL")
+        or os.getenv("SQLALCHEMY_MIGRATION_DATABASE_URL")
+        or database_settings.url
+    )
+    config.set_main_option("sqlalchemy.url", migration_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

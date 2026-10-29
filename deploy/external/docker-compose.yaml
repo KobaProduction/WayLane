@@ -1,0 +1,71 @@
+# External WayLane runtime: only API and UI. No local PostgreSQL or PgBouncer.
+# Reuse an existing isolated network and its existing database:5432 alias.
+services:
+  backend:
+    build:
+      context: ../../services/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    entrypoint: ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
+    environment:
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: ${POSTGRES_HOST:-database}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_MIGRATION_HOST: ${POSTGRES_MIGRATION_HOST:-postgres}
+      POSTGRES_MIGRATION_PORT: ${POSTGRES_MIGRATION_PORT:-5432}
+      POSTGRES_URL: ${POSTGRES_URL:-}
+      POSTGRES_MIGRATION_URL: ${POSTGRES_MIGRATION_URL:-}
+      POSTGRES_AUTO_CREATE_DB: "false"
+      ROLE: all-in-one
+      UVICORN_HOST: waylane-api
+      UVICORN_PORT: "8000"
+      UVICORN_WORKERS: "1"
+      OTLP_ENDPOINT: ${OTEL_ENDPOINT:-}
+      OTLP_BEARER_TOKEN: ${OTEL_BEARER_TOKEN:-}
+      OTEL_SERVICE_NAMESPACE: ${OTEL_NAMESPACE:-waylane}
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${DEPLOYMENT_ENVIRONMENT:-development}
+    volumes:
+      # Keep the existing WayLane volume key for in-place Coolify migration.
+      - waylane-data:/var/lib/pasarguard
+    networks:
+      dependencies:
+        aliases: [waylane-api]
+      egress: {}
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://waylane-api:8000/health >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ../../services/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_API: /
+        NGINX_CONFIG: deploy/nginx.bundled.conf
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [dependencies, egress]
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  waylane-data: {}
+networks:
+  dependencies:
+    external: true
+    name: ${EXTERNAL_NETWORK_NAME:?}
+  egress:
+    driver: bridge

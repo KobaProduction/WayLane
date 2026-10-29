@@ -28,8 +28,8 @@ ancestries; their historical paths are unchanged. Historical commits remain avai
 former standalone repositories were retired. Do not restore their links
 in current runtime or release consumers.
 Read docs/deployment/README.md for gates and topology.
-For independent GitHub-triggered Coolify DEV deployments, use the
-[direct-source setup and migration gates](deploy/compose/README.md#direct-github--coolify-dev-deployment-independent-from-intens).
+For all-in-one and external-dependency Compose variants, use the
+[deployment contracts](deploy/compose/README.md).
 
 ## Licensing and WayLane identities
 
