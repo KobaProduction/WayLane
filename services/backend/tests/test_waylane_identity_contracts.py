@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 from google.protobuf import descriptor_pb2
-from grpc_tools import _proto
+import grpc_tools
 from grpc_tools import protoc
 
 from app.db.crud.api_key import API_KEY_PREFIX, _generate_api_key
@@ -46,7 +46,7 @@ def test_control_protobuf_is_one_binary_websocket_envelope(tmp_path):
     result = protoc.main([
         "grpc_tools.protoc",
         f"-I{proto.parent}",
-        f"-I{Path(_proto.__file__).parent}",
+        f"-I{Path(grpc_tools.__file__).parent / "_proto"}",
         f"--descriptor_set_out={output}",
         proto.name,
     ])
