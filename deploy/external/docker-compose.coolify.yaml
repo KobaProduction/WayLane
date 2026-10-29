@@ -1,5 +1,6 @@
 # Existing Coolify application can use this entrypoint without a new resource.
-# The external network and DATABASE/MIGRATION URLs are operator inputs.
+# The external Docker network and PostgreSQL host/port settings are operator inputs.
+# Watch paths below are documentation: configure the same paths in Coolify.
 x-watch-path-coolify:
   - "deploy/external/**"
   - "services/backend/**"
