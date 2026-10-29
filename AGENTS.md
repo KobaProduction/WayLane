@@ -15,7 +15,7 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
 - services/node/: legacy Go node implementation and autonomous WayLane Node
-  bootstrap/agent **source**, not new Node deployment entrypoints. The legacy
+  bootstrap script/agent **source**, not new Node deployment entrypoints. The legacy
   node remains host-network/NET_ADMIN dependent; do not ascribe those
   privileges or its single-core lifecycle to the autonomous Node.
 - deploy/node/{classic,discovery}/: separate Git-backed deployment owners,

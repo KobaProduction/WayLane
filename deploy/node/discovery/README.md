@@ -20,8 +20,7 @@ Watch Paths (persist each line in Coolify):
 
 ```text
 deploy/node/discovery/**
-services/node/bootstrap/**
-services/node/agent/**
+services/node/**
 ```
 
 `docker-compose.yaml` is the standalone runnable entrypoint;

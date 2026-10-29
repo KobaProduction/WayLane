@@ -54,7 +54,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./services/node/bootstrap/Dockerfile
+          file: ./services/node/bootstrap.Dockerfile
           push: false
           platforms: linux/amd64
           tags: waylane-bootstrap:ci

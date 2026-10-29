@@ -1,7 +1,8 @@
 # WayLane Node — Git-backed deployment sources
 
-**Deployment definitions live here; runtime source stays in
-`services/node/bootstrap/` and `services/node/agent/`.**
+**Deployment definitions live here; runtime source remains in
+`services/node/`: a small `bootstrap.sh`, `bootstrap.Dockerfile` and
+its internal `agent/`.**
 
 A Node is one installation comprising exactly two outer Compose services:
 a privileged **one-shot bootstrap** followed by one non-root **agent**
@@ -28,7 +29,7 @@ service is created.
 - GitHub repository: `KobaProduction/WayLane`; release/DEV branch chosen
   by the operator, normally `main` after approved merge.
 - Build context: **monorepo root**; Dockerfiles are
-  `services/node/bootstrap/Dockerfile` and
+  `services/node/bootstrap.Dockerfile` and
   `services/node/agent/Dockerfile`. Coolify builds directly from Git.
   No Docker registry publication, prerelease tag or external standalone
   Node repository is needed for the first pilot.
@@ -52,16 +53,14 @@ Discovery resource:
 
 ```text
 deploy/node/discovery/**
-services/node/bootstrap/**
-services/node/agent/**
+services/node/**
 ```
 
 Classic resource:
 
 ```text
 deploy/node/classic/**
-services/node/bootstrap/**
-services/node/agent/**
+services/node/**
 ```
 
 These are **repository-relative**, newline-separated patterns. A webhook

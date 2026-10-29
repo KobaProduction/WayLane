@@ -11,7 +11,8 @@ Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
   NET_ADMIN requirements; `DEPLOYMENT.md` owns this runtime's acceptance.
   Kernel WireGuard remains the default; AmneziaWG 3.1 is opt-in and requires
   separate real-traffic verification (Issue #7).
-- New `bootstrap/` and `agent/`: autonomous WayLane Node **source only**.
+- New `bootstrap.sh` plus minimal `bootstrap.Dockerfile` and `agent/`:
+  autonomous WayLane Node **source only**.
   Git-backed deployment definitions belong to
   `deploy/node/{classic,discovery}/` (one generic `docker-compose.yaml`,
   one `docker-compose.coolify.yaml` and a README per mode). Read

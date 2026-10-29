@@ -19,8 +19,7 @@ Watch Paths (persist each line in Coolify):
 
 ```text
 deploy/node/classic/**
-services/node/bootstrap/**
-services/node/agent/**
+services/node/**
 ```
 
 `docker-compose.yaml` runs the standalone bootstrap + agent stack;

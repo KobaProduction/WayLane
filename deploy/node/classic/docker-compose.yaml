@@ -6,7 +6,7 @@ services:
   bootstrap:
     build:
       context: ../../..
-      dockerfile: services/node/bootstrap/Dockerfile
+      dockerfile: services/node/bootstrap.Dockerfile
     user: "0:0"
     privileged: true
     restart: "no"

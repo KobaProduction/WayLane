@@ -7,7 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 MODES = ("classic", "discovery")
-WATCHED_NODE_SOURCE = ("services/node/agent/**", "services/node/bootstrap/**")
+WATCHED_NODE_SOURCE = ("services/node/**",)
 
 
 def _read(path: str) -> dict:
@@ -32,10 +32,29 @@ def test_node_deployments_are_outside_service_source_and_have_single_entrypoints
             "README.md",
         }
         text = (deployment / "README.md").read_text()
+        # Watch exactly this deployment mode and all Node source files.
+        fences = chr(96) * 3
+        watch_block = text.split("Watch Paths (persist each line in Coolify):", 1)[1]
+        watch_block = watch_block.split(fences + "text", 1)[1].split(fences, 1)[0].strip()
+        assert watch_block.splitlines() == [
+            f"deploy/node/{mode}/**",
+            "services/node/**",
+        ]
         for path in (f"deploy/node/{mode}/**", *WATCHED_NODE_SOURCE):
             assert path in text
         assert "Base Directory" in text and f"/deploy/node/{mode}" in text
         assert "/docker-compose.coolify.yaml" in text
+
+
+def test_bootstrap_is_a_single_root_script_with_no_separate_source_folder():
+    node = ROOT / "services/node"
+    assert not (node / "bootstrap").exists()
+    assert (node / "bootstrap.sh").is_file()
+    assert (node / "bootstrap.Dockerfile").is_file()
+    assert "sh -n bootstrap.sh" in (node / "scripts/verify.sh").read_text()
+    dockerfile = (node / "bootstrap.Dockerfile").read_text()
+    assert "COPY services/node/bootstrap.sh" in dockerfile
+    assert "ENTRYPOINT" in dockerfile
 
 
 def test_classic_and_discovery_share_identical_node_runtime_and_security():
@@ -60,7 +79,7 @@ def test_classic_and_discovery_share_identical_node_runtime_and_security():
         )
         assert not any("/var/run/docker.sock" in str(v) for v in agent["volumes"])
         for unit, dockerfile in (("agent", "services/node/agent/Dockerfile"), (
-            "bootstrap", "services/node/bootstrap/Dockerfile",
+            "bootstrap", "services/node/bootstrap.Dockerfile",
         )):
             build = source["services"][unit]["build"]
             assert build["dockerfile"] == dockerfile
