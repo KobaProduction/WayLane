@@ -35,11 +35,14 @@ unprivileged `agent` controller, private rootless Docker and independent VPN
 cores. Classic and Discovery are **registration methods**, not separate
 Agent products.
 
-- `docker-compose.node.classic.yaml` or `docker-compose.node.classic.coolify.yaml`
-- `docker-compose.node.discovery.yaml` or `docker-compose.node.discovery.coolify.yaml`
+Deployment entrypoints are owned by the root
+[deploy/node/](../../deploy/node/README.md) tree:
 
-The base runtime is `docker-compose.node.yaml`. See
-[Node runtime, enrollment and core ownership](agent/README.md).
+- [Classic](../../deploy/node/classic/README.md)
+- [Discovery](../../deploy/node/discovery/README.md) — preferred first isolated DEV pilot
+
+Do not add new Node Compose entrypoints to `services/node/`.
+See [Node runtime, enrollment and core ownership](agent/README.md).
 The autonomous Node control plane uses one persistent binary WebSocket
 with Protobuf frames. (Legacy PasarGuard node RPC is a separate runtime.) Public traffic remains unaccepted. Legacy PasarGuard
 nodes are a separate deployment, not an alternate Node-control protocol.

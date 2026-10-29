@@ -1,11 +1,11 @@
+# WayLane Node Classic — standalone Docker Compose entrypoint.
 # WayLane Node: bootstrap + internal controller agent, with private VPN cores.
 # Bootstrap prepares private volumes; Go Agent supervises embedded rootless Docker.
 # This profile grants nested namespace exceptions; production security and VPN traffic are NOT accepted.
-name: waylane-node
 services:
   bootstrap:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: services/node/bootstrap/Dockerfile
     user: "0:0"
     privileged: true
@@ -18,7 +18,7 @@ services:
       - rootless-run:/bootstrap/docker-run
   agent:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: services/node/agent/Dockerfile
     depends_on:
       bootstrap:
@@ -39,10 +39,10 @@ services:
       XDG_RUNTIME_DIR: /run/user/1000
       DOCKER_TLS_CERTDIR: ""
       CONTROL_PANEL_URL: ${CONTROL_PANEL_URL:?}
-      # Choose ONE of Discovery or direct Agent token; leave both empty only
-      # after a registered identity is safely persisted in agent-state.
-      DISCOVERY_TOKEN: ${DISCOVERY_TOKEN:-}
-      NODE_TOKEN: ${NODE_TOKEN:-}
+      # Registration credential is mode-scoped; protect it in the runtime.
+      # Keep agent-state persistent to retain identity between restarts.
+      DISCOVERY_TOKEN: ""
+      NODE_TOKEN: ${NODE_TOKEN:?}
       DEV_ALLOW_HTTP: ${DEV_ALLOW_HTTP:-false}
       # One authenticated WebSocket, binary Protobuf frames only.
       NODE_STATE_DIR: /var/lib/waylane-agent

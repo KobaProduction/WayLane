@@ -14,9 +14,13 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: separately deployed legacy Go VPN node plus an autonomous WayLane Node deployment.
-  The legacy node remains host-network/NET_ADMIN dependent; do not ascribe those
-  privileges or its single-core lifecycle to WayLane Node Agent.
+- services/node/: legacy Go node implementation and autonomous WayLane Node
+  bootstrap/agent **source**, not new Node deployment entrypoints. The legacy
+  node remains host-network/NET_ADMIN dependent; do not ascribe those
+  privileges or its single-core lifecycle to the autonomous Node.
+- deploy/node/{classic,discovery}/: separate Git-backed deployment owners,
+  each with `docker-compose.yaml`, `docker-compose.coolify.yaml` and README.
+  See `deploy/node/README.md` for Watch Paths, secrets and test boundaries.
 - services/external/: approved contracts for separate PostgreSQL,
   API load balancer/ingress, external SigNoz OTLP endpoints.
 - shared/contracts/: narrowly scoped protocol DTOs, no ORM imports.

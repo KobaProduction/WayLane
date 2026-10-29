@@ -362,7 +362,7 @@ export default function NodeDiscoveryPanel() {
             <div className="space-y-2">
               <p className="text-muted-foreground text-xs">
                 Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN. После подключения нода автоматически передаст hostname сервера — отдельное поле имени не требуется.
-                Используйте docker-compose.node.classic.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
+                В Coolify используйте /deploy/node/classic и /docker-compose.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
               </p>
               {canCreate && (
                 <Button type="button" disabled={loading} onClick={() => void createDirect()}>
@@ -388,7 +388,7 @@ export default function NodeDiscoveryPanel() {
           ) : (
             <div className="space-y-2">
               <p className="text-muted-foreground text-xs">
-                Нода сама регистрируется по Discovery-токену. Используйте docker-compose.node.discovery.coolify.yaml.
+                Нода сама регистрируется по Discovery-токену. В Coolify используйте /deploy/node/discovery и /docker-compose.coolify.yaml.
                 Новые ноды можно подтверждать автоматически или вручную.
               </p>
               {canCreate && (

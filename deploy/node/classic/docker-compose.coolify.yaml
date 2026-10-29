@@ -1,19 +1,22 @@
-# WayLane Node — classic registration. One installation = bootstrap + agent + private cores.
-# Runtime services retain internal process names; the product entity is a Node.
+# WayLane Node Classic — Coolify Git-backed adapter.
+# Save Watch Paths in Coolify; YAML does not configure Coolify webhook filters.
 services:
   bootstrap:
     extends:
-      file: ./docker-compose.node.yaml
+      file: ./docker-compose.yaml
       service: bootstrap
+    exclude_from_hc: true
   agent:
     extends:
-      file: ./docker-compose.node.yaml
+      file: ./docker-compose.yaml
       service: agent
     environment:
       CONTROL_PANEL_URL: ${CONTROL_PANEL_URL:?}
       NODE_TOKEN: ${NODE_TOKEN:?}
       DISCOVERY_TOKEN: ""
       DEV_ALLOW_HTTP: "false"
+
+# A Coolify resource owns its own volumes/Compose project identity.
 volumes:
   agent-state: {}
   rootless-data: {}

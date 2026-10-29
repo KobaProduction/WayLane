@@ -16,13 +16,15 @@ Panel-to-Docker control is permitted.
 
 ## Two exclusive node registration profiles
 
-The source of truth is **one** `services/node/docker-compose.node.yaml`
-(base runtime) with two fully separate installation entrypoints:
+The canonical **deployment definitions** are at
+[deploy/node/](../../../deploy/node/README.md); this source directory
+contains only the internal Node runtime implementation. Each registration
+mode owns one complete generic Compose, one Coolify adapter and a README:
 
-| Registration | Generic Compose | Coolify Compose | Credential |
-| --- | --- | --- | --- |
-| Classic | `docker-compose.node.classic.yaml` | `docker-compose.node.classic.coolify.yaml` | `NODE_TOKEN` |
-| Discovery | `docker-compose.node.discovery.yaml` | `docker-compose.node.discovery.coolify.yaml` | `DISCOVERY_TOKEN` |
+| Registration | Deployment directory | Credential |
+| --- | --- | --- |
+| [Classic](../../../deploy/node/classic/README.md) | `deploy/node/classic/` | `NODE_TOKEN` |
+| [Discovery](../../../deploy/node/discovery/README.md) | `deploy/node/discovery/` | `DISCOVERY_TOKEN` |
 
 Both entrypoints have exactly the same runtime security, two services and
 `agent-state`, `rootless-data`, `rootless-run` private volumes.
@@ -87,17 +89,21 @@ binary WebSocket Upgrade route. Acceptance still requires a **real**
 trusted TLS WSS handshake through the deployed proxy; source checks alone
 do not prove the route works end-to-end.
 
-## Coolify setup (per Node)
+## Git-backed deployment
 
-- Git source: `KobaProduction/WayLane`, branch `main`, trusted GitHub App
-- Base Directory: `/services/node`
-- Compose Location: `/docker-compose.node.classic.coolify.yaml` **or**
-  `/docker-compose.node.discovery.coolify.yaml`
-- Watch Paths: `services/node/**`, persisted in Coolify (the `x-` key is
-  documentation only). Avoid automatic redeploy of unaccepted live traffic.
-- Do not assign an HTTP domain or mount `/var/run/docker.sock`. The Node
-  initiates outbound connections to the panel.
-- Keep tokens protected, runtime-only and inaccessible to image builds.
+Use the [Discovery deployment](../../../deploy/node/discovery/README.md)
+for the first isolated DEV pilot, or
+[Classic](../../../deploy/node/classic/README.md) for a Node explicitly
+precreated in the panel. Their Coolify Base Directories are
+`/deploy/node/discovery` and `/deploy/node/classic`, respectively;
+both use `/docker-compose.coolify.yaml`. Save the Watch Paths stated
+in each deployment README, not `services/node/**` indiscriminately.
+The same trusted GitHub monorepo remains the build source.
+
+No public management domain, system Docker socket, alternative transport
+or node-name variable is needed. Protected credentials belong only in
+runtime configuration. Bootstrap and agent retain separate permissions
+inside the same resource.
 
 ## Security and acceptance
 

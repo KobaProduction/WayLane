@@ -5,14 +5,14 @@
 **legacy single-process node**. Do not transfer their root/NET_ADMIN,
 host networking, certificates, or core lifecycle to WayLane Node Agent.
 
-WayLane Node Agent is an **opt-in experiment** deployed with
-`docker-compose.node.yaml`. It contains only a one-shot privileged bootstrap
-plus one autonomous, non-privileged Go agent with an embedded rootless Docker
-engine. No host systemd, no rootful host socket, no third rootless-engine service.
-The panel talks only to the agent. Future independent Xray/sing-box/WireGuard/
-AmneziaWG plugin containers are controlled only by that agent; their creation,
-updates, networking and rollback are not yet implemented. See
-`agent/README.md` for the canonical v2 contract and current acceptance gates.
+The autonomous WayLane Node is **separate** from the legacy deployment
+described below. Its Git-backed Compose definitions are now owned by
+`deploy/node/discovery/` and `deploy/node/classic/`, each with exactly
+two Compose files and a README. Each autonomous Node has a one-shot
+privileged bootstrap and one non-privileged controller with private rootless
+Docker. Single-Xray DEV control is implemented; other cores and production
+VPN client ingress are not accepted. See `deploy/node/README.md` and
+`agent/README.md`. Do not migrate this legacy stack as a side effect.
 
 ## Legacy single-process node
 
