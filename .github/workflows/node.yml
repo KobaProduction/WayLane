@@ -62,9 +62,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      PANEL_URL: https://panel.example.invalid
+      CONTROL_PANEL_URL: https://panel.example.invalid
       DISCOVERY_TOKEN: wl_disc_ci-only
-      GRPC_TARGET: localhost:8443
     steps:
       - uses: actions/checkout@v4
       - name: Enforce two-service bootstrap-agent contract
@@ -75,7 +74,7 @@ jobs:
           # Validate both canonical Node installation modes and their Coolify adapters.
           python3 - <<'PYCOMPOSE'
           from pathlib import Path
-          for mode in ("managed", "discovery"):
+          for mode in ("classic", "discovery"):
               path = Path(f"services/node/docker-compose.node.{mode}.coolify.yaml")
               source = path.read_text()
               assert source.count("    exclude_from_hc: true\n") == 1
@@ -84,8 +83,8 @@ jobs:
               )
           PYCOMPOSE
           trap 'rm -f services/node/.node.*.native-check.yaml' EXIT
-          for mode in managed discovery; do
-            if [ "$mode" = managed ]; then
+          for mode in classic discovery; do
+            if [ "$mode" = classic ]; then
               export NODE_TOKEN=wl_node_01234567-89ab-4cde-a012-3456789abcde_0123456789012345678901234567890123456789012
               export DISCOVERY_TOKEN=
             else
@@ -93,7 +92,7 @@ jobs:
               export DISCOVERY_TOKEN=wl_disc_ci-only
             fi
             docker compose -p waylane-node-ci -f "services/node/.node.$mode.native-check.yaml" config --format json |
-              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert not s["agent"].get("privileged",False); assert s["agent"]["environment"]["CONTROL_TRANSPORT"]=="grpc"; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values())'
+              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert not s["agent"].get("privileged",False); assert s["agent"]["environment"]["CONTROL_TRANSPORT"]=="grpc"; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
           done
       # Hosted Linux runners may forbid creation of nested user namespaces.
       # Probe precisely the RootlessKit operation; do not grant privileges to

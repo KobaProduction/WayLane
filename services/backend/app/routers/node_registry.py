@@ -45,20 +45,23 @@ class InvitationInput(BaseModel):
     auto_approve: bool = True
 
 
-class ManagedNodeInput(BaseModel):
-    display_name: str = Field(min_length=1, max_length=128)
+class ClassicNodeInput(BaseModel):
+    display_name: str | None = Field(default=None, max_length=128)
 
 
-@node_registry_router.post("/managed", status_code=201)
-async def create_direct_agent(body: ManagedNodeInput, db: AsyncSession = Depends(get_db),
+@node_registry_router.post("/classic", status_code=201)
+async def create_classic_node(body: ClassicNodeInput, db: AsyncSession = Depends(get_db),
                               _: AdminDetails = Depends(require_permission("nodes", "create"))):
     """Create an explicitly approved node with its own one-time agent token."""
     now = datetime.now(UTC)
     node_uuid = uuid4()
+    # Before first telemetry, the real host-machine name is not yet known.
+    # A temporary UUID-derived label is replaced on the first valid report.
+    name = (body.display_name or "").strip() or f"node-{node_uuid}"
     raw = "wl_node_" + str(node_uuid) + "_" + secrets.token_urlsafe(32)
     await db.execute(insert(node_agent_registrations).values(
         node_uuid=str(node_uuid), secret_hash=digest(raw),
-        invitation_id=None, display_name=body.display_name,
+        invitation_id=None, display_name=name,
         agent_version="unknown", status="approved",
         capabilities=[], created_at=now, last_seen_at=None))
     await db.commit()
@@ -183,7 +186,7 @@ async def list_registrations(db: AsyncSession = Depends(get_db),
     result = []
     for row in rows:
         entry = dict(row)
-        entry["connection_mode"] = "managed" if entry.pop("invitation_id") is None else "discovery"
+        entry["connection_mode"] = "classic" if entry.pop("invitation_id") is None else "discovery"
         entry["node_version"] = entry.pop("agent_version")
         result.append(entry)
     return {"nodes": result}

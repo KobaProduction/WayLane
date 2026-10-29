@@ -43,4 +43,4 @@ The security/runtime pilot is not accepted by source CI alone.
 The control channel and Node-versus-Core ownership contract is
 documented in shared/contracts/NODE_CONTROL.md. One Agent owns machine
 telemetry; child cores own only their separate service traffic and state.
-The Node control protocol is **binary Protobuf only**: gRPC bidirectional streaming or binary WebSocket. SSE, HTTP streaming and JSON frames are not supported control transports. New Node defaults to binary gRPC; legacy HTTP control remains explicit for staged rollback. See shared/contracts/NODE_CONTROL.md; production gRPC/WS interop acceptance is separate.
+The Node control protocol is **binary Protobuf only**: gRPC bidirectional streaming or binary WebSocket. SSE, HTTP streaming and JSON frames are not supported control transports. New Node defaults to binary gRPC; no legacy HTTP control transport or token aliases are supported. See shared/contracts/NODE_CONTROL.md; production gRPC/WS interop acceptance is separate.

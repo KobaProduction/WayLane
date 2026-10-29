@@ -70,7 +70,7 @@ type NodeRuntimeMetrics = {
 
 type Registration = {
   node_uuid: string
-  connection_mode: 'managed' | 'discovery'
+  connection_mode: 'classic' | 'discovery'
   display_name: string
   status: 'pending' | 'approved' | 'revoked'
   node_version: string
@@ -93,7 +93,7 @@ export default function NodeDiscoveryPanel() {
   const [label, setLabel] = useState('')
   const [directName, setDirectName] = useState('')
   const [directCredentials, setDirectCredentials] = useState<{ node_uuid: string; node_token: string } | null>(null)
-  const [registrationMode, setRegistrationMode] = useState<'managed' | 'discovery'>('managed')
+  const [registrationMode, setRegistrationMode] = useState<'classic' | 'discovery'>('classic')
   const [autoApprove, setAutoApprove] = useState(true)
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(false)
@@ -160,19 +160,19 @@ export default function NodeDiscoveryPanel() {
   }
 
   const createDirect = async () => {
-    if (!canCreate || !directName.trim()) return
+    if (!canCreate) return
     setLoading(true)
     setDirectCredentials(null)
     try {
-      const reply = await $fetch<{ node_uuid: string; node_token: string }>('/api/node-registry/managed', {
-        method: 'POST', body: { display_name: directName.trim() },
+      const reply = await $fetch<{ node_uuid: string; node_token: string }>('/api/node-registry/classic', {
+        method: 'POST', body: { display_name: directName.trim() || null },
       })
       setDirectCredentials(reply)
       setDirectName('')
       await refresh()
-      toast.success('Управляемая нода создана; сохраните её токен')
+      toast.success('Classic нода создана; сохраните её токен')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось создать управляемую ноду')
+      toast.error(e instanceof Error ? e.message : 'Не удалось создать Classic-ноду')
     } finally { setLoading(false) }
   }
 
@@ -351,26 +351,26 @@ export default function NodeDiscoveryPanel() {
         <div className="flex flex-col gap-3 rounded-md border p-3">
           <p className="text-sm font-medium">Способ подключения новой ноды</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="Способ регистрации ноды">
-            <Button type="button" variant={registrationMode === 'managed' ? 'default' : 'outline'}
-              onClick={() => setRegistrationMode('managed')}>
-              Управляемая панелью
+            <Button type="button" variant={registrationMode === 'classic' ? 'default' : 'outline'}
+              onClick={() => setRegistrationMode('classic')}>
+              Classic
             </Button>
             <Button type="button" variant={registrationMode === 'discovery' ? 'default' : 'outline'}
               onClick={() => setRegistrationMode('discovery')}>
               Discovery
             </Button>
           </div>
-          {registrationMode === 'managed' ? (
+          {registrationMode === 'classic' ? (
             <div className="space-y-2">
               <p className="text-muted-foreground text-xs">
-                Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN.
-                Используйте docker-compose.node.managed.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
+                Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN. Если имя не указано, после подключения нода возьмёт hostname сервера.
+                Используйте docker-compose.node.classic.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
               </p>
               {canCreate && (
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input aria-label="Название управляемой ноды" placeholder="Имя ноды" value={directName}
+                  <Input aria-label="Название Classic-ноды" placeholder="Имя ноды (необязательно — из hostname сервера)" value={directName}
                     maxLength={128} onChange={e => setDirectName(e.target.value)} className="min-w-0 flex-1" />
-                  <Button type="button" disabled={loading || !directName.trim()} onClick={() => void createDirect()}>
+                  <Button type="button" disabled={loading} onClick={() => void createDirect()}>
                     Создать ноду
                   </Button>
                 </div>
@@ -379,7 +379,7 @@ export default function NodeDiscoveryPanel() {
                 <div className="space-y-2 rounded-md border p-3">
                   <p className="text-sm">Токен отображается один раз. Сохраните его в защищённой переменной Coolify.</p>
                   <p className="break-all font-mono text-xs">UUID: {directCredentials.node_uuid}</p>
-                  <Input aria-label="Токен управляемой ноды" type="password" readOnly value={directCredentials.node_token}
+                  <Input aria-label="Токен Classic-ноды" type="password" readOnly value={directCredentials.node_token}
                     className="font-mono text-xs" />
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="outline" size="sm"
@@ -430,9 +430,10 @@ export default function NodeDiscoveryPanel() {
             </div>
           )}
           <p className="text-muted-foreground text-xs">
-            По умолчанию — бинарный gRPC (требуется доступный TLS gRPC endpoint панели).
-            Если этот канал недоступен, укажите CONTROL_TRANSPORT=ws — существующий HTTPS-адрес панели
-            используется для защищённого WebSocket. Переключение транспорта не происходит автоматически.
+            Один адрес CONTROL_PANEL_URL (полный HTTPS-адрес панели) используется для регистрации,
+            двустороннего gRPC и, при выборе CONTROL_TRANSPORT=ws, бинарного WebSocket.
+            gRPC — по умолчанию; для него панель должна принимать HTTP/2 на том же адресе.
+            Если gRPC недоступен, вручную выберите ws. Обратное подключение к ноде не требуется.
           </p>
         </div>
         {registrationMode === 'discovery' && invitations.length > 0 && (
@@ -465,7 +466,7 @@ export default function NodeDiscoveryPanel() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="min-w-0 break-words text-sm font-medium">{node.display_name}</span>
                   <Badge variant="secondary">{node.status}</Badge>
-                  <Badge variant="outline">{node.connection_mode === 'managed' ? 'Управляемая' : 'Discovery'}</Badge>
+                  <Badge variant="outline">{node.connection_mode === 'classic' ? 'Classic' : 'Discovery'}</Badge>
                 </div>
                 <p className="text-muted-foreground break-all font-mono text-xs">{node.node_uuid}</p>
                 <p className="text-muted-foreground break-words text-xs">

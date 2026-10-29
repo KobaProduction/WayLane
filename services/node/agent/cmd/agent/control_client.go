@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -125,18 +124,53 @@ func wsControlConnect(ctx context.Context, origin string, ident identity) (binar
 	conn.SetReadLimit(maxControlFrameBytes)
 	return &wsControlStream{ws: conn}, nil
 }
-func grpcControlConnect(ctx context.Context, ident identity) (binaryStream, error) {
-	target := os.Getenv("GRPC_TARGET")
-	if target == "" || strings.Contains(target, "://") || strings.Contains(target, "/") {
-		return nil, errors.New("gRPC target must be host:port")
+
+// grpcTarget derives the stream endpoint from the same HTTPS origin used
+// for Discovery registration and optional WSS. gRPC must be routed over the
+// same public TLS hostname/port; there is no separate operator target.
+func grpcTarget(origin string) (string, error) {
+	panel, err := url.Parse(origin)
+	if err != nil || panel.Hostname() == "" || panel.User != nil || panel.RawQuery != "" || panel.Fragment != "" ||
+		(panel.Path != "" && panel.Path != "/") {
+		return "", errors.New("CONTROL_PANEL_URL must be a valid HTTPS origin")
 	}
-	host, _, err := net.SplitHostPort(target)
+	var port string
+	switch panel.Scheme {
+	case "https":
+		port = "443"
+	case "http":
+		if os.Getenv("DEV_ALLOW_HTTP") != "true" {
+			return "", errors.New("plaintext gRPC is forbidden outside local development")
+		}
+		port = "80"
+	default:
+		return "", errors.New("unsupported CONTROL_PANEL_URL scheme")
+	}
+	if panel.Port() != "" {
+		port = panel.Port()
+	}
+	if panel.Scheme == "http" {
+		host := panel.Hostname()
+		if host != "host.docker.internal" && host != "localhost" &&
+			(net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback()) {
+			return "", errors.New("plaintext gRPC is restricted to local development")
+		}
+	}
+	return net.JoinHostPort(panel.Hostname(), port), nil
+}
+
+func grpcControlConnect(ctx context.Context, origin string, ident identity) (binaryStream, error) {
+	target, err := grpcTarget(origin)
 	if err != nil {
 		return nil, err
 	}
+	panel, _ := url.Parse(origin)
+	host := panel.Hostname()
 	opts := []grpc.DialOption{grpc.WithDefaultCallOptions(grpc.ForceCodec(controlWireCodec{})), grpc.WithBlock()}
 	if os.Getenv("GRPC_DEV_INSECURE") == "true" {
-		if os.Getenv("DEV_ALLOW_HTTP") != "true" || (host != "host.docker.internal" && net.ParseIP(host) == nil) {
+		if panel.Scheme != "http" || os.Getenv("DEV_ALLOW_HTTP") != "true" ||
+			(host != "host.docker.internal" && host != "localhost" &&
+				(net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback())) {
 			return nil, errors.New("plaintext gRPC forbidden")
 		}
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -340,7 +374,7 @@ func runBinaryControl(ctx context.Context, origin string, ident identity, state,
 		case "ws":
 			stream, err = wsControlConnect(ctx, origin, ident)
 		case "grpc":
-			stream, err = grpcControlConnect(ctx, ident)
+			stream, err = grpcControlConnect(ctx, origin, ident)
 		default:
 			return errors.New("unsupported binary transport")
 		}

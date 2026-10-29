@@ -205,15 +205,15 @@ var nodeUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-f
 func directTokenUUID(nodeToken string) (string, error) {
 	const prefix = "wl_node_"
 	if !strings.HasPrefix(nodeToken, prefix) {
-		return "", errors.New("invalid managed node token prefix")
+		return "", errors.New("invalid classic node token prefix")
 	}
 	parts := strings.SplitN(strings.TrimPrefix(nodeToken, prefix), "_", 2)
 	if len(parts) != 2 || !nodeUUIDPattern.MatchString(parts[0]) {
-		return "", errors.New("invalid managed node identity")
+		return "", errors.New("invalid classic node identity")
 	}
 	random, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil || len(random) != 32 || len(parts[1]) != 43 {
-		return "", errors.New("managed node token must contain 32 random bytes")
+		return "", errors.New("classic node token must contain 32 random bytes")
 	}
 	return parts[0], nil
 }
@@ -273,11 +273,31 @@ func prepareIdentity(dir, discovery, agentToken string) (identity, error) {
 	return ident, nil
 }
 
+// nodeHostName reads the *host machine* hostname, not Docker's container ID.
+// A read-only /etc/hostname bind is part of the canonical Node Compose contract.
+func nodeHostName() (string, error) {
+	return nodeHostNameFromFile("/etc/waylane/host-hostname")
+}
+
+func nodeHostNameFromFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("host machine hostname unavailable: %w", err)
+	}
+	name := strings.TrimSpace(string(data))
+	if len(name) < 1 || len(name) > 128 || !hostNamePattern.MatchString(name) {
+		return "", errors.New("invalid host machine hostname")
+	}
+	return name, nil
+}
+
+var hostNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
 func run(ctx context.Context) error {
 	if os.Geteuid() == 0 {
 		return errors.New("WayLane Agent must never run as root")
 	}
-	panelURL := os.Getenv("PANEL_URL")
+	panelURL := os.Getenv("CONTROL_PANEL_URL")
 	origin, err := panelOrigin(panelURL, os.Getenv("DEV_ALLOW_HTTP") == "true")
 	if err != nil {
 		return err
@@ -287,6 +307,16 @@ func run(ctx context.Context) error {
 	state := os.Getenv("NODE_STATE_DIR")
 	if state == "" {
 		return errors.New("state directory required")
+	}
+	name := os.Getenv("NODE_NAME")
+	if name == "" {
+		name, err = nodeHostName()
+		if err != nil {
+			return err
+		}
+	}
+	if len(name) > 128 {
+		return errors.New("invalid node name")
 	}
 	ident, err := prepareIdentity(state, token, directToken)
 	if err != nil {
@@ -300,13 +330,6 @@ func run(ctx context.Context) error {
 	if err := awaitRootlessEngine(ctx, socket, engineExit); err != nil {
 		return err
 	}
-	name := os.Getenv("NODE_NAME")
-	if name == "" {
-		name = "waylane-node"
-	}
-	if len(name) > 128 {
-		return errors.New("invalid node name")
-	}
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 		// Never forward discovery/agent credentials to a redirected origin.
@@ -318,9 +341,6 @@ func run(ctx context.Context) error {
 	}
 	if controlMode != "ws" && controlMode != "grpc" {
 		return errors.New("CONTROL_TRANSPORT must be grpc or ws")
-	}
-	if controlMode == "grpc" && os.Getenv("GRPC_TARGET") == "" {
-		return errors.New("GRPC_TARGET is required for gRPC control")
 	}
 	if !ident.Registered {
 		if token == "" {

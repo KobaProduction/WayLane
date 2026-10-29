@@ -13,7 +13,7 @@ from starlette.requests import Request
 from app.db.base import Base
 from app.db.models import node_agent_registrations
 from app.routers.node_registry import (
-    ManagedNodeInput, Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_direct_agent,
+    ClassicNodeInput, Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_classic_node,
     XrayDesiredInput, XrayReport, set_desired_xray, get_desired_xray, agent_xray_desired, agent_xray_report,
     enroll, heartbeat, list_registrations, list_invitations, revoke, revoke_invitation,
 )
@@ -187,7 +187,7 @@ def test_direct_agent_token_registration_and_revocation(tmp_path):
         factory = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with factory() as db:
-                direct = await create_direct_agent(ManagedNodeInput(display_name="direct-qa-node"),
+                direct = await create_classic_node(ClassicNodeInput(display_name="classic-qa-node"),
                                                    db=db, _=object())
                 assert direct["status"] == "approved"
                 assert direct["node_token"].startswith("wl_node_")
@@ -206,8 +206,7 @@ def test_direct_agent_token_registration_and_revocation(tmp_path):
                 assert status == {"status": "approved", "allowed_operations": []}
                 listing = await list_registrations(db=db, _=object())
                 assert len(listing["nodes"]) == 1
-                assert listing["nodes"][0]["connection_mode"] == "managed"
-                assert listing["nodes"][0]["connection_mode"] == "managed"
+                assert listing["nodes"][0]["connection_mode"] == "classic"
                 assert listing["nodes"][0]["reported_ipv4"] == "8.8.4.4"
                 assert "node_token" not in listing["nodes"][0]
                 assert "secret_hash" not in listing["nodes"][0]
@@ -223,11 +222,15 @@ def test_direct_agent_token_registration_and_revocation(tmp_path):
                                     client_request(), x_node_secret=direct["node_token"], db=db)
                 assert revoked.value.status_code == 403
 
-                other = await create_direct_agent(ManagedNodeInput(display_name="direct-qa-node"),
+                unnamed = await create_classic_node(ClassicNodeInput(), db=db, _=object())
+                unnamed_row = (await db.execute(select(node_agent_registrations).where(
+                    node_agent_registrations.c.node_uuid == unnamed["node_uuid"]))).mappings().one()
+                assert unnamed_row["display_name"] == "node-" + unnamed["node_uuid"]
+                other = await create_classic_node(ClassicNodeInput(display_name="classic-qa-node"),
                                                   db=db, _=object())
                 assert other["node_uuid"] != direct_uuid
                 assert other["node_token"] != direct["node_token"]
-                assert (await list_registrations(db=db, _=object()))["nodes"][0]["connection_mode"] == "managed"
+                assert (await list_registrations(db=db, _=object()))["nodes"][0]["connection_mode"] == "classic"
                 stored = (await db.execute(select(node_agent_registrations).where(
                     node_agent_registrations.c.node_uuid == direct_uuid))).mappings().one()
                 assert stored["invitation_id"] is None
@@ -246,7 +249,7 @@ def test_xray_desired_generation_and_authentication(tmp_path):
         factory = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with factory() as db:
-                agent = await create_direct_agent(ManagedNodeInput(display_name="xray-qa"),
+                agent = await create_classic_node(ClassicNodeInput(display_name="xray-qa"),
                                                   db=db, _=object())
                 node_uuid = UUID(agent["node_uuid"])
                 config = {"inbounds": [{"listen": "127.0.0.1", "port": 18443,
@@ -304,7 +307,7 @@ def test_xray_desired_generation_and_authentication(tmp_path):
 def test_node_registry_has_no_compatibility_routes():
     from app.routers.node_registry import node_registry_router, node_control_router
     paths = {route.path for route in [*node_registry_router.routes, *node_control_router.routes]}
-    assert {"/api/node-registry/managed", "/api/node-registry/nodes",
+    assert {"/api/node-registry/classic", "/api/node-registry/nodes",
             "/api/node-registry/discovery-tokens",
             "/api/node-registry/discovery-tokens/{invitation_id}/revoke",
             "/api/node-registry/nodes/{node_uuid}/xray"} <= paths

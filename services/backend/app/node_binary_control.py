@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from google.protobuf.json_format import MessageToDict, ParseDict
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 
 from app.controlpb import control_pb2 as pb
 from app.db.base import SessionLocal, begin_immediate_if_sqlite
@@ -132,6 +132,14 @@ class AgentBinarySession:
             }
             if body.machine_metrics:
                 changes["machine_metrics"] = body.machine_metrics.model_dump()
+                # Adopt the host-machine hostname only for unnamed Classic Nodes.
+                # Never override an administrator-provided display name.
+                hostname = body.machine_metrics.hostname
+                if hostname != "unknown-host":
+                    changes["display_name"] = case(
+                        (node_agent_registrations.c.display_name == f"node-{self.node_uuid}", hostname),
+                        else_=node_agent_registrations.c.display_name,
+                    )
             if body.reported_ipv4:
                 changes["reported_ipv4"] = body.reported_ipv4
             if body.reported_ipv6:

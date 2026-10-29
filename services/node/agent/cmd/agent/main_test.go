@@ -121,7 +121,7 @@ func TestManagedNodeTokenPrefix(t *testing.T) {
 	const nonce = "0123456789012345678901234567890123456789012"
 	actual, err := directTokenUUID("wl_node_" + uuid + "_" + nonce)
 	if err != nil || actual != uuid {
-		t.Fatalf("managed node token: %s %v", actual, err)
+		t.Fatalf("classic node token: %s %v", actual, err)
 	}
 	for _, prefix := range []string{"wl_agent_", "wl_disc_"} {
 		if _, err := directTokenUUID(prefix + uuid + "_" + nonce); err == nil {
@@ -221,5 +221,56 @@ func TestObsoletePersistedManagedNodeSecretIsRejected(t *testing.T) {
 	}
 	if _, err := prepareIdentity(dir, "", ""); err == nil {
 		t.Fatal("old persisted Agent token accepted by strict Node runtime")
+	}
+}
+
+func TestNodeDefaultsToHostMachineName(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "host-hostname")
+	if err := os.WriteFile(filename, []byte("eu-latvia-vpn1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := nodeHostNameFromFile(filename)
+	if err != nil || actual != "eu-latvia-vpn1" {
+		t.Fatalf("real hostname: %q %v", actual, err)
+	}
+	for _, invalid := range []string{"", "bad host", "../escape", strings.Repeat("a", 129)} {
+		if err := os.WriteFile(filename, []byte(invalid), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := nodeHostNameFromFile(filename); err == nil {
+			t.Fatalf("invalid hostname %q accepted", invalid)
+		}
+	}
+	if err := os.Remove(filename); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nodeHostNameFromFile(filename); err == nil {
+		t.Fatal("missing host /etc/hostname mount must fail closed")
+	}
+}
+
+func TestGRPCTargetDerivedFromControlPanelURL(t *testing.T) {
+	cases := map[string]string{
+		"https://control.example.com":      "control.example.com:443",
+		"https://control.example.com:8443": "control.example.com:8443",
+		"https://[2001:db8::5]:443":        "[2001:db8::5]:443",
+	}
+	for origin, expected := range cases {
+		got, err := grpcTarget(origin)
+		if err != nil || got != expected {
+			t.Fatalf("grpcTarget(%s): %q %v, want %q", origin, got, err, expected)
+		}
+	}
+	for _, bad := range []string{"ftp://control.example.com", "http://control.example.com", "https://user:pass@control.example.com", "https://control.example.com/foo", "https://control.example.com?token=secret"} {
+		if _, err := grpcTarget(bad); err == nil {
+			t.Fatalf("accepted invalid origin %s", bad)
+		}
+	}
+	t.Setenv("DEV_ALLOW_HTTP", "true")
+	if got, err := grpcTarget("http://host.docker.internal:8080"); err != nil || got != "host.docker.internal:8080" {
+		t.Fatalf("local HTTP target: %q %v", got, err)
+	}
+	if _, err := grpcTarget("http://public.example.com"); err == nil {
+		t.Fatal("public plaintext gRPC accepted")
 	}
 }

@@ -21,7 +21,7 @@ The source of truth is **one** `services/node/docker-compose.node.yaml`
 
 | Registration | Generic Compose | Coolify Compose | Credential |
 | --- | --- | --- | --- |
-| Managed by panel | `docker-compose.node.managed.yaml` | `docker-compose.node.managed.coolify.yaml` | `NODE_TOKEN` |
+| Classic | `docker-compose.node.classic.yaml` | `docker-compose.node.classic.coolify.yaml` | `NODE_TOKEN` |
 | Discovery | `docker-compose.node.discovery.yaml` | `docker-compose.node.discovery.coolify.yaml` | `DISCOVERY_TOKEN` |
 
 Both entrypoints have exactly the same runtime security, two services and
@@ -32,8 +32,8 @@ runs with UID 1000 and supervises its private socket
 `/run/user/1000/docker.sock`. Coolify adapters mark the completed
 bootstrap `exclude_from_hc: true`.
 
-**Managed:** An authorized administrator creates a new Node in the panel
-(`POST /api/node-registry/managed`), receives the one-time `wl_node_...`
+**Classic:** An authorized administrator creates a new Node in the panel
+(`POST /api/node-registry/classic`), receives the one-time `wl_node_...`
 `NODE_TOKEN` and places it in the protected deployment variable. The Node
 does not use a shared Discovery invitation; it starts with its existing UUID
 and panel-side approved registration.
@@ -44,7 +44,12 @@ with `DISCOVERY_TOKEN`, creates a private UUID and node secret, enrolls
 exactly once via `POST /api/node-control/enroll` and is either automatically
 approved or awaits confirmation. Both flows use the same internal
 controller/cores once approved. A registered identity is persisted in
-`agent-state`; preserve this volume on restart. Tokens are returned once,
+`agent-state`; preserve this volume on restart. If `NODE_NAME` is empty,
+the Node reads the **server's** `/etc/hostname` from a read-only mount.
+This avoids accidentally displaying Docker's container ID. If the mount or
+hostname is invalid, registration fails rather than inventing a name.
+A Classic Node created without a display name adopts that hostname on its
+first authenticated telemetry; explicitly assigned names are preserved. Tokens are returned once,
 never committed and never written to logs.
 
 No `wl_agent_` token, prefixed `WAYLANE_AGENT_*` deployment inputs or
@@ -59,12 +64,12 @@ Only use:
 
 | Variable | Required? | Meaning |
 | --- | --- | --- |
-| `PANEL_URL` | Yes | Public HTTPS **origin** of the WayLane panel; no URL path |
-| `NODE_TOKEN` | Managed profile only | One-time private Node token |
+| `CONTROL_PANEL_URL` | Yes | One public HTTPS **origin** for registration, gRPC and WSS; no URL path |
+| `NODE_TOKEN` | Classic profile only | One-time private Node token |
 | `DISCOVERY_TOKEN` | Discovery profile only | One-time private invitation |
-| `NODE_NAME` | No, default `waylane-node` | Human-readable Node label |
+| `NODE_NAME` | Optional | Override host-machine hostname; by default read host `/etc/hostname` (read-only bind) |
 | `CONTROL_TRANSPORT` | No, default `grpc` | `grpc` or `ws` binary Protobuf |
-| `GRPC_TARGET` | Required for gRPC | Reachable TLS-enabled `hostname:port` control listener |
+
 
 The private internal runtime uses `NODE_STATE_DIR` and
 `ROOTLESS_SOCKET`. Local Docker Desktop-only test overrides are
@@ -90,7 +95,7 @@ Do not claim a gRPC default means the live ingress is already configured.
 
 - Git source: `KobaProduction/WayLane`, branch `main`, trusted GitHub App
 - Base Directory: `/services/node`
-- Compose Location: `/docker-compose.node.managed.coolify.yaml` **or**
+- Compose Location: `/docker-compose.node.classic.coolify.yaml` **or**
   `/docker-compose.node.discovery.coolify.yaml`
 - Watch Paths: `services/node/**`, persisted in Coolify (the `x-` key is
   documentation only). Avoid automatic redeploy of unaccepted live traffic.

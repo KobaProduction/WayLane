@@ -38,7 +38,7 @@ services:
       HOME: /home/rootless
       XDG_RUNTIME_DIR: /run/user/1000
       DOCKER_TLS_CERTDIR: ""
-      PANEL_URL: ${PANEL_URL:?}
+      CONTROL_PANEL_URL: ${CONTROL_PANEL_URL:?}
       # Choose ONE of Discovery or direct Agent token; leave both empty only
       # after a registered identity is safely persisted in agent-state.
       DISCOVERY_TOKEN: ${DISCOVERY_TOKEN:-}
@@ -46,15 +46,19 @@ services:
       DEV_ALLOW_HTTP: ${DEV_ALLOW_HTTP:-false}
       # Binary Protobuf over gRPC by default; WSS is the optional fallback.
       CONTROL_TRANSPORT: ${CONTROL_TRANSPORT:-grpc}
-      GRPC_TARGET: ${GRPC_TARGET:-}
       GRPC_DEV_INSECURE: ${GRPC_DEV_INSECURE:-false}
-      NODE_NAME: ${NODE_NAME:-waylane-node}
+      NODE_NAME: ${NODE_NAME:-}
       NODE_STATE_DIR: /var/lib/waylane-agent
       ROOTLESS_SOCKET: /run/user/1000/docker.sock
     volumes:
       - agent-state:/var/lib/waylane-agent
       - rootless-data:/home/rootless/.local/share/docker
       - rootless-run:/run/user/1000
+      # Read host-machine identity, not the container hostname; no host Docker socket.
+      - type: bind
+        source: /etc/hostname
+        target: /etc/waylane/host-hostname
+        read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=32m
     pids_limit: 512

@@ -32,10 +32,10 @@ Tests: `./scripts/verify.sh` provisions a pinned checksum-verified Xray executab
 
 A Node is a complete installation: one-shot `bootstrap`, the internal
 unprivileged `agent` controller, private rootless Docker and independent VPN
-cores. Panel-managed and Discovery are **registration methods**, not separate
+cores. Classic and Discovery are **registration methods**, not separate
 Agent products.
 
-- `docker-compose.node.managed.yaml` or `docker-compose.node.managed.coolify.yaml`
+- `docker-compose.node.classic.yaml` or `docker-compose.node.classic.coolify.yaml`
 - `docker-compose.node.discovery.yaml` or `docker-compose.node.discovery.coolify.yaml`
 
 The base runtime is `docker-compose.node.yaml`. See

@@ -1,6 +1,6 @@
 # WayLane Agent binary control v1
 
-One managed **Node** is a machine running a single autonomous Agent. The Agent
+One autonomous **Node** is a machine running a single autonomous Agent. The Agent
 owns machine telemetry, registration and private core runtime; it can supervise
 many independent cores later. Cores never receive Panel credentials or report
 host/machine identity.
@@ -23,7 +23,10 @@ status and redacted error code. There is no transport-specific command schema.
 Xray configuration maps inside `Struct` are serialized as Protobuf binary on
 both transports, not JSON on the network.
 
-The Agent initiates either transport. Management is full-duplex in both cases:
+The Node initiates one outbound connection. In gRPC bidirectional streaming,
+both the panel and the Node send independent Protobuf messages over that
+single authenticated session; the panel does **not** initiate a separate
+network connection to the Node. Management is full-duplex in both cases:
 Panel pushes desired generations, Agent sends telemetry, acknowledges and
 reports applied/restart-needed/error states. Server authenticates every
 session with the existing per-Agent credential and requires approval.
@@ -32,7 +35,11 @@ Wrong/revoked identity is rejected. The child never receives that credential.
 ### Connection configuration
 
 `CONTROL_TRANSPORT=grpc` is the default for a **new Node**.
-Set `GRPC_TARGET=host:port` to an authenticated TLS gRPC listener.
+Both HTTPS registration and bidirectional gRPC use the **one**
+`CONTROL_PANEL_URL=https://hostname[:port]`. The Node derives its gRPC
+host and port (443 by default) from this URL. The panel ingress MUST route
+`/waylane.control.v1.AgentControl/Connect` over HTTP/2 to its gRPC server.
+It does not need a separate Node-facing endpoint or a second operator URL.
 Use `CONTROL_TRANSPORT=ws` as an explicit binary WebSocket alternative.
 The Panel's optional gRPC listener is started with
 `CONTROL_GRPC_BIND=host:port` (default off). Remote gRPC listener

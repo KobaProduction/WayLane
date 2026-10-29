@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.base import Base
 from app.db.models import CoreConfig, CoreType
 from app.routers.node_registry import (
-    ManagedNodeInput, EditorRoutingInput, XrayDesiredInput, XrayReport,
-    agent_xray_desired, agent_xray_report, create_direct_agent,
+    ClassicNodeInput, EditorRoutingInput, XrayDesiredInput, XrayReport,
+    agent_xray_desired, agent_xray_report, create_classic_node,
     get_desired_xray, set_desired_xray, sync_editor_routing,
 )
 from app.routers.node_xray_resources import replace_routing
@@ -43,7 +43,7 @@ def test_saved_routing_editor_reaches_private_agent_desired_state(tmp_path):
         sessions=async_sessionmaker(engine,expire_on_commit=False)
         try:
             async with sessions() as db:
-                agent=await create_direct_agent(ManagedNodeInput(display_name="qa"),db=db,_=object())
+                agent=await create_classic_node(ClassicNodeInput(display_name="qa"),db=db,_=object())
                 uuid=UUID(agent["node_uuid"])
                 await set_desired_xray(uuid,XrayDesiredInput(action="deploy",config=qa_config()),db=db,_=object())
                 await agent_xray_report(XrayReport(node_uuid=uuid,generation=1,status="running"),
@@ -88,7 +88,7 @@ def test_tls_preset_agent_binding_keeps_key_out_of_admin_api(tmp_path, monkeypat
         sessions=async_sessionmaker(engine,expire_on_commit=False)
         try:
             async with sessions() as db:
-                agent=await create_direct_agent(ManagedNodeInput(display_name="tls-qa"),db=db,_=object())
+                agent=await create_classic_node(ClassicNodeInput(display_name="tls-qa"),db=db,_=object())
                 uid=UUID(agent["node_uuid"])
                 config=qa_config()
                 config["inbounds"].append({

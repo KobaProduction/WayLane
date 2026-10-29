@@ -88,6 +88,53 @@ def test_websocket_only_binary_protobuf_frames_and_desired_state(runtime):
     assert row["applied_generation"]==1 and row["runtime_status"]=="running"
 
 
+def test_classic_node_uses_host_machine_name_only_when_not_customized(runtime):
+    node, factory = runtime
+
+    async def check():
+        async with factory() as db:
+            await db.execute(
+                node_agent_registrations.update()
+                .where(node_agent_registrations.c.node_uuid == node)
+                .values(display_name="node-" + node)
+            )
+            await db.commit()
+        session = control.AgentBinarySession(node, SECRET)
+        await session.receive(control.new_message("hello", node))
+        machine = {
+            "scope": "agent-runtime", "hostname": "eu-test-host-01",
+            "os": "linux", "arch": "amd64", "cpu_logical_count": 2,
+            "memory_total_bytes": 1024, "memory_available_bytes": 512,
+            "disk_total_bytes": 1024, "disk_free_bytes": 512,
+            "load_1": 0, "uptime_seconds": 12
+        }
+        await session.receive(control.new_message("telemetry", node, payload={
+            "node_version": "0.1.0", "capabilities": [], "machine_metrics": machine
+        }))
+        async with factory() as db:
+            stored = (await db.execute(
+                node_agent_registrations.select()
+                .where(node_agent_registrations.c.node_uuid == node)
+            )).mappings().one()
+            assert stored["display_name"] == "eu-test-host-01"
+            await db.execute(
+                node_agent_registrations.update()
+                .where(node_agent_registrations.c.node_uuid == node)
+                .values(display_name="Operator's name")
+            )
+            await db.commit()
+        machine["hostname"] = "new-machine-host"
+        await session.receive(control.new_message("telemetry", node, payload={
+            "node_version": "0.1.0", "capabilities": [], "machine_metrics": machine
+        }))
+        async with factory() as db:
+            stored = (await db.execute(node_agent_registrations.select())).mappings().one()
+            assert stored["display_name"] == "Operator's name"
+        await session.close()
+
+    asyncio.run(check())
+
+
 def test_rejected_websocket_agent_cannot_handshake(runtime):
     node,_=runtime
     app=FastAPI()
