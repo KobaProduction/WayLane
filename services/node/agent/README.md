@@ -33,8 +33,9 @@ runs with UID 1000 and supervises its private socket
 bootstrap `exclude_from_hc: true`.
 
 **Classic:** An authorized administrator creates a new Node in the panel
-(`POST /api/node-registry/classic`), receives the one-time `wl_node_...`
-`NODE_TOKEN` and places it in the protected deployment variable. The Node
+(`POST /api/node-registry/classic`, no name or body required), receives the
+one-time `wl_node_...` `NODE_TOKEN` and places it in the protected deployment
+variable. The hostname is not configured in the panel. The Node
 does not use a shared Discovery invitation; it starts with its existing UUID
 and panel-side approved registration.
 
@@ -44,12 +45,12 @@ with `DISCOVERY_TOKEN`, creates a private UUID and node secret, enrolls
 exactly once via `POST /api/node-control/enroll` and is either automatically
 approved or awaits confirmation. Both flows use the same internal
 controller/cores once approved. A registered identity is persisted in
-`agent-state`; preserve this volume on restart. If `NODE_NAME` is empty,
-the Node reads the **server's** `/etc/hostname` from a read-only mount.
-This avoids accidentally displaying Docker's container ID. If the mount or
-hostname is invalid, registration fails rather than inventing a name.
-A Classic Node created without a display name adopts that hostname on its
-first authenticated telemetry; explicitly assigned names are preserved. Tokens are returned once,
+`agent-state`; preserve this volume on restart. The Node always reads
+the **server's** `/etc/hostname` from a read-only mount, never Docker's
+container hostname. If the mount or hostname is invalid, registration fails
+rather than inventing a name. A Classic Node receives that hostname on its
+first authenticated telemetry; the registry shows a temporary UUID-derived
+label before the Node connects. Tokens are returned once,
 never committed and never written to logs.
 
 No `wl_agent_` token, prefixed `WAYLANE_AGENT_*` deployment inputs or
@@ -67,7 +68,6 @@ Only use:
 | `CONTROL_PANEL_URL` | Yes | One public HTTPS **origin** for registration, gRPC and WSS; no URL path |
 | `NODE_TOKEN` | Classic profile only | One-time private Node token |
 | `DISCOVERY_TOKEN` | Discovery profile only | One-time private invitation |
-| `NODE_NAME` | Optional | Override host-machine hostname; by default read host `/etc/hostname` (read-only bind) |
 | `CONTROL_TRANSPORT` | No, default `grpc` | `grpc` or `ws` binary Protobuf |
 
 

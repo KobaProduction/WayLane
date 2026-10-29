@@ -45,19 +45,15 @@ class InvitationInput(BaseModel):
     auto_approve: bool = True
 
 
-class ClassicNodeInput(BaseModel):
-    display_name: str | None = Field(default=None, max_length=128)
-
-
 @node_registry_router.post("/classic", status_code=201)
-async def create_classic_node(body: ClassicNodeInput, db: AsyncSession = Depends(get_db),
+async def create_classic_node(db: AsyncSession = Depends(get_db),
                               _: AdminDetails = Depends(require_permission("nodes", "create"))):
-    """Create an explicitly approved node with its own one-time agent token."""
+    """Provision a Classic Node; its real hostname arrives via authenticated telemetry."""
     now = datetime.now(UTC)
     node_uuid = uuid4()
-    # Before first telemetry, the real host-machine name is not yet known.
-    # A temporary UUID-derived label is replaced on the first valid report.
-    name = (body.display_name or "").strip() or f"node-{node_uuid}"
+    # The host name is only known after the Node connects. Never ask for a
+    # manually configured name: display this temporary label until telemetry.
+    name = f"node-{node_uuid}"
     raw = "wl_node_" + str(node_uuid) + "_" + secrets.token_urlsafe(32)
     await db.execute(insert(node_agent_registrations).values(
         node_uuid=str(node_uuid), secret_hash=digest(raw),

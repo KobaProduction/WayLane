@@ -91,7 +91,6 @@ export default function NodeDiscoveryPanel() {
   const [entries, setEntries] = useState<Registration[]>([])
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [label, setLabel] = useState('')
-  const [directName, setDirectName] = useState('')
   const [directCredentials, setDirectCredentials] = useState<{ node_uuid: string; node_token: string } | null>(null)
   const [registrationMode, setRegistrationMode] = useState<'classic' | 'discovery'>('classic')
   const [autoApprove, setAutoApprove] = useState(true)
@@ -165,10 +164,9 @@ export default function NodeDiscoveryPanel() {
     setDirectCredentials(null)
     try {
       const reply = await $fetch<{ node_uuid: string; node_token: string }>('/api/node-registry/classic', {
-        method: 'POST', body: { display_name: directName.trim() || null },
+        method: 'POST',
       })
       setDirectCredentials(reply)
-      setDirectName('')
       await refresh()
       toast.success('Classic нода создана; сохраните её токен')
     } catch (e) {
@@ -363,17 +361,13 @@ export default function NodeDiscoveryPanel() {
           {registrationMode === 'classic' ? (
             <div className="space-y-2">
               <p className="text-muted-foreground text-xs">
-                Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN. Если имя не указано, после подключения нода возьмёт hostname сервера.
+                Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN. После подключения нода автоматически передаст hostname сервера — отдельное поле имени не требуется.
                 Используйте docker-compose.node.classic.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
               </p>
               {canCreate && (
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input aria-label="Название Classic-ноды" placeholder="Имя ноды (необязательно — из hostname сервера)" value={directName}
-                    maxLength={128} onChange={e => setDirectName(e.target.value)} className="min-w-0 flex-1" />
-                  <Button type="button" disabled={loading} onClick={() => void createDirect()}>
-                    Создать ноду
-                  </Button>
-                </div>
+                <Button type="button" disabled={loading} onClick={() => void createDirect()}>
+                  Создать Classic-ноду
+                </Button>
               )}
               {directCredentials && (
                 <div className="space-y-2 rounded-md border p-3">

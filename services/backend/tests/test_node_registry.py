@@ -13,7 +13,7 @@ from starlette.requests import Request
 from app.db.base import Base
 from app.db.models import node_agent_registrations
 from app.routers.node_registry import (
-    ClassicNodeInput, Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_classic_node,
+    Enrollment, Heartbeat, InvitationInput, approve, create_invitation, create_classic_node,
     XrayDesiredInput, XrayReport, set_desired_xray, get_desired_xray, agent_xray_desired, agent_xray_report,
     enroll, heartbeat, list_registrations, list_invitations, revoke, revoke_invitation,
 )
@@ -187,14 +187,14 @@ def test_direct_agent_token_registration_and_revocation(tmp_path):
         factory = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with factory() as db:
-                direct = await create_classic_node(ClassicNodeInput(display_name="classic-qa-node"),
-                                                   db=db, _=object())
+                direct = await create_classic_node(db=db, _=object())
                 assert direct["status"] == "approved"
                 assert direct["node_token"].startswith("wl_node_")
                 assert len(direct["node_token"]) == 88
                 assert direct["node_token"].startswith("wl_node_" + direct["node_uuid"] + "_")
                 preheartbeat = (await db.execute(select(node_agent_registrations).where(
                     node_agent_registrations.c.node_uuid == direct["node_uuid"]))).mappings().one()
+                assert preheartbeat["display_name"] == "node-" + direct["node_uuid"]
                 assert preheartbeat["last_seen_at"] is None
                 assert not direct["node_uuid"].startswith("wl_disc_")
                 direct_uuid = direct["node_uuid"]
@@ -222,12 +222,11 @@ def test_direct_agent_token_registration_and_revocation(tmp_path):
                                     client_request(), x_node_secret=direct["node_token"], db=db)
                 assert revoked.value.status_code == 403
 
-                unnamed = await create_classic_node(ClassicNodeInput(), db=db, _=object())
+                unnamed = await create_classic_node(db=db, _=object())
                 unnamed_row = (await db.execute(select(node_agent_registrations).where(
                     node_agent_registrations.c.node_uuid == unnamed["node_uuid"]))).mappings().one()
                 assert unnamed_row["display_name"] == "node-" + unnamed["node_uuid"]
-                other = await create_classic_node(ClassicNodeInput(display_name="classic-qa-node"),
-                                                  db=db, _=object())
+                other = await create_classic_node(db=db, _=object())
                 assert other["node_uuid"] != direct_uuid
                 assert other["node_token"] != direct["node_token"]
                 assert (await list_registrations(db=db, _=object()))["nodes"][0]["connection_mode"] == "classic"
@@ -249,8 +248,7 @@ def test_xray_desired_generation_and_authentication(tmp_path):
         factory = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with factory() as db:
-                agent = await create_classic_node(ClassicNodeInput(display_name="xray-qa"),
-                                                  db=db, _=object())
+                agent = await create_classic_node(db=db, _=object())
                 node_uuid = UUID(agent["node_uuid"])
                 config = {"inbounds": [{"listen": "127.0.0.1", "port": 18443,
                                        "protocol": "socks", "settings": {"auth": "password",

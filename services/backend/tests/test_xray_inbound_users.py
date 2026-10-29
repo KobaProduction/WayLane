@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.base import Base
 from app.routers.node_registry import (
-    ClassicNodeInput, XrayDesiredInput, XrayInboundUsersInput, XrayReport,
+    XrayDesiredInput, XrayInboundUsersInput, XrayReport,
     agent_xray_desired, agent_xray_report, create_classic_node,
     get_desired_xray, list_xray_inbounds, revoke, set_desired_xray, sync_xray_inbound_users,
 )
@@ -63,7 +63,7 @@ def test_user_change_is_generation_guarded_and_authenticated(tmp_path):
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         try:
             async with sessions() as db:
-                node = await create_classic_node(ClassicNodeInput(display_name="qa"), db=db, _=object())
+                node = await create_classic_node(db=db, _=object())
                 uid = UUID(node["node_uuid"])
                 created = await set_desired_xray(uid, XrayDesiredInput(
                     action="deploy", config=baseline()), db=db, _=object())

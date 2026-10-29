@@ -308,15 +308,9 @@ func run(ctx context.Context) error {
 	if state == "" {
 		return errors.New("state directory required")
 	}
-	name := os.Getenv("NODE_NAME")
-	if name == "" {
-		name, err = nodeHostName()
-		if err != nil {
-			return err
-		}
-	}
-	if len(name) > 128 {
-		return errors.New("invalid node name")
+	name, err := nodeHostName()
+	if err != nil {
+		return err
 	}
 	ident, err := prepareIdentity(state, token, directToken)
 	if err != nil {
