@@ -19,7 +19,7 @@ services:
   agent:
     build:
       context: ../../..
-      dockerfile: services/node/agent/Dockerfile
+      dockerfile: services/node/node.Dockerfile
     depends_on:
       bootstrap:
         condition: service_completed_successfully

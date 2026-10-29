@@ -25,14 +25,14 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rcontrol.proto\x12\x12waylane.control.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xdf\x01\n\x08\x45nvelope\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\x12\x11\n\tnode_uuid\x18\x02 \x01(\t\x12\x12\n\nmessage_id\x18\x03 \x01(\t\x12\x0c\n\x04kind\x18\x04 \x01(\t\x12\x0f\n\x07\x63ore_id\x18\x05 \x01(\t\x12\x12\n\ngeneration\x18\x06 \x01(\x04\x12\x11\n\toperation\x18\x07 \x01(\t\x12(\n\x07payload\x18\x08 \x01(\x0b\x32\x17.google.protobuf.Struct\x12\x0e\n\x06status\x18\t \x01(\t\x12\x12\n\nerror_code\x18\n \x01(\tBUZSgithub.com/KobaProduction/WayLane/services/node/agent/cmd/agent/controlpb;controlpbb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rcontrol.proto\x12\x12waylane.control.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xdf\x01\n\x08\x45nvelope\x12\x18\n\x10protocol_version\x18\x01 \x01(\r\x12\x11\n\tnode_uuid\x18\x02 \x01(\t\x12\x12\n\nmessage_id\x18\x03 \x01(\t\x12\x0c\n\x04kind\x18\x04 \x01(\t\x12\x0f\n\x07\x63ore_id\x18\x05 \x01(\t\x12\x12\n\ngeneration\x18\x06 \x01(\x04\x12\x11\n\toperation\x18\x07 \x01(\t\x12(\n\x07payload\x18\x08 \x01(\x0b\x32\x17.google.protobuf.Struct\x12\x0e\n\x06status\x18\t \x01(\t\x12\x12\n\nerror_code\x18\n \x01(\tBOZMgithub.com/KobaProduction/waylane/services/node/cmd/agent/controlpb;controlpbb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'control_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'ZSgithub.com/KobaProduction/WayLane/services/node/agent/cmd/agent/controlpb;controlpb'
+  _globals['DESCRIPTOR']._serialized_options = b'ZMgithub.com/KobaProduction/waylane/services/node/cmd/agent/controlpb;controlpb'
   _globals['_ENVELOPE']._serialized_start=68
   _globals['_ENVELOPE']._serialized_end=291
 # @@protoc_insertion_point(module_scope)

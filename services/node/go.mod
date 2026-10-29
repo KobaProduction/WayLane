@@ -3,6 +3,7 @@ module github.com/KobaProduction/waylane/services/node
 go 1.27
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -25,7 +26,6 @@ require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/huin/goupnp v1.2.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/josharian/native v1.1.0 // indirect

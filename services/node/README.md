@@ -28,21 +28,38 @@ Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft
 
 Tests: `./scripts/verify.sh` provisions a pinned checksum-verified Xray executable and disposable TLS certs in ignored local directories before executing the existing integration tests. No production credentials are used.
 
-## WayLane Node — autonomous deployment
+## Autonomous WayLane Node
 
-A Node is a complete installation: one-shot `bootstrap`, the internal
-unprivileged `agent` controller, private rootless Docker and independent VPN
-cores. Classic and Discovery are **registration methods**, not separate
-Agent products.
+The new Node is a **single installation** comprising exactly two outer
+Compose services: one-shot privileged \`bootstrap\` and non-privileged
+\`agent\` (UID/GID 1000). The internal controller runs in a private
+rootless Docker environment and can manage child VPN core containers.
+No host Docker socket, host systemd or third Docker sidecar is allowed.
 
-Deployment entrypoints are owned by the root
-[deploy/node/](../../deploy/node/README.md) tree:
+**Implementation is one Go module (\`services/node/go.mod\`)**. The legacy
+PasarGuard binary builds from \`cmd/node\` and the autonomous controller
+from \`cmd/agent\`. Their executables and Docker images are separate.
+The one-shot initialization is a small \`bootstrap.sh\`, with
+\`bootstrap.Dockerfile\`; the autonomous Node image uses
+\`node.Dockerfile\`. These are source files, not deployment entrypoints.
 
-- [Classic](../../deploy/node/classic/README.md)
-- [Discovery](../../deploy/node/discovery/README.md) — preferred first isolated DEV pilot
+[Discovery and Classic](../../deploy/node/README.md) are registration
+modes. Each has its own generic and Coolify Compose under \`deploy/node/\`.
+Discovery uses one protected invitation \`DISCOVERY_TOKEN\` to enroll; Classic
+uses an individual \`NODE_TOKEN\` issued from the panel. A registered Node
+persists its private identity in the \`agent-state\` volume and reads its
+name from the host's read-only \`/etc/hostname\`. Never share an identity
+volume across two Nodes.
 
-Do not add new Node Compose entrypoints to `services/node/`.
-See [Node runtime, enrollment and core ownership](agent/README.md).
-The autonomous Node control plane uses one persistent binary WebSocket
-with Protobuf frames. (Legacy PasarGuard node RPC is a separate runtime.) Public traffic remains unaccepted. Legacy PasarGuard
-nodes are a separate deployment, not an alternate Node-control protocol.
+The Node establishes one authenticated outbound WSS connection derived
+from \`CONTROL_PANEL_URL\`, using only binary Protobuf \`Envelope\` frames:
+hello/ack, desired commands, result/ack, telemetry and ping/pong.
+The panel sends commands on the same full-duplex socket. No autonomous
+Node gRPC control transport, alternate HTTP control fallback or published
+management port is supported. See
+[Node control protocol](../../shared/contracts/NODE_CONTROL.md).
+
+DEV supports one Xray child, but complete PasarGuard parity, multiple
+core drivers and public TCP/UDP VPN traffic require separate acceptance.
+Legacy PasarGuard instances, data and client routing must not be touched
+while testing autonomous Node.

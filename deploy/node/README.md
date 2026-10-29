@@ -2,7 +2,7 @@
 
 **Deployment definitions live here; runtime source remains in
 `services/node/`: a small `bootstrap.sh`, `bootstrap.Dockerfile` and
-its internal `agent/`.**
+`cmd/agent/` built by `node.Dockerfile`.**
 
 A Node is one installation comprising exactly two outer Compose services:
 a privileged **one-shot bootstrap** followed by one non-root **agent**
@@ -16,7 +16,7 @@ Classic or Discovery Node is a **registration mode**, not another runtime.
 
 Each directory independently owns a **standalone**
 `docker-compose.yaml` and a Coolify `docker-compose.coolify.yaml`,
-plus its operational README. These are separate alternatives; **use one
+with the single operational README in this parent directory. These are separate alternatives; **use one
 mode per Node**. Each runtime is fully self-contained, rather than
 inheriting a second mode or reaching into `services/node` for Compose.
 A source contract test compares their common security/runtime topology
@@ -30,7 +30,7 @@ service is created.
   by the operator, normally `main` after approved merge.
 - Build context: **monorepo root**; Dockerfiles are
   `services/node/bootstrap.Dockerfile` and
-  `services/node/agent/Dockerfile`. Coolify builds directly from Git.
+  `services/node/node.Dockerfile`. Coolify builds directly from Git.
   No Docker registry publication, prerelease tag or external standalone
   Node repository is needed for the first pilot.
 - Coolify Base Directory: `/deploy/node/discovery` **or**
@@ -47,28 +47,75 @@ service is created.
   `rootless-run`; **never delete them during redeploy**. Host
   `/etc/hostname` is read-only and supplies the Node name.
 
-## Watch Paths — manually save in Coolify
+## Watch Paths — save in Coolify
 
-Discovery resource:
-
-```text
-deploy/node/discovery/**
-services/node/**
-```
-
-Classic resource:
+**Discovery:**
 
 ```text
-deploy/node/classic/**
+deploy/node/discovery/*.yaml
 services/node/**
+!services/node/**/*.md
 ```
 
-These are **repository-relative**, newline-separated patterns. A webhook
-alone cannot configure Watch Paths; save them under the individual Coolify
-resource. Documentation changes inside that mode's directory deliberately
-affect that mode only. Source shared by both modes triggers both only after
-those resources are actually installed. Keep automatic deployments disabled
-for an unaccepted traffic-serving Node; the operator owns rollout decisions.
+**Classic:**
+
+```text
+deploy/node/classic/*.yaml
+services/node/**
+!services/node/**/*.md
+```
+
+Paths are repository-relative. The first pattern watches only that mode's
+two Compose files; the second watches all Node source (both Dockerfiles,
+the bootstrap script, Go commands and module dependencies). The final
+negation deliberately excludes Node Markdown documentation. The common
+`deploy/node/README.md` is outside both resource Watch Paths, so README
+changes alone do **not** trigger Coolify's Git webhook deployments.
+Coolify evaluates Watch Paths in order; keep the exclusion **after**
+the inclusive source pattern. A manual deploy is not blocked by Watch Paths.
+Save and verify these patterns in the actual Coolify resource.
+
+## Discovery — preferred first isolated DEV Node
+
+The Node self-registers using an invitation issued in the panel under
+**Nodes → Discovery**. It may remain pending until the operator approves
+it. Do not precreate a Classic identity.
+
+| Coolify field | Value |
+| --- | --- |
+| Git repository | `KobaProduction/WayLane` |
+| Branch | `main`, after approved merge |
+| Base Directory | `/deploy/node/discovery` |
+| Compose Location | `/docker-compose.coolify.yaml` |
+| Build Pack | Docker Compose |
+
+Set `CONTROL_PANEL_URL` to the trusted public HTTPS Panel origin and
+`DISCOVERY_TOKEN` to the protected `wl_disc_...` invitation.
+`NODE_TOKEN` is always empty, `DEV_ALLOW_HTTP` is forced false. The
+node learns its own name from Linux `/etc/hostname`, and communicates
+over one outbound binary-Protobuf WSS connection. The panel must approve
+the Node before it receives core-management commands.
+
+## Classic — pre-registered Node
+
+The panel administrator creates the Classic Node and receives its one-time
+`wl_node_...` credential, which is stored as protected `NODE_TOKEN`.
+The Node receives its host name from Linux `/etc/hostname` on first
+authenticated telemetry.
+
+| Coolify field | Value |
+| --- | --- |
+| Git repository | `KobaProduction/WayLane` |
+| Branch | `main`, after approved merge |
+| Base Directory | `/deploy/node/classic` |
+| Compose Location | `/docker-compose.coolify.yaml` |
+| Build Pack | Docker Compose |
+
+Set `CONTROL_PANEL_URL` to the trusted public HTTPS Panel origin and
+`NODE_TOKEN` to the protected one-time credential.
+`DISCOVERY_TOKEN` is always empty, `DEV_ALLOW_HTTP` is forced false.
+No extra DNS listener, gRPC target or published Node management port is
+needed. Both profiles build the same Node runtime.
 
 ## Runtime secrets and acceptance
 
@@ -93,5 +140,5 @@ destroying volumes**, checking bootstrap/agent and restored WSS control.
 A source rollback cannot reverse changed persistent registration data;
 back up the identity volumes before a planned migration. Keep existing
 PasarGuard containers, credentials and client routing unchanged.
-See [Node architecture](../../services/node/agent/README.md) and
+See [Node architecture](../../services/node/README.md) and
 [wire protocol](../../shared/contracts/NODE_CONTROL.md).

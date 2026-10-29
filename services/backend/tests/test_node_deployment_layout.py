@@ -24,24 +24,26 @@ def test_node_deployments_are_outside_service_source_and_have_single_entrypoints
     ):
         assert not (ROOT / "services/node" / obsolete).exists()
 
+    assert (ROOT / "deploy/node/README.md").is_file()
     for mode in MODES:
         deployment = ROOT / "deploy/node" / mode
         assert {p.name for p in deployment.iterdir() if p.is_file()} == {
             "docker-compose.yaml",
             "docker-compose.coolify.yaml",
-            "README.md",
         }
-        text = (deployment / "README.md").read_text()
-        # Watch exactly this deployment mode and all Node source files.
+        # The shared deployment README is outside watched mode folders:
+        # a documentation-only edit should not trigger redeployment.
+        text = (ROOT / "deploy/node/README.md").read_text()
+        assert text.count("## Discovery") == 1
+        assert text.count("## Classic") == 1
         fences = chr(96) * 3
-        watch_block = text.split("Watch Paths (persist each line in Coolify):", 1)[1]
+        watch_block = text.split(f"**{mode.title()}:**", 1)[1]
         watch_block = watch_block.split(fences + "text", 1)[1].split(fences, 1)[0].strip()
         assert watch_block.splitlines() == [
-            f"deploy/node/{mode}/**",
+            f"deploy/node/{mode}/*.yaml",
             "services/node/**",
+            "!services/node/**/*.md",
         ]
-        for path in (f"deploy/node/{mode}/**", *WATCHED_NODE_SOURCE):
-            assert path in text
         assert "Base Directory" in text and f"/deploy/node/{mode}" in text
         assert "/docker-compose.coolify.yaml" in text
 
@@ -55,6 +57,14 @@ def test_bootstrap_is_a_single_root_script_with_no_separate_source_folder():
     dockerfile = (node / "bootstrap.Dockerfile").read_text()
     assert "COPY services/node/bootstrap.sh" in dockerfile
     assert "ENTRYPOINT" in dockerfile
+    assert not (node / "agent").exists(), "No nested agent Go module or source directory"
+    assert (node / "cmd/agent/main.go").is_file()
+    assert (node / "node.Dockerfile").is_file()
+    image = (node / "node.Dockerfile").read_text()
+    assert "COPY services/node/go.mod services/node/go.sum" in image
+    assert "COPY services/node/cmd/agent" in image
+    assert "go build -trimpath" in image
+    assert not (node / "cmd/agent/go.mod").exists()
 
 
 def test_classic_and_discovery_share_identical_node_runtime_and_security():
@@ -78,7 +88,7 @@ def test_classic_and_discovery_share_identical_node_runtime_and_security():
             for v in agent["volumes"]
         )
         assert not any("/var/run/docker.sock" in str(v) for v in agent["volumes"])
-        for unit, dockerfile in (("agent", "services/node/agent/Dockerfile"), (
+        for unit, dockerfile in (("agent", "services/node/node.Dockerfile"), (
             "bootstrap", "services/node/bootstrap.Dockerfile",
         )):
             build = source["services"][unit]["build"]

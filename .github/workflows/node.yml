@@ -4,12 +4,14 @@ on:
     branches: [main, development, migration/waylane-monorepo]
     paths:
       - "services/node/**"
-      - "deploy/node/**"
+      - "deploy/node/**/*.yaml"
+      - "!services/node/**/*.md"
       - ".github/workflows/node.yml"
   pull_request:
     paths:
       - "services/node/**"
-      - "deploy/node/**"
+      - "deploy/node/**/*.yaml"
+      - "!services/node/**/*.md"
       - ".github/workflows/node.yml"
 permissions:
   contents: read
@@ -47,7 +49,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./services/node/agent/Dockerfile
+          file: ./services/node/node.Dockerfile
           push: false
           platforms: linux/amd64
           tags: waylane-agent:ci

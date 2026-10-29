@@ -69,4 +69,4 @@ host Docker socket**. Future independently deployable VPN engine containers
 are managed exclusively by the agent, but their lifecycle and real traffic
 have not yet been implemented or accepted. This manifest is generic Compose;
 no Coolify v2 resource, ENV or managed-domain contract has been approved.
-Canonical details and runtime gates: `services/node/agent/README.md`.
+Canonical details and runtime gates: `services/node/README.md`.

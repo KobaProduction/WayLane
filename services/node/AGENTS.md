@@ -11,12 +11,12 @@ Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
   NET_ADMIN requirements; `DEPLOYMENT.md` owns this runtime's acceptance.
   Kernel WireGuard remains the default; AmneziaWG 3.1 is opt-in and requires
   separate real-traffic verification (Issue #7).
-- New `bootstrap.sh` plus minimal `bootstrap.Dockerfile` and `agent/`:
+- New `bootstrap.sh` plus minimal `bootstrap.Dockerfile`, `node.Dockerfile` and `cmd/agent/`:
   autonomous WayLane Node **source only**.
   Git-backed deployment definitions belong to
   `deploy/node/{classic,discovery}/` (one generic `docker-compose.yaml`,
-  one `docker-compose.coolify.yaml` and a README per mode). Read
-  `deploy/node/README.md` and the complete `agent/README.md` before
+  one `docker-compose.coolify.yaml` per mode, with the single README in `deploy/node/`). Read
+  `deploy/node/README.md` and `services/node/README.md` before
   changing runtime or deployment contracts.
   Exactly two Compose services, one-shot privileged bootstrap and autonomous
   non-privileged Go agent supervising its private embedded rootless Docker.

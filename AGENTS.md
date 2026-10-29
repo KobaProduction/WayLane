@@ -19,7 +19,7 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node remains host-network/NET_ADMIN dependent; do not ascribe those
   privileges or its single-core lifecycle to the autonomous Node.
 - deploy/node/{classic,discovery}/: separate Git-backed deployment owners,
-  each with `docker-compose.yaml`, `docker-compose.coolify.yaml` and README.
+  each with `docker-compose.yaml` and `docker-compose.coolify.yaml`; shared operator README at `deploy/node/README.md`.
   See `deploy/node/README.md` for Watch Paths, secrets and test boundaries.
 - services/external/: approved contracts for separate PostgreSQL,
   API load balancer/ingress, external SigNoz OTLP endpoints.
@@ -32,7 +32,7 @@ No production DNS, data, token or routing changes before authorized cutover.
 
 ## WayLane Node architecture authority
 
-Read `services/node/AGENTS.md` and `services/node/agent/README.md` before
+Read `services/node/AGENTS.md` and `services/node/README.md` before
 changing the autonomous agent-based node. Its single Compose entrypoint has **exactly two services**:
 a one-shot privileged `bootstrap` preparing private volumes, then one
 non-privileged autonomous `agent`. The agent supervises its own embedded

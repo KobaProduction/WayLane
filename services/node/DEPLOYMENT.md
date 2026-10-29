@@ -8,11 +8,11 @@ host networking, certificates, or core lifecycle to WayLane Node Agent.
 The autonomous WayLane Node is **separate** from the legacy deployment
 described below. Its Git-backed Compose definitions are now owned by
 `deploy/node/discovery/` and `deploy/node/classic/`, each with exactly
-two Compose files and a README. Each autonomous Node has a one-shot
+two Compose files, plus one common `deploy/node/README.md`. Each autonomous Node has a one-shot
 privileged bootstrap and one non-privileged controller with private rootless
 Docker. Single-Xray DEV control is implemented; other cores and production
 VPN client ingress are not accepted. See `deploy/node/README.md` and
-`agent/README.md`. Do not migrate this legacy stack as a side effect.
+`README.md`. Do not migrate this legacy stack as a side effect.
 
 ## Legacy single-process node
 
