@@ -260,7 +260,8 @@ def test_node_is_an_independent_wss_deployment_with_no_old_compose():
         agent = generic["services"]["agent"]
         assert agent["user"] == "1000:1000"
         assert agent["environment"]["CONTROL_PANEL_URL"] == "${CONTROL_PANEL_URL:?}"
-        assert agent["build"]["dockerfile"] == "services/node/node.Dockerfile"
+        assert agent["build"]["dockerfile"] == "services/agent/agent.Dockerfile"
+        assert agent["network_mode"] == "host"
         assert not agent.get("ports")
         assert "NODE_NAME" not in agent["environment"]
     assert not (ROOT / "services/node/docker-compose.yaml").exists()

@@ -248,3 +248,10 @@ func TestNodeDefaultsToHostMachineName(t *testing.T) {
 		t.Fatal("missing host /etc/hostname mount must fail closed")
 	}
 }
+
+func TestNodeRequiresStableAgentOwnership(t *testing.T) {
+	t.Setenv("NODE_MANAGED_BY_AGENT", "false")
+	if err := run(context.Background()); err == nil || !strings.Contains(err.Error(), "Agent") {
+		t.Fatalf("standalone Node unexpectedly started its own rootless daemon: %v", err)
+	}
+}

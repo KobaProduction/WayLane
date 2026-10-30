@@ -10,10 +10,9 @@ def main():
     for owner in OWNERS:
         path = ROOT / "services" / owner
         if owner == "node":
-            # The autonomous Node has exactly one Go entrypoint and two
-            # independent Dockerfile roles; no obsolete generic Dockerfile.
-            files = ("AGENTS.md", "node.Dockerfile", "bootstrap.Dockerfile",
-                     "bootstrap.sh", "main.go", "go.mod", "README.md", "LICENSE")
+            # The inner Node is an independently updatable runtime image.
+            files = ("AGENTS.md", "node.Dockerfile", "main.go",
+                     "go.mod", "README.md", "LICENSE")
         else:
             files = ("AGENTS.md", "Dockerfile", "README.md", "LICENSE", "UPSTREAM.md")
         for name in files:
@@ -28,6 +27,12 @@ def main():
         if owner != "node":
             assert (path / ".env.example").exists()
         print(f"{owner}: independently scoped CI and service files")
+    agent = ROOT / "services/agent"
+    for name in ("AGENTS.md", "README.md", "agent.Dockerfile", "bootstrap.Dockerfile",
+                 "node-seed.Dockerfile", "bootstrap.sh", "main.go", "go.mod", "verify.sh", "LICENSE"):
+        assert (agent / name).is_file(), f"Missing Agent runtime: {name}"
+    assert not (ROOT / "services/node/bootstrap.sh").exists()
+    assert not (ROOT / "services/node/runtime.go").exists()
     rel = yaml.load(
         (ROOT / ".github/workflows/release-image.yml").read_text(),
         Loader=yaml.BaseLoader,

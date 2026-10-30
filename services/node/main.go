@@ -295,7 +295,10 @@ var hostNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 func run(ctx context.Context) error {
 	if os.Geteuid() == 0 {
-		return errors.New("WayLane Agent must never run as root")
+		return errors.New("WayLane Node must never run as host root")
+	}
+	if os.Getenv("NODE_MANAGED_BY_AGENT") != "true" {
+		return errors.New("Node must be installed and supervised by the stable WayLane Agent")
 	}
 	panelURL := os.Getenv("CONTROL_PANEL_URL")
 	origin, err := panelOrigin(panelURL, os.Getenv("DEV_ALLOW_HTTP") == "true")
@@ -317,11 +320,10 @@ func run(ctx context.Context) error {
 		return err
 	}
 	socket := os.Getenv("ROOTLESS_SOCKET")
-	engineExit, err := startRootlessEngine(ctx, socket)
-	if err != nil {
-		return err
+	if socket != "/run/user/1000/docker.sock" {
+		return errors.New("Node requires the Agent-owned private rootless Docker socket")
 	}
-	if err := awaitRootlessEngine(ctx, socket, engineExit); err != nil {
+	if err := checkRootlessDocker(ctx, socket); err != nil {
 		return err
 	}
 	client := &http.Client{

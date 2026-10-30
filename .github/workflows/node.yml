@@ -4,12 +4,14 @@ on:
     branches: [main, development, migration/waylane-monorepo]
     paths:
       - "services/node/**"
+      - "services/agent/**"
       - "deploy/node/**/*.yaml"
       - "!services/node/**/*.md"
       - ".github/workflows/node.yml"
   pull_request:
     paths:
       - "services/node/**"
+      - "services/agent/**"
       - "deploy/node/**/*.yaml"
       - "!services/node/**/*.md"
       - ".github/workflows/node.yml"
@@ -27,6 +29,9 @@ jobs:
         with:
           go-version-file: services/node/go.mod
       - run: ./scripts/verify.sh
+      - name: Verify stable Agent source
+        working-directory: services/agent
+        run: ./verify.sh
   node-images:
     needs: verify
     runs-on: ubuntu-latest
@@ -43,7 +48,14 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./services/node/bootstrap.Dockerfile
+          file: ./services/agent/agent.Dockerfile
+          push: false
+          platforms: linux/amd64
+          tags: waylane-agent:ci
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./services/agent/bootstrap.Dockerfile
           push: false
           platforms: linux/amd64
           tags: waylane-bootstrap:ci
@@ -83,7 +95,7 @@ jobs:
               export DISCOVERY_TOKEN=wl_disc_ci-only
             fi
             docker compose -p waylane-node-ci -f "deploy/node/$mode/.node.native-check.yaml" config --format json |
-              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert not s["agent"].get("privileged",False); assert "CONTROL_TRANSPORT" not in s["agent"]["environment"]; assert "GRPC_DEV_INSECURE" not in s["agent"]["environment"]; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
+              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert s["agent"]["network_mode"]=="host"; assert not s["agent"].get("privileged",False); assert "CONTROL_TRANSPORT" not in s["agent"]["environment"]; assert "GRPC_DEV_INSECURE" not in s["agent"]["environment"]; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
           done
           # Both independent generic entrypoints must keep identical security
           # and runtime shape; only their registration credential may differ.

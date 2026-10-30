@@ -7,7 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 MODES = ("classic", "discovery")
-WATCHED_NODE_SOURCE = ("services/node/**",)
+WATCHED_NODE_SOURCE = ("services/agent/**",)
 
 
 def _read(path: str) -> dict:
@@ -41,34 +41,33 @@ def test_node_deployments_are_outside_service_source_and_have_single_entrypoints
         watch_block = watch_block.split(fences + "text", 1)[1].split(fences, 1)[0].strip()
         assert watch_block.splitlines() == [
             f"deploy/node/{mode}/*.yaml",
-            "services/node/**",
-            "!services/node/**/*.md",
+            "services/agent/**",
+            "!services/agent/**/*.md",
         ]
         assert "Base Directory" in text and f"/deploy/node/{mode}" in text
         assert "/docker-compose.coolify.yaml" in text
 
 
-def test_bootstrap_is_a_single_root_script_with_no_separate_source_folder():
+def test_stable_agent_owns_bootstrap_and_node_is_independently_updatable():
+    agent = ROOT / "services/agent"
     node = ROOT / "services/node"
-    assert not (node / "bootstrap").exists()
-    assert (node / "bootstrap.sh").is_file()
-    assert (node / "bootstrap.Dockerfile").is_file()
-    assert "sh -n bootstrap.sh" in (node / "scripts/verify.sh").read_text()
-    dockerfile = (node / "bootstrap.Dockerfile").read_text()
-    assert "COPY services/node/bootstrap.sh" in dockerfile
-    assert "ENTRYPOINT" in dockerfile
-    assert not (node / "agent").exists(), "No nested agent Go module or source directory"
+    assert (agent / "bootstrap.sh").is_file()
+    assert (agent / "bootstrap.Dockerfile").is_file()
+    assert "sh -n bootstrap.sh" in (agent / "verify.sh").read_text()
+    bootstrap = (agent / "bootstrap.Dockerfile").read_text()
+    assert "COPY services/agent/bootstrap.sh" in bootstrap
+    image = (agent / "agent.Dockerfile").read_text()
+    assert "COPY services/agent/*.go" in image
+    assert "COPY services/node/*.go" in image, "Agent installer must seed its first Node"
+    assert (agent / "node-seed.Dockerfile").is_file()
     assert (node / "main.go").is_file()
     assert (node / "node.Dockerfile").is_file()
-    image = (node / "node.Dockerfile").read_text()
-    assert "COPY services/node/go.mod services/node/go.sum" in image
-    assert "COPY services/node/*.go" in image
-    assert "go build -trimpath" in image
-    assert not (node / "cmd/agent").exists()
-    assert not (node / "backend").exists()
-    assert not (node / "controller").exists()
-    assert not (node / "common").exists()
-    assert not (node / "cmd/go.mod").exists()
+    assert "FROM docker:29.5-cli" in (node / "node.Dockerfile").read_text()
+    assert "NODE_MANAGED_BY_AGENT" in (node / "main.go").read_text()
+    assert not (node / "runtime.go").exists(), "Only Agent may start embedded rootless Docker"
+    assert not (node / "bootstrap.Dockerfile").exists()
+    assert not (node / "bootstrap.sh").exists()
+    assert not (node / "cmd/node").exists()
 
 
 def test_classic_and_discovery_share_identical_node_runtime_and_security():
@@ -81,19 +80,22 @@ def test_classic_and_discovery_share_identical_node_runtime_and_security():
         bootstrap, agent = source["services"]["bootstrap"], source["services"]["agent"]
         assert bootstrap["privileged"] is True and bootstrap["restart"] == "no"
         assert bootstrap["network_mode"] == "none"
+        assert agent["network_mode"] == "host", "Public core TCP/UDP must not be behind isolated outer NAT"
         assert agent["user"] == "1000:1000" and not agent.get("privileged")
         assert agent["depends_on"]["bootstrap"]["condition"] == "service_completed_successfully"
         assert "ports" not in agent and "ports" not in bootstrap
         assert agent["cap_drop"] == ["ALL"]
         assert agent["read_only"] is True
+        assert "waylane-node-runtime" in " ".join(agent["healthcheck"]["test"])
+        assert agent["healthcheck"]["start_period"] == "120s"
         assert any(
             isinstance(v, dict) and v["source"] == "/etc/hostname"
             and v["target"] == "/etc/waylane/host-hostname" and v["read_only"]
             for v in agent["volumes"]
         )
         assert not any("/var/run/docker.sock" in str(v) for v in agent["volumes"])
-        for unit, dockerfile in (("agent", "services/node/node.Dockerfile"), (
-            "bootstrap", "services/node/bootstrap.Dockerfile",
+        for unit, dockerfile in (("agent", "services/agent/agent.Dockerfile"), (
+            "bootstrap", "services/agent/bootstrap.Dockerfile",
         )):
             build = source["services"][unit]["build"]
             assert build["dockerfile"] == dockerfile

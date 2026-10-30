@@ -1,36 +1,26 @@
 # WayLane Node — Git-backed deployment sources
 
-**Deployment definitions live here; runtime source remains in
-`services/node/`: a small `bootstrap.sh`, `bootstrap.Dockerfile` and
-the Go main package built by `node.Dockerfile`.**
-
-A Node is one installation comprising exactly two outer Compose services:
-a privileged **one-shot bootstrap** followed by one non-root **Node**
-supervising its own private rootless Docker and VPN core containers. A
-Classic or Discovery Node is a **registration mode**, not another runtime.
+**Each installation has exactly two outer Compose services:** a privileged
+one-shot bootstrap plus the stable non-root Agent. Agent starts embedded
+rootless Docker and supervises a separately updatable Node image. Node owns
+Panel WSS and manages its inner VPN Core containers. There is no extra outer
+Node service or system Docker socket. Classic and Discovery are independent
+registration options under this same runtime.
 
 | Mode | Entrypoint | Enrollment |
 | --- | --- | --- |
-| **Discovery** (preferred for the first isolated DEV test) | [discovery/](discovery/) | One protected `DISCOVERY_TOKEN`; the Node enrolls itself |
-| Classic | [classic/](classic/) | One protected `NODE_TOKEN`; the panel pre-creates an identity |
+| Discovery | [discovery/](discovery/) | Invitation + approval |
+| Classic | [classic/](classic/) | Panel-issued individual Node token |
 
-Each directory independently owns a **standalone**
-`docker-compose.yaml` and a Coolify `docker-compose.coolify.yaml`,
-with the single operational README in this parent directory. These are separate alternatives; **use one
-mode per Node**. Each runtime is fully self-contained, rather than
-inheriting a second mode or reaching into `services/node` for Compose.
-A source contract test compares their common security/runtime topology
-so changes cannot silently diverge. Only the adapter uses Coolify's
-`exclude_from_hc: true` for a completed bootstrap; no third long-running
-service is created.
+Each mode has generic and Coolify Compose manifests.
 
 ## Source, build and deployment boundary
 
 - GitHub repository: `KobaProduction/WayLane`; release/DEV branch chosen
   by the operator, normally `main` after approved merge.
 - Build context: **monorepo root**; Dockerfiles are
-  `services/node/bootstrap.Dockerfile` and
-  `services/node/node.Dockerfile`. Coolify builds directly from Git.
+  `services/agent/bootstrap.Dockerfile` and
+  `services/agent/agent.Dockerfile`. Coolify builds directly from Git.
   No Docker registry publication, prerelease tag or external standalone
   Node repository is needed for the first pilot.
 - Coolify Base Directory: `/deploy/node/discovery` **or**
@@ -53,21 +43,21 @@ service is created.
 
 ```text
 deploy/node/discovery/*.yaml
-services/node/**
-!services/node/**/*.md
+services/agent/**
+!services/agent/**/*.md
 ```
 
 **Classic:**
 
 ```text
 deploy/node/classic/*.yaml
-services/node/**
-!services/node/**/*.md
+services/agent/**
+!services/agent/**/*.md
 ```
 
 Paths are repository-relative. The first pattern watches only that mode's
-two Compose files; the second watches all Node source (both Dockerfiles,
-the bootstrap script, single Go command and module dependencies). The final
+two Compose files; the second watches all Node source (Agent Dockerfiles,
+bootstrap script and stable Agent runtime). The final
 negation deliberately excludes Node Markdown documentation. The common
 `deploy/node/README.md` is outside both resource Watch Paths, so README
 changes alone do **not** trigger Coolify's Git webhook deployments.
@@ -116,6 +106,15 @@ Set `CONTROL_PANEL_URL` to the trusted public HTTPS Panel origin and
 `DISCOVERY_TOKEN` is always empty, `DEV_ALLOW_HTTP` is forced false.
 No extra DNS listener, gRPC target or published Node management port is
 needed. Both profiles build the same Node runtime.
+
+## Host network and dynamic ports
+
+The outer Agent uses `network_mode: host`. Replaceable Node and VPN
+Cores use host networking on private rootless Docker 29.5 or later.
+There is no static Compose `ports:` map: a Core can change its UDP/TCP
+listeners at runtime without reinstalling Agent. The physical Linux host
+firewall/cloud security rules, Docker Desktop host networking, IPv6,
+privileged ports (<1024) and TUN/UDP must be accepted separately.
 
 ## Experimental AWG 3.1 — isolated Docker Desktop only
 

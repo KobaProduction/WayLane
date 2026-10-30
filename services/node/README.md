@@ -1,17 +1,17 @@
-# WayLane Node
+# Replaceable WayLane Node
 
-A single autonomous Go program at `services/node/` manages the Node and its
-independent VPN core containers using a private rootless Docker daemon.
+The Node is not the installed Agent. The stable
+[Agent](../agent/README.md) owns private rootless Docker and deploys or
+updates Node as a separate image through a fixed local Unix API.
+Node owns the outbound WSS/Protobuf connection and its VPN Core children.
+It uses the Agent-owned rootless Docker socket and never starts a
+second daemon. Changing a Node version does not restart Agent.
 
-## Runtime
-
-- `bootstrap.sh` and `bootstrap.Dockerfile`: one-shot privileged
-  initialization of private persistent volumes (UID/GID 1000).
-- `node.Dockerfile`: one unprivileged long-lived Node with its own
-  RootlessKit and private Docker socket.
-- `go.mod`: minimal dependencies for binary WebSocket and Protobuf.
-- Root Go sources: Node registration, telemetry, desired state, Xray child
-  lifecycle and persistent identity.
+Node and all VPN Cores use host networking on rootless Docker >=29.5,
+under an outer Agent with Linux host networking. Core TCP/UDP listen ports
+can be changed dynamically without editing Compose or restarting Agent.
+Rootless privileged ports below 1024 and real external traffic acceptance
+still require separate verification.
 
 The internal `coreDriver` dispatches desired-state Protobuf commands by exact
 `core_id` without adding a separate management listener. Only `xray/default`
@@ -61,21 +61,8 @@ currently executes only Xray. Do not assign AWG capabilities or route client
 traffic until a rootless TUN/UDP, lifecycle and peer-sync acceptance passes.
 Plain WireGuard clients are compatible only when AWG obfuscation is disabled.
 
-The Node initiates a single full-duplex WSS session to the Control Panel
-using the configured `CONTROL_PANEL_URL`. Commands and telemetry use
-binary Protobuf `Envelope` messages. The Node name comes from a read-only
-mount of the host's `/etc/hostname`; no `NODE_NAME` is needed.
-
-**Deployment definitions are separate from source:**
-[deploy/node/README.md](../../deploy/node/README.md). Choose either
-Discovery (Node enrolls with a protected invitation) or Classic
-(panel provisions its individual token). Each has one standalone
-`docker-compose.yaml` and one `docker-compose.coolify.yaml`.
-
-## Verification and limits
-
-Run `./scripts/verify.sh` with Go 1.27+, or let CI run its equivalent.
-The source and Compose checks do not prove runtime RootlessKit
-compatibility, real TCP/UDP VPN traffic, multiple engines, or completed
-initial enrollment. Pilot on an isolated host before using client traffic.
-No management HTTP port or host Docker socket should be exposed.
+The Node initiates the single outbound binary-Protobuf WSS to Panel.
+Node identity and Core state persist across updates. Agent controls Node
+image lifetime only, through its local versioned Unix socket. See
+shared/contracts/NODE_CONTROL.md, services/agent/README.md and
+deploy/node/README.md. Live RootlessKit TUN/UDP client testing is pending.

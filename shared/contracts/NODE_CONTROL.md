@@ -1,9 +1,11 @@
 # WayLane Node control v1 — binary WebSocket + Protobuf
 
-The installed **Node** contains the one-shot bootstrap, an internal non-root
-`agent` controller and private independently managed VPN cores. Only the
-controller connects to the Control Panel; child VPN cores never receive
-panel credentials or the host identity.
+An installation has a stable **Agent** (owns private rootless Docker,
+Node installation, upgrades and recovery) and a replaceable **Node** (owns
+one outbound Panel WSS and manages separate VPN Cores). Outer Compose
+contains only bootstrap plus Agent; Node and Cores are inner containers.
+Agent has no VPN key material. The Agent local management API is a private
+Unix socket v1, not an additional Panel transport or network listener.
 
 ## Transport: one outbound WSS session
 
@@ -82,3 +84,12 @@ certificates or customer routing as a side effect.
 
 Related work: Issues #13 (VPN parity), #14 (Node lifecycle),
 #15 (Node binary control).
+
+## Dynamic Core TCP/UDP ports
+
+The stable Agent outer container runs with Linux host networking. Node and
+its rootless Docker 29.5+ child Cores use host networking too. This avoids
+static Compose port lists: each Core dynamically binds TCP/UDP ports,
+without an Agent restart. Ports below 1024 need a separate unprivileged
+binding policy; cloud firewall, IPv6 and VPN client traffic are not
+accepted by source/config tests.
