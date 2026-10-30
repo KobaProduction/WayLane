@@ -279,3 +279,25 @@ func TestAgentRollsBackWhenNewNodeCannotStart(t *testing.T) {
 		t.Fatal("no rollback to pinned previous Node image was attempted")
 	}
 }
+
+func TestDockerCLIUsesWritablePrivateConfigEvenWithReadOnlyHome(t *testing.T) {
+	path := t.TempDir()
+	docker := filepath.Join(path, "docker")
+	content := []byte("#!/bin/sh\necho \"$DOCKER_CONFIG\"\n")
+	if err := os.WriteFile(docker, content, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", path+":"+os.Getenv("PATH"))
+	t.Setenv("DOCKER_CONFIG", "/home/rootless/.docker")
+	got, err := systemDocker(context.Background(), "info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/tmp/waylane-docker-cli" {
+		t.Fatalf("Docker CLI still writes to readonly home: %q", got)
+	}
+	info, err := os.Stat(got)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+		t.Fatal("Docker CLI config directory not private", err)
+	}
+}

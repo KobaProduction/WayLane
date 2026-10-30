@@ -35,8 +35,17 @@ var nodeDigest = regexp.MustCompile(`^ghcr\.io/kobaproduction/waylane-node@sha25
 type dockerRun func(context.Context, ...string) (string, error)
 
 func systemDocker(ctx context.Context, args ...string) (string, error) {
+	// The installed Agent root filesystem is read-only. Docker CLI and
+	// buildx create config/context files under ~/.docker by default;
+	// confine them to the existing private writable /tmp tmpfs instead.
+	configDir := "/tmp/waylane-docker-cli"
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return "", errors.New("cannot prepare private Docker CLI config")
+	}
 	argv := append([]string{"--host", "unix://" + dockerSocket}, args...)
-	output, err := exec.CommandContext(ctx, "docker", argv...).Output()
+	cmd := exec.CommandContext(ctx, "docker", argv...)
+	cmd.Env = append(os.Environ(), "DOCKER_CONFIG="+configDir)
+	output, err := cmd.Output()
 	if err != nil {
 		return "", errors.New("private rootless Docker request failed")
 	}
