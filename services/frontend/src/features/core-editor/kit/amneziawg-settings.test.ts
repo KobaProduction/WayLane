@@ -94,8 +94,8 @@ test('JSON modal AWG preset shares editor defaults and plain WG mode preserves k
   assert.deepEqual(awg.amnezia, AMNEZIA_31_PRESET)
   assert.deepEqual(original, { private_key: 'synthetic-only', address: ['10.5.0.1/24'], peers: [{ public_key: 'peer-test' }] })
   const plain = asPlainWireGuardCore(awg)
-  assert.equal(Object.hasOwn(plain, 'engine'), false)
-  assert.equal(Object.hasOwn(plain, 'amnezia'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(plain, 'engine'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(plain, 'amnezia'), false)
   assert.deepEqual(plain, original)
 })
 
