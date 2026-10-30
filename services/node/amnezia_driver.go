@@ -15,8 +15,8 @@ import (
 type awgEngine interface {
 	Start(context.Context, awgWireConfig) error
 	Reconfigure(context.Context, awgWireConfig, awgWireConfig) error
-	Stop(context.Context) error
-	Healthy(context.Context) error
+	Stop(context.Context, awgWireConfig) error
+	Healthy(context.Context, awgWireConfig) error
 }
 
 type awgDesired struct {
@@ -134,7 +134,13 @@ func (d awgCoreDriver) ApplyDesired(ctx context.Context, message *controlEnvelop
 	}
 	if desired.Generation <= state.LastGeneration {
 		if state.Status == "running" && state.LastResultStatus == "" {
-			if err := d.engine.Healthy(ctx); err != nil {
+			// Replayed results refer to the exact persisted interface, not any
+			// other socket left in the private runtime directory.
+			if len(state.Config) == 0 {
+				return coreApplyResult{Status: "error", ErrorCode: "awg_unhealthy"}, nil
+			}
+			current, decodeErr := awgDecodeStrict(state.Config)
+			if decodeErr != nil || d.engine.Healthy(ctx, current) != nil {
 				return coreApplyResult{Status: "error", ErrorCode: "awg_unhealthy"}, nil
 			}
 		}
@@ -176,7 +182,10 @@ func (d awgCoreDriver) ApplyDesired(ctx context.Context, message *controlEnvelop
 		if state.Status != "running" {
 			return coreApplyResult{}, errors.New("AWG is not running")
 		}
-		err = d.engine.Stop(ctx)
+		if len(state.Config) == 0 {
+			return coreApplyResult{}, errors.New("AWG stored config required for safe stop")
+		}
+		err = d.engine.Stop(ctx, old)
 	}
 	state.LastGeneration = desired.Generation
 	state.ErrorCode = ""

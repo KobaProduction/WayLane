@@ -61,9 +61,15 @@ func (r awgChildRuntime) privateSocketDir() (string, error) {
 	if !filepath.IsAbs(r.stateDir) || filepath.Clean(r.stateDir) != r.stateDir {
 		return "", errors.New("absolute clean Node state directory required")
 	}
-	base := filepath.Join(r.stateDir, "awg", "uapi")
-	if err := os.MkdirAll(base, 0700); err != nil {
+	// Validate the parent AWG directory first: MkdirAll(base) alone may
+	// follow a symlink in an intermediate path of the persistent volume.
+	statePath, err := awgStateFile(r.stateDir)
+	if err != nil {
 		return "", err
+	}
+	base := filepath.Join(filepath.Dir(statePath), "uapi")
+	if err := os.Mkdir(base, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", errors.New("unable to create private AWG UAPI directory")
 	}
 	info, err := os.Lstat(base)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
@@ -152,7 +158,9 @@ func (r awgChildRuntime) Start(ctx context.Context, config awgWireConfig) (err e
 			defer cancel()
 			// A failed startup must never remove a differently owned Core.
 			if r.verifyOwned(cleanupCtx) == nil {
-				_, _ = r.run(cleanupCtx, "rm", "-f", awgChildName)
+				if _, cleanupErr := r.run(cleanupCtx, "rm", "-f", awgChildName); cleanupErr == nil {
+					_ = r.removeStoppedSocket(config.InterfaceName)
+				}
 			}
 		}
 	}()
@@ -177,7 +185,7 @@ func (r awgChildRuntime) Start(ctx context.Context, config awgWireConfig) (err e
 
 // Healthy checks both Docker ownership/running state and the mounted private
 // UAPI socket. Source checks cannot substitute for a real UDP peer handshake.
-func (r awgChildRuntime) Healthy(ctx context.Context) error {
+func (r awgChildRuntime) Healthy(ctx context.Context, expected awgWireConfig) error {
 	if err := r.verifyOwned(ctx); err != nil {
 		return err
 	}
@@ -189,37 +197,52 @@ func (r awgChildRuntime) Healthy(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return errors.New("AWG private socket directory unavailable")
+	if !awgInterfaceName.MatchString(expected.InterfaceName) {
+		return errors.New("invalid expected AWG interface")
 	}
-	found := false
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".sock") {
-			continue
-		}
-		info, e := os.Lstat(filepath.Join(dir, entry.Name()))
-		if e == nil && info.Mode()&os.ModeSocket != 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return errors.New("AWG private UAPI socket unavailable")
+	info, err := os.Lstat(filepath.Join(dir, expected.InterfaceName+".sock"))
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return errors.New("expected AWG private UAPI socket unavailable")
 	}
 	return nil
 }
 
 // Stop only touches the Node-labeled child and never a host/core process.
-func (r awgChildRuntime) Stop(ctx context.Context) error {
+// Remove a socket only after the explicitly-owned child was removed. Never
+// follow symlinks or delete arbitrary files from the private state volume.
+func (r awgChildRuntime) removeStoppedSocket(interfaceName string) error {
+	if !awgInterfaceName.MatchString(interfaceName) {
+		return errors.New("invalid AWG interface name for cleanup")
+	}
+	dir, err := r.privateSocketDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, interfaceName+".sock")
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return errors.New("refusing to unlink an unexpected AWG UAPI path")
+	}
+	return os.Remove(path)
+}
+
+func (r awgChildRuntime) Stop(ctx context.Context, config awgWireConfig) error {
+	if !awgInterfaceName.MatchString(config.InterfaceName) {
+		return errors.New("invalid expected AWG interface")
+	}
 	if err := r.verifyOwned(ctx); err != nil {
 		return err
 	}
 	if _, err := r.run(ctx, "stop", "--time", "5", awgChildName); err != nil {
 		return err
 	}
-	_, err := r.run(ctx, "rm", awgChildName)
-	return err
+	if _, err := r.run(ctx, "rm", awgChildName); err != nil {
+		return err
+	}
+	return r.removeStoppedSocket(config.InterfaceName)
 }
 
 // Reconfigure applies UAPI changes to the same verified child without
@@ -227,6 +250,8 @@ func (r awgChildRuntime) Stop(ctx context.Context) error {
 // changes: these require a separately reviewed stop/deploy transaction.
 func (r awgChildRuntime) Reconfigure(ctx context.Context, original, next awgWireConfig) error {
 	if next.InterfaceName != original.InterfaceName || next.ListenPort != original.ListenPort ||
+		next.PrivateKey != original.PrivateKey || next.Engine != original.Engine ||
+		next.MTU != original.MTU || next.PublicKey != original.PublicKey ||
 		len(next.Address) != len(original.Address) {
 		return errAWGRequiresRestart
 	}

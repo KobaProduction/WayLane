@@ -16,7 +16,7 @@ type mockAWGEngine struct {
 	failure                  string
 }
 
-func (m *mockAWGEngine) Healthy(_ context.Context) error {
+func (m *mockAWGEngine) Healthy(_ context.Context, _ awgWireConfig) error {
 	m.healthy++
 	if m.failure == "health" {
 		return errors.New("synthetic no socket")
@@ -41,7 +41,7 @@ func (m *mockAWGEngine) Reconfigure(_ context.Context, _, _ awgWireConfig) error
 	}
 	return nil
 }
-func (m *mockAWGEngine) Stop(_ context.Context) error {
+func (m *mockAWGEngine) Stop(_ context.Context, _ awgWireConfig) error {
 	m.stops++
 	if m.failure == "stop" {
 		return errors.New("synthetic sensitive error")

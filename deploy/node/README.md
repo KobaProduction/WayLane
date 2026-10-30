@@ -132,6 +132,12 @@ for this experiment. Do not consider a Docker image build, AWG UAPI test or
 successful control handshake proof of UDP/TUN reachability. Require an isolated
 host test for container device/NET_ADMIN permissions, peer handshake, client
 traffic, routing, rollback and reconnect before any real VPN exposure.
+The outer bootstrap/agent Compose publishes no UDP port, and the AWG child
+currently uses `--network host` only within the **nested rootless** runtime.
+A working UAPI socket and TUN character device in the outer Node do not
+prove externally reachable VPN ingress. Inspect the entire host → outer
+Compose → rootless daemon → child UDP forwarding chain and explicitly
+approve its networking model before adding public port mappings.
 
 ## Runtime secrets and acceptance
 
