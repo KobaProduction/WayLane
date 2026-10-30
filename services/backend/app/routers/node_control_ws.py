@@ -4,6 +4,7 @@ import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from app.node_binary_control import MAX_BINARY_FRAME, AgentBinarySession, check_agent, decode_frame
 
@@ -71,7 +72,13 @@ async def control_websocket(ws: WebSocket):
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        try:
-            await ws.close(code=1000)
-        except RuntimeError:
-            pass
+        # A peer-initiated disconnect (or an earlier protocol rejection) has
+        # already closed the WebSocket. Sending a second close can race with
+        # TestClient/ASGI teardown and raise a transport cancellation.
+        if (ws.client_state is not WebSocketState.DISCONNECTED
+                and ws.application_state is not WebSocketState.DISCONNECTED):
+            try:
+                await ws.close(code=1000)
+            except (OSError, RuntimeError, WebSocketDisconnect):
+                # Transport vanished between the state check and close.
+                pass
