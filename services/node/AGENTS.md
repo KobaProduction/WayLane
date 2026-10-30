@@ -14,4 +14,8 @@ independent systemd service or extra Compose rootless sidecar.
 `scripts/verify.sh` owns the Go source gate. The Go dependencies are
 isolated to the Node's WSS/Protobuf runtime. Validate both generic and
 Coolify Compose and the host runtime before declaring deployment ready.
+Experimental AWG 3.1 is gated by AWG_EXPERIMENTAL_DEV=true,
+DEV_ALLOW_HTTP=true, a Docker Desktop/loopback Panel origin, linux/amd64 and
+/dev/net/tun. Coolify explicitly disables the DEV flags. Backend independently
+stores desired AWG generations; the WSS endpoint handles both core IDs.
 Do not claim production traffic support from source tests alone.

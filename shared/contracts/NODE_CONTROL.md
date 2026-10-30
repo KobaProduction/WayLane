@@ -54,9 +54,12 @@ credentials and text frames are rejected. AmneziaWG 3.1 is the prioritized
 next core (with plain WireGuard supported only when obfuscation is disabled),
 but `awg/default` is reserved, not advertised or accepted by this Xray-only
 Node yet. A source-tested AWG 3.1 UAPI codec and private-socket transport are
-present; this is not an active child container driver and does not establish
-UDP traffic. Do not send AWG desired commands until the driver, independent
-per-core desired-state persistence and isolated TUN/UDP tests are complete. The control channel never
+present, alongside an experimental AWG child driver and independent AWG
+Panel desired state. Normal Nodes never advertise AWG. The driver is only
+registered in an explicitly opted-in, local loopback Docker Desktop pilot;
+Coolify disables this gate. **AWG is not accepted for production UDP traffic**
+until rootless TUN, routing, peer handshake, recovery and bidirectional client
+tests pass. The control channel never
 carries client VPN traffic and does not publish child core TCP/UDP ports.
 
 ## Deploy and acceptance

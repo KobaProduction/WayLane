@@ -15,6 +15,7 @@ services:
       DISCOVERY_TOKEN: ${DISCOVERY_TOKEN:?}
       NODE_TOKEN: ""
       DEV_ALLOW_HTTP: "false"
+      AWG_EXPERIMENTAL_DEV: "false"
 
 # A Coolify resource owns its own volumes/Compose project identity.
 volumes:

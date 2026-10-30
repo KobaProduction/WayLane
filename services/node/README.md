@@ -28,6 +28,21 @@ from the Panel, TUN address/route setup or UDP ingress. In particular, UAPI
 The AmneziaWG-Go 3.1 implementation and license provenance are referenced in
 `LICENSE.AMNEZIAWG` (upstream project: https://github.com/amnezia-vpn/amneziawg-go).
 
+The experimental `awgCoreDriver` now has an independently persisted desired
+`generation`, last accepted configuration and redacted result status. The
+pinned image is only available for `linux/amd64`. Its child launcher requires
+NET_ADMIN and `/dev/net/tun` within the **private rootless** Docker daemon;
+address/link setup, peer UAPI updates and owned-container stop are implemented.
+The Panel uses a separate durable AWG desired table and sends commands only
+to capability-advertising Nodes. **Normal deployments never advertise AWG.**
+
+For a disposable Docker Desktop pilot only, both generic Compose profiles
+expose `AWG_EXPERIMENTAL_DEV=false` by default. Opt-in requires that flag,
+`DEV_ALLOW_HTTP=true`, an HTTP Panel origin on Docker Desktop/loopback,
+`linux/amd64` and a visible character device `/dev/net/tun`. The Coolify
+adapters hard-disable both DEV flags. This remains an unaccepted experiment,
+not production routing or a tested VPN service.
+
 **Core priority:** AmneziaWG 3.1 is the next target engine; plain WireGuard
 is a compatibility profile, not a second independent control stack. Backend
 validation and the Core Editor support AWG configuration, but this Node

@@ -40,8 +40,10 @@ through a private Unix socket. Neither host systemd,
 a separate Compose Docker sidecar, nor the host/system Docker socket belongs
 in this architecture. Only the Node communicates with the panel; the Node
 owns one DEV Xray child (deploy/pull/update/restart/stop,
-per-inbound account updates), while multi-engine drivers, public UDP/TCP ingress
-and production traffic are **not** accepted.
+per-inbound account updates). An experimental AWG 3.1 child driver, independent
+Panel desired-state table and private UAPI are available only behind an
+explicit Docker Desktop loopback DEV opt-in; Coolify always disables it.
+Public UDP/TCP ingress and production AWG traffic are **not** accepted.
 The security/runtime pilot is not accepted by source CI alone.
 
 The control channel and Node-versus-Core ownership contract is

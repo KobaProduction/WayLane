@@ -117,6 +117,22 @@ Set `CONTROL_PANEL_URL` to the trusted public HTTPS Panel origin and
 No extra DNS listener, gRPC target or published Node management port is
 needed. Both profiles build the same Node runtime.
 
+## Experimental AWG 3.1 — isolated Docker Desktop only
+
+Both generic Compose profiles default `AWG_EXPERIMENTAL_DEV` to `false`.
+For a disposable local pilot only, an operator may explicitly opt in with
+`AWG_EXPERIMENTAL_DEV=true`, `DEV_ALLOW_HTTP=true`, `CONTROL_PANEL_URL` pointing
+to Docker Desktop or loopback HTTP, a Linux amd64 Node and a TUN character
+device. The child is pinned to the official `amneziavpn/amneziawg-go` 3.1
+amd64 image digest and managed through private Rootless Docker. The panel
+requires a separately approved Node with advertised AWG support before it
+allows AWG desired-state generation. Persistent per-Core state is separate
+from Xray. **Coolify hard-disables both DEV flags** and must never be used
+for this experiment. Do not consider a Docker image build, AWG UAPI test or
+successful control handshake proof of UDP/TUN reachability. Require an isolated
+host test for container device/NET_ADMIN permissions, peer handshake, client
+traffic, routing, rollback and reconnect before any real VPN exposure.
+
 ## Runtime secrets and acceptance
 
 The only operator values are `CONTROL_PANEL_URL` (required HTTPS origin)

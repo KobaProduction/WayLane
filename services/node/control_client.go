@@ -147,8 +147,12 @@ func controlDesiredFromPayload(payload *structpb.Struct) (xrayDesired, error) {
 	return desired, nil
 }
 func controlTelemetryPayload(state string) (map[string]any, error) {
+	capabilities := []string{"docker.rootless.inspect", "xray.protobuf.binary"}
+	if experimentalAWGEnabled() {
+		capabilities = append(capabilities, "awg.protobuf.binary")
+	}
 	raw, err := json.Marshal(map[string]any{"node_version": version,
-		"capabilities":    []string{"docker.rootless.inspect", "xray.protobuf.binary"},
+		"capabilities":    capabilities,
 		"machine_metrics": collectNodeRuntimeMetrics(state)})
 	if err != nil {
 		return nil, err
@@ -158,9 +162,15 @@ func controlTelemetryPayload(state string) (map[string]any, error) {
 	return result, err
 }
 func runControlStream(ctx context.Context, stream binaryStream, ident identity, state, socket string) error {
-	return runControlStreamDrivers(ctx, stream, ident, state, map[string]coreDriver{
+	drivers := map[string]coreDriver{
 		"xray/default": xrayCoreDriver{socket: socket, stateDir: state},
-	})
+	}
+	// This registration is possible only in an explicitly opted-in local
+	// Docker Desktop pilot. Production Nodes never advertise AWG here.
+	if experimentalAWGEnabled() {
+		drivers["awg/default"] = awgCoreDriver{engine: newAWGChildRuntime(state, socket), stateDir: state}
+	}
+	return runControlStreamDrivers(ctx, stream, ident, state, drivers)
 }
 
 // Only registered core drivers may receive desired-state updates. This keeps

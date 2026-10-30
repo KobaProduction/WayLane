@@ -44,6 +44,8 @@ services:
       DISCOVERY_TOKEN: ""
       NODE_TOKEN: ${NODE_TOKEN:?}
       DEV_ALLOW_HTTP: ${DEV_ALLOW_HTTP:-false}
+      # Strict loopback-only development gate; never enabled for Coolify.
+      AWG_EXPERIMENTAL_DEV: ${AWG_EXPERIMENTAL_DEV:-false}
       # One authenticated WebSocket, binary Protobuf frames only.
       NODE_STATE_DIR: /var/lib/waylane-agent
       ROOTLESS_SOCKET: /run/user/1000/docker.sock

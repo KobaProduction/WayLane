@@ -9,14 +9,24 @@ OWNERS = ("backend", "frontend", "node")
 def main():
     for owner in OWNERS:
         path = ROOT / "services" / owner
-        for name in ("AGENTS.md", "Dockerfile", "README.md", "LICENSE", "UPSTREAM.md"):
+        if owner == "node":
+            # The autonomous Node has exactly one Go entrypoint and two
+            # independent Dockerfile roles; no obsolete generic Dockerfile.
+            files = ("AGENTS.md", "node.Dockerfile", "bootstrap.Dockerfile",
+                     "bootstrap.sh", "main.go", "go.mod", "README.md", "LICENSE")
+        else:
+            files = ("AGENTS.md", "Dockerfile", "README.md", "LICENSE", "UPSTREAM.md")
+        for name in files:
             assert (path / name).is_file(), f"Missing: {owner}/{name}"
         workflow = ROOT / ".github/workflows" / f"{owner}.yml"
         data = yaml.load(workflow.read_text(), Loader=yaml.BaseLoader)
         paths = data["on"]["push"]["paths"]
         assert f"services/{owner}/**" in paths
         assert all(f"services/{other}/**" not in paths for other in OWNERS if other != owner)
-        assert (path / ".env.example").exists()
+        # Only backend/frontend own a service .env template. Node secrets
+        # belong to its mode-scoped Git-backed Compose runtime.
+        if owner != "node":
+            assert (path / ".env.example").exists()
         print(f"{owner}: independently scoped CI and service files")
     rel = yaml.load(
         (ROOT / ".github/workflows/release-image.yml").read_text(),

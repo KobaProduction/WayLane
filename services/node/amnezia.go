@@ -89,8 +89,11 @@ func awgDecodeStrict(raw []byte) (awgWireConfig, error) {
 	} else if !errors.Is(err, io.EOF) {
 		return awgWireConfig{}, errors.New("invalid trailing AWG configuration")
 	}
-	if c.Engine != "amneziawg" {
-		return awgWireConfig{}, errors.New("AWG core requires engine=amneziawg")
+	if c.Engine != "amneziawg" && c.Engine != "wireguard" {
+		return awgWireConfig{}, errors.New("AWG Core requires an explicit AWG or plain WireGuard profile")
+	}
+	if c.Engine == "wireguard" && c.Amnezia != (awg31Options{}) {
+		return awgWireConfig{}, errors.New("plain WireGuard may not contain obfuscation settings")
 	}
 	if !awgInterfaceName.MatchString(c.InterfaceName) {
 		return awgWireConfig{}, errors.New("invalid AWG interface name")

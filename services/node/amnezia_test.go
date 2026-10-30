@@ -55,7 +55,7 @@ func TestAmnezia31UAPICompatibleWithBackendConfig(t *testing.T) {
 }
 func TestAmnezia31ValidationFailsClosed(t *testing.T) {
 	cases := map[string]func(*awgWireConfig){
-		"missing engine":         func(c *awgWireConfig) { c.Engine = "wireguard" },
+		"missing engine":         func(c *awgWireConfig) { c.Engine = "" },
 		"invalid iface":          func(c *awgWireConfig) { c.InterfaceName = "../delete" },
 		"invalid port":           func(c *awgWireConfig) { c.ListenPort = -1 },
 		"unsupported global PSK": func(c *awgWireConfig) { c.PreSharedKey = awgTestKey('z') },
@@ -99,7 +99,16 @@ func TestAmneziaPlainWireGuardDoesNotInheritAWGFields(t *testing.T) {
 	cfg.Engine = "wireguard"
 	cfg.Amnezia = awg31Options{}
 	raw, _ := json.Marshal(cfg)
+	if _, err := awgDecodeStrict(raw); err != nil {
+		t.Fatal("an explicit unobfuscated WireGuard profile must remain compatible:", err)
+	}
+	request, err := awgUAPISet(cfg)
+	if err != nil || !bytes.Contains(request, []byte("listen_port=51820")) {
+		t.Fatal("plain WireGuard UAPI conversion failed:", err)
+	}
+	cfg.Amnezia.Jc = 4
+	raw, _ = json.Marshal(cfg)
 	if _, err := awgDecodeStrict(raw); err == nil {
-		t.Fatal("plain WireGuard must not masquerade as an AWG core")
+		t.Fatal("obfuscated fields must never be accepted as plain WireGuard")
 	}
 }

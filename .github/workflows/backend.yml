@@ -48,6 +48,7 @@ jobs:
           tests/test_amneziawg_core.py
           tests/test_node_registry.py
           tests/test_node_binary_control.py
+          tests/test_node_awg_desired.py
           tests/test_node_resource_routing.py
           tests/test_pgbouncer_bootstrap.py
   image:
