@@ -17,6 +17,17 @@ The internal `coreDriver` dispatches desired-state Protobuf commands by exact
 `core_id` without adding a separate management listener. Only `xray/default`
 is registered; unsupported core IDs fail closed.
 
+The AmneziaWG 3.1 preparation code (`amnezia.go` and `amnezia_uapi.go`)
+validates the backend's AWG core configuration, constructs private UAPI
+`set=1` requests with complete peer replacement, and exchanges those requests
+through a bounded Unix socket. Peer keys and the server private key are never
+passed as Docker CLI arguments. This is **source-level readiness only**:
+there is no activated AWG core driver, child image launcher, peer synchronization
+from the Panel, TUN address/route setup or UDP ingress. In particular, UAPI
+`set=1` success by itself does not establish an interface route or VPN traffic.
+The AmneziaWG-Go 3.1 implementation and license provenance are referenced in
+`LICENSE.AMNEZIAWG` (upstream project: https://github.com/amnezia-vpn/amneziawg-go).
+
 **Core priority:** AmneziaWG 3.1 is the next target engine; plain WireGuard
 is a compatibility profile, not a second independent control stack. Backend
 validation and the Core Editor support AWG configuration, but this Node

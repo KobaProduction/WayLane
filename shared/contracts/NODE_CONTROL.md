@@ -53,8 +53,10 @@ Unknown versions/cores, stale generations, wrong identities, revoked
 credentials and text frames are rejected. AmneziaWG 3.1 is the prioritized
 next core (with plain WireGuard supported only when obfuscation is disabled),
 but `awg/default` is reserved, not advertised or accepted by this Xray-only
-Node yet. Do not send AWG desired commands until the driver and isolated
-TUN/UDP tests are complete. The control channel never
+Node yet. A source-tested AWG 3.1 UAPI codec and private-socket transport are
+present; this is not an active child container driver and does not establish
+UDP traffic. Do not send AWG desired commands until the driver, independent
+per-core desired-state persistence and isolated TUN/UDP tests are complete. The control channel never
 carries client VPN traffic and does not publish child core TCP/UDP ports.
 
 ## Deploy and acceptance
