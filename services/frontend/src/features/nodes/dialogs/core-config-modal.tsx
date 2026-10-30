@@ -38,6 +38,7 @@ import { toast } from 'sonner'
 import type { CoreBackendType, CoreConfigFormValues } from '@/features/nodes/forms/core-config-form'
 import { VlessAdvancedGenerationModal, type VlessKeyVariant } from '@/features/core-editor/components/shared/vless-advanced-generation-modal'
 import { XrayInboundTagPicker } from '@/features/core-editor/components/shared/xray-inbound-tag-selectors'
+import { withAmneziaCorePreset, asPlainWireGuardCore } from '@/features/core-editor/kit/amneziawg-settings'
 
 interface CoreConfigModalProps {
   isDialogOpen: boolean
@@ -301,7 +302,10 @@ export default function CoreConfigModal({ isDialogOpen, onOpenChange, form, edit
       if (nextBackendType === 'wg') {
         const keyPair = generateWireGuardKeyPair()
         setGeneratedWireGuardKeyPair(keyPair)
-        defaultTemplate = createWireGuardCoreConfigJson(keyPair)
+        defaultTemplate = JSON.stringify(
+          withAmneziaCorePreset(JSON.parse(createWireGuardCoreConfigJson(keyPair)) as Record<string, unknown>),
+          null, 2,
+        )
       } else {
         defaultTemplate = DEFAULT_XRAY_CORE_CONFIG_JSON
       }
@@ -316,13 +320,19 @@ export default function CoreConfigModal({ isDialogOpen, onOpenChange, form, edit
     try {
       const config = JSON.parse(form.getValues('config')) as Record<string, unknown>
       // Existing WG identities and peer allocations must be retained.
-      const awg = {
-        s1: 16, s2: 16, s3: 16, s4: 16,
-        h1: '100', h2: '200', h3: '300', h4: '400',
-        jc: 4, jmin: 24, jmax: 48,
-        random_trailers: true,
-      }
-      const next = JSON.stringify({ ...config, engine: 'amneziawg', amnezia: awg }, null, 2)
+      const next = JSON.stringify(withAmneziaCorePreset(config), null, 2)
+      form.setValue('config', next, { shouldDirty: true, shouldValidate: true })
+      validateJsonContent(next)
+      debouncedConfigChange(next)
+    } catch {
+      toast.error(t('coreConfigModal.invalidJson', { defaultValue: 'Invalid WireGuard JSON configuration' }))
+    }
+  }, [form, validateJsonContent, debouncedConfigChange, t])
+
+  const applyPlainWireGuardTemplate = useCallback(() => {
+    try {
+      const config = JSON.parse(form.getValues('config')) as Record<string, unknown>
+      const next = JSON.stringify(asPlainWireGuardCore(config), null, 2)
       form.setValue('config', next, { shouldDirty: true, shouldValidate: true })
       validateJsonContent(next)
       debouncedConfigChange(next)
@@ -1006,12 +1016,16 @@ export default function CoreConfigModal({ isDialogOpen, onOpenChange, form, edit
 
                     <div>
                       {!isXrayBackend && (
-                        <div className="mb-3">
+                        <div className="mb-3 space-y-2">
                           <Button type="button" variant="outline" onClick={applyAmneziaWGTemplate} className="w-full">
-                            AmneziaWG 3.1 — Enable obfuscation preset
+                            AmneziaWG 3.1 — применить профиль
                           </Button>
-                          <p className="text-muted-foreground mt-1 text-xs">
-                            Requires WayLane node v0.6.0+. Older WireGuard clients need an unobfuscated interface.
+                          <Button type="button" variant="outline" onClick={applyPlainWireGuardTemplate} className="w-full">
+                            WireGuard — режим совместимости (без маскировки)
+                          </Button>
+                          <p className="text-muted-foreground text-xs">
+                            AmneziaWG используется по умолчанию для новых ядер. Обычный WireGuard работает только без маскировки.
+                            Новая автономная Node пока не умеет разворачивать эти ядра; сохранение настроек не означает запуск VPN.
                           </p>
                         </div>
                       )}

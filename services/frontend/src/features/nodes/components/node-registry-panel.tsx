@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { $fetch } from '@/service/http'
 import { useAdmin } from '@/hooks/use-admin'
 import { hasPermission } from '@/utils/rbac'
@@ -94,6 +94,7 @@ export default function NodeDiscoveryPanel() {
   const [label, setLabel] = useState('')
   const [directCredentials, setDirectCredentials] = useState<{ node_uuid: string; node_token: string } | null>(null)
   const [registrationMode, setRegistrationMode] = useState<'classic' | 'discovery'>('discovery')
+  const registrationRef = useRef<HTMLDivElement>(null)
   const [autoApprove, setAutoApprove] = useState(false)
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(false)
@@ -117,6 +118,20 @@ export default function NodeDiscoveryPanel() {
 
 
 
+
+  // The Nodes page header and command palette use this event. The old node
+  // list/dialog no longer mounts here, so bring the actual registration form
+  // into view and keyboard focus instead of silently doing nothing.
+  useEffect(() => {
+    if (!canCreate || !canRead) return
+    const openRegistration = () => {
+      setRegistrationMode('discovery')
+      registrationRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      registrationRef.current?.focus()
+    }
+    window.addEventListener('openNodeDialog', openRegistration)
+    return () => window.removeEventListener('openNodeDialog', openRegistration)
+  }, [canCreate, canRead])
 
   const refresh = async () => {
     try {
@@ -347,7 +362,7 @@ export default function NodeDiscoveryPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-col gap-3 rounded-md border p-3">
+        <div ref={registrationRef} tabIndex={-1} aria-label="Регистрация новой ноды" className="flex flex-col gap-3 rounded-md border p-3 focus-visible:outline-2 focus-visible:outline-primary">
           <p className="text-sm font-medium">Способ подключения новой ноды</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="Способ регистрации ноды">
             <Button type="button" variant={registrationMode === 'classic' ? 'default' : 'outline'}

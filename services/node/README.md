@@ -13,6 +13,10 @@ independent VPN core containers using a private rootless Docker daemon.
 - Root Go sources: Node registration, telemetry, desired state, Xray child
   lifecycle and persistent identity.
 
+The internal `coreDriver` dispatches desired-state Protobuf commands by exact
+`core_id` without adding a separate management listener. Only `xray/default`
+is registered; unsupported core IDs fail closed.
+
 **Core priority:** AmneziaWG 3.1 is the next target engine; plain WireGuard
 is a compatibility profile, not a second independent control stack. Backend
 validation and the Core Editor support AWG configuration, but this Node

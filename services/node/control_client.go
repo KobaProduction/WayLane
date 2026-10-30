@@ -158,6 +158,14 @@ func controlTelemetryPayload(state string) (map[string]any, error) {
 	return result, err
 }
 func runControlStream(ctx context.Context, stream binaryStream, ident identity, state, socket string) error {
+	return runControlStreamDrivers(ctx, stream, ident, state, map[string]coreDriver{
+		"xray/default": xrayCoreDriver{socket: socket, stateDir: state},
+	})
+}
+
+// Only registered core drivers may receive desired-state updates. This keeps
+// future AmneziaWG management independent from the Xray state lifecycle.
+func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident identity, state string, drivers map[string]coreDriver) error {
 	defer stream.Close()
 	hello, err := newControlMessage(ident.UUID, "hello", "", 0, nil)
 	if err != nil {
@@ -225,47 +233,25 @@ func runControlStream(ctx context.Context, stream binaryStream, ident identity, 
 			}
 		case "ack", "pong":
 		case "desired":
-			if reply.CoreID != "xray/default" || reply.Generation == 0 {
+			if reply.Generation == 0 {
+				return errors.New("binary core generation required")
+			}
+			driver, ok := drivers[reply.CoreID]
+			if !ok || driver == nil {
 				return errors.New("binary command targeted unknown core")
 			}
-			desired, err := controlDesiredFromPayload(reply.Payload)
+			workCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+			outcome, err := driver.ApplyDesired(workCtx, reply)
+			cancel()
 			if err != nil {
 				return err
 			}
-			if uint64(desired.Generation) != reply.Generation {
-				return errors.New("desired generation mismatch")
-			}
-			local, err := readXrayState(state)
+			result, err := newControlMessage(ident.UUID, "result", reply.CoreID, reply.Generation, nil)
 			if err != nil {
 				return err
 			}
-			if desired.Generation > local.Generation {
-				workCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
-				updated, applyErr := applyXrayDesired(workCtx, socket, state, local, desired)
-				cancel()
-				if applyErr != nil {
-					updated.Status = "error"
-					if errors.Is(applyErr, errLiveRequiresRestart) {
-						updated.Status = "requires_restart"
-					}
-					updated.Error = applyErr.Error()
-					if len(updated.Error) > 240 {
-						updated.Error = updated.Error[:240]
-					}
-				}
-				if err := saveXrayState(state, updated); err != nil {
-					return err
-				}
-				local = updated
-			}
-			result, err := newControlMessage(ident.UUID, "result", "xray/default", uint64(desired.Generation), nil)
-			if err != nil {
-				return err
-			}
-			result.Status = local.Status
-			if local.Error != "" {
-				result.ErrorCode = "xray_apply_failed"
-			}
+			result.Status = outcome.Status
+			result.ErrorCode = outcome.ErrorCode
 			if err := send(result); err != nil {
 				return err
 			}

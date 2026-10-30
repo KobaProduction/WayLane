@@ -4,6 +4,8 @@ import { createNewWireGuardDraft, draftToPersistedConfig, getWireGuardPersistCon
 import {
   AMNEZIA_31_PRESET,
   applyAmneziaPreset,
+  withAmneziaCorePreset,
+  asPlainWireGuardCore,
   getAmneziaSettings,
   isAmneziaDraft,
   setAmneziaMode,
@@ -82,4 +84,25 @@ test('AWG is the preferred new core profile; explicit plain WG remains available
   assert.equal(isAmneziaDraft(plain), false)
   assert.equal(getWireGuardPersistConfig(plain).ok, true)
   assert.equal(draftToPersistedConfig(plain).amnezia, undefined)
+})
+
+
+test('JSON modal AWG preset shares editor defaults and plain WG mode preserves keys/peers', () => {
+  const original = { private_key: 'synthetic-only', address: ['10.5.0.1/24'], peers: [{ public_key: 'peer-test' }] }
+  const awg = withAmneziaCorePreset(original)
+  assert.equal(awg.engine, 'amneziawg')
+  assert.deepEqual(awg.amnezia, AMNEZIA_31_PRESET)
+  assert.deepEqual(original, { private_key: 'synthetic-only', address: ['10.5.0.1/24'], peers: [{ public_key: 'peer-test' }] })
+  const plain = asPlainWireGuardCore(awg)
+  assert.deepEqual(plain, original)
+  assert.equal(plain.engine, undefined)
+  assert.equal(plain.amnezia, undefined)
+})
+
+
+test('JSON modal AWG transforms reject non-object JSON rather than replacing config', () => {
+  for (const invalid of [null, [], 'value']) {
+    assert.throws(() => withAmneziaCorePreset(invalid as Record<string, unknown>), /Expected WireGuard object/)
+    assert.throws(() => asPlainWireGuardCore(invalid as Record<string, unknown>), /Expected WireGuard object/)
+  }
 })
