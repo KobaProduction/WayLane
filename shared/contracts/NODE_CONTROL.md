@@ -1,9 +1,11 @@
 # WayLane Node control v1 — binary WebSocket + Protobuf
 
-The installed **Node** contains the one-shot bootstrap, an internal non-root
-`agent` controller and private independently managed VPN cores. Only the
-controller connects to the Control Panel; child VPN cores never receive
-panel credentials or the host identity.
+An installation has a stable **Agent** (owns private rootless Docker,
+Node installation, upgrades and recovery) and a replaceable **Node** (owns
+one outbound Panel WSS and manages separate VPN Cores). Outer Compose
+contains only bootstrap plus Agent; Node and Cores are inner containers.
+Agent has no VPN key material. The Agent local management API is a private
+Unix socket v1, not an additional Panel transport or network listener.
 
 ## Transport: one outbound WSS session
 
@@ -50,7 +52,16 @@ The control session supports:
 Bounded server queues protect memory. The Node persists its applied
 generation; repeated commands after reconnect must not execute again.
 Unknown versions/cores, stale generations, wrong identities, revoked
-credentials and text frames are rejected. The control channel never
+credentials and text frames are rejected. AmneziaWG 3.1 is the prioritized
+next core (with plain WireGuard supported only when obfuscation is disabled),
+but `awg/default` is reserved, not advertised or accepted by this Xray-only
+Node yet. A source-tested AWG 3.1 UAPI codec and private-socket transport are
+present, alongside an experimental AWG child driver and independent AWG
+Panel desired state. Normal Nodes never advertise AWG. The driver is only
+registered in an explicitly opted-in, local loopback Docker Desktop pilot;
+Coolify disables this gate. **AWG is not accepted for production UDP traffic**
+until rootless TUN, routing, peer handshake, recovery and bidirectional client
+tests pass. The control channel never
 carries client VPN traffic and does not publish child core TCP/UDP ports.
 
 ## Deploy and acceptance
@@ -73,3 +84,12 @@ certificates or customer routing as a side effect.
 
 Related work: Issues #13 (VPN parity), #14 (Node lifecycle),
 #15 (Node binary control).
+
+## Dynamic Core TCP/UDP ports
+
+The stable Agent outer container runs with Linux host networking. Node and
+its rootless Docker 29.5+ child Cores use host networking too. This avoids
+static Compose port lists: each Core dynamically binds TCP/UDP ports,
+without an Agent restart. Ports below 1024 need a separate unprivileged
+binding policy; cloud firewall, IPv6 and VPN client traffic are not
+accepted by source/config tests.

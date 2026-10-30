@@ -4,6 +4,8 @@ import { createNewWireGuardDraft, draftToPersistedConfig, getWireGuardPersistCon
 import {
   AMNEZIA_31_PRESET,
   applyAmneziaPreset,
+  withAmneziaCorePreset,
+  asPlainWireGuardCore,
   getAmneziaSettings,
   isAmneziaDraft,
   setAmneziaMode,
@@ -69,4 +71,38 @@ test('unknown AWG options are rejected; plain WG draft never emits AWG params', 
   const awg = applyAmneziaPreset(wg)
   const invalid = { ...awg, extra: { ...awg.extra, amnezia: { ...getAmneziaSettings(awg), unknown: 'bad' } } }
   assert.ok(validateAmneziaSettings(invalid).length > 0)
+})
+
+
+test('AWG is the preferred new core profile; explicit plain WG remains available', () => {
+  const preferred = applyAmneziaPreset(createNewWireGuardDraft())
+  const saved = getWireGuardPersistConfig(preferred)
+  assert.equal(saved.ok, true, JSON.stringify(saved))
+  if (!saved.ok) return
+  assert.equal(saved.config.engine, 'amneziawg')
+  const plain = setAmneziaMode(preferred, false)
+  assert.equal(isAmneziaDraft(plain), false)
+  assert.equal(getWireGuardPersistConfig(plain).ok, true)
+  assert.equal(draftToPersistedConfig(plain).amnezia, undefined)
+})
+
+
+test('JSON modal AWG preset shares editor defaults and plain WG mode preserves keys/peers', () => {
+  const original = { private_key: 'synthetic-only', address: ['10.5.0.1/24'], peers: [{ public_key: 'peer-test' }] }
+  const awg = withAmneziaCorePreset(original)
+  assert.equal(awg.engine, 'amneziawg')
+  assert.deepEqual(awg.amnezia, AMNEZIA_31_PRESET)
+  assert.deepEqual(original, { private_key: 'synthetic-only', address: ['10.5.0.1/24'], peers: [{ public_key: 'peer-test' }] })
+  const plain = asPlainWireGuardCore(awg)
+  assert.equal(Object.prototype.hasOwnProperty.call(plain, 'engine'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(plain, 'amnezia'), false)
+  assert.deepEqual(plain, original)
+})
+
+
+test('JSON modal AWG transforms reject non-object JSON rather than replacing config', () => {
+  for (const invalid of [null, [], 'value']) {
+    assert.throws(() => withAmneziaCorePreset(invalid as unknown as Record<string, unknown>), /Expected WireGuard object/)
+    assert.throws(() => asPlainWireGuardCore(invalid as unknown as Record<string, unknown>), /Expected WireGuard object/)
+  }
 })

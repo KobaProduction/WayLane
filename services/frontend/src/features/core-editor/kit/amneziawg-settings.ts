@@ -18,6 +18,21 @@ export const AMNEZIA_31_PRESET: AmneziaSettings = {
   random_trailers: true,
 }
 
+/** The legacy JSON modal and the modern draft editor must use the same
+ * AWG 3.1 defaults. Never mutate the source config (including peer keys).
+ */
+export function withAmneziaCorePreset(config: Record<string, unknown>): Record<string, unknown> {
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) throw new Error('Expected WireGuard object')
+  return { ...config, engine: 'amneziawg', amnezia: { ...AMNEZIA_31_PRESET } }
+}
+
+/** Explicit plain WireGuard compatibility profile; no obfuscation fields. */
+export function asPlainWireGuardCore(config: Record<string, unknown>): Record<string, unknown> {
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) throw new Error('Expected WireGuard object')
+  const { engine: _engine, amnezia: _amnezia, ...plain } = config
+  return plain
+}
+
 export const AWG_NUMBER_FIELDS = ['jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4'] as const
 export const AWG_RANGE_FIELDS = [
   'h1', 'h2', 'h3', 'h4', 'content_padding_addition',

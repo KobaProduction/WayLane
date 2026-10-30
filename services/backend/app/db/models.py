@@ -736,6 +736,22 @@ node_agent_xray_desired = Table(
 )
 
 
+# Independent desired generation and status for AWG; do not reuse Xray state.
+# AWG cores are queued only for explicitly capability-advertising DEV Nodes.
+node_agent_awg_desired = Table(
+    "node_agent_awg_desired", Base.metadata,
+    Column("node_uuid", String(36),
+           ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    Column("generation", Integer, nullable=False),
+    Column("action", String(16), nullable=False),
+    Column("config", JSON(), nullable=True),
+    Column("applied_generation", Integer, nullable=False, server_default="0"),
+    Column("runtime_status", String(16), nullable=False, server_default="pending"),
+    Column("last_error", String(300), nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("reported_at", DateTime(timezone=True), nullable=True),
+)
+
 
 class Node(Base, CreatedAtUTCMixin):
     __tablename__ = "nodes"

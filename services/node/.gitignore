@@ -1,43 +1,13 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
 *.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-# Test binary, built with `go test -c`
 *.test
-.gocache*
-.gotemp
-
-# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
-*.idea
-./certs
-./generated
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
-go.work
-xray-core/
-*.env
 *.temp
-
-# AI
-.AI
-graphify-out
-superpowers/
-
+.env
+.env.*
+!.env.example
+.gocache*/
+.gotemp/
+.toolchains/
+.test-runtime/
 certs/
 generated/
-pasarguard-node*
-
-# Reproducible local integration test binary cache.
-.test-runtime/
-
-# Host-specific cached build toolchains (not Git content)
-.toolchains/

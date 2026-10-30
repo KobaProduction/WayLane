@@ -38,7 +38,7 @@ def test_discovery_invitation_enroll_heartbeat_approve_revoke(tmp_path):
         try:
             async with session() as db:
                 invitation = await create_invitation(
-                    InvitationInput(label="synthetic-node-pool"), db=db, _=object())
+                    InvitationInput(label="synthetic-node-pool", auto_approve=True), db=db, _=object())
                 token = invitation["discovery_token"]
                 assert token.startswith("wl_disc_")
                 invitations = await list_invitations(db=db, _=object())
@@ -310,3 +310,8 @@ def test_node_registry_has_no_compatibility_routes():
             "/api/node-registry/discovery-tokens/{invitation_id}/revoke",
             "/api/node-registry/nodes/{node_uuid}/xray"} <= paths
     assert not any(p.startswith("/api/agent") or p.startswith("/api/node-discovery") for p in paths)
+
+
+def test_new_discovery_invitation_requires_explicit_approval_by_default():
+    assert InvitationInput(label="ordinary").auto_approve is False
+    assert InvitationInput(label="trusted", auto_approve=True).auto_approve is True

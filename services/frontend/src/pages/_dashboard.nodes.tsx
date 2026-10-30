@@ -45,9 +45,9 @@ const Settings = () => {
   const isCoreEditorPage = /^\/nodes\/cores\/[^/]+$/.test(location.pathname)
 
   const handleCreateNode = useCallback(() => {
-    if (!canCreateNodes) return
+    if (!canReadNodes || !canCreateNodes) return
     window.dispatchEvent(new CustomEvent('openNodeDialog'))
-  }, [canCreateNodes])
+  }, [canCreateNodes, canReadNodes])
 
   const handleCreateCore = useCallback(() => {
     if (!canCreateCores) return
@@ -113,14 +113,9 @@ const Settings = () => {
     return {
       title: 'nodes.title',
       description: 'manageNodes',
-      buttonIcon: canCreateNodes ? Plus : undefined,
-      buttonText: canCreateNodes ? 'nodes.addNode' : undefined,
-      onButtonClick: canCreateNodes
-        ? () => {
-            const event = new CustomEvent('openNodeDialog')
-            window.dispatchEvent(event)
-          }
-        : undefined,
+      buttonIcon: canCreateNodes && canReadNodes ? Plus : undefined,
+      buttonText: canCreateNodes && canReadNodes ? 'nodes.addNode' : undefined,
+      onButtonClick: canReadNodes && canCreateNodes ? handleCreateNode : undefined,
     }
   }
 

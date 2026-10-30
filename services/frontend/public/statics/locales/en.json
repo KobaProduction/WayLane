@@ -120,9 +120,9 @@
       }
     },
     "wireguard": {
-      "title": "WireGuard",
-      "description": "Peer IP pools for WireGuard cores — usage, free addresses, and interface tags",
-      "empty": "No WireGuard subnets yet. Create a WireGuard core with an interface address to start allocating peer IPs.",
+      "title": "AmneziaWG / WireGuard",
+      "description": "Peer IP pools for AmneziaWG and WireGuard cores — usage, free addresses, and interface tags",
+      "empty": "No AmneziaWG/WireGuard subnets yet. Create a core with an interface address to start allocating peer IPs.",
       "used": "Used",
       "free": "Free",
       "capacity": "Capacity",
@@ -2516,7 +2516,7 @@
         "engine": "WireGuard transport",
         "plain": "WireGuard (standard clients)",
         "obfuscated": "AmneziaWG 3.1 (obfuscation)",
-        "compatibility": "Requires WayLane Node 0.6.0+ and an AmneziaWG-compatible client with matching settings. Standard WireGuard clients work only when obfuscation is disabled. Host VPN traffic is not yet acceptance-tested.",
+        "compatibility": "AmneziaWG 3.1 settings are supported by the Core Editor, but the autonomous WayLane Node cannot deploy this engine yet. A compatible AWG client must match the server settings. Standard WireGuard clients work only with obfuscation disabled. No production VPN traffic is accepted.",
         "preset": "Apply AmneziaWG 3.1 preset",
         "advanced": "Advanced AWG 3.1 options",
         "headerKeyHint": "Base64, 32 bytes. All S1–S4 must be at least 12 when this is set."

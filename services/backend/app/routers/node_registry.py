@@ -5,7 +5,7 @@ import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
-from ipaddress import IPv4Address, IPv6Address, ip_address
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -15,9 +15,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import begin_immediate_if_sqlite, get_db
-from app.db.models import node_agent_registrations, node_discovery_invitations, node_agent_xray_desired
+from app.db.models import node_agent_registrations, node_discovery_invitations, node_agent_xray_desired, node_agent_awg_desired
 from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
+from app.core.wireguard import WireGuardConfig
+from app.utils.crypto import validate_wireguard_key
 from .authentication import require_permission
 from .xray_inbound_users import replace_inbound_users
 from .node_xray_resources import (agent_tls_material, queue_xray_refresh, replace_routing, routing_from_editor, xray_tls_inbound)
@@ -42,7 +44,7 @@ def observed_ip(request: Request) -> str | None:
 class InvitationInput(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     lifetime_hours: int | None = Field(default=None, ge=1, le=8760)
-    auto_approve: bool = True
+    auto_approve: bool = False
 
 
 @node_registry_router.post("/classic", status_code=201)
@@ -377,6 +379,129 @@ async def set_desired_xray(
     await db.commit()
     return {"generation": generation, "status": "pending", "action": body.action,
             "image_version": version, "region": region}
+
+
+class AWGDesiredInput(BaseModel):
+    """Only the independently managed AmneziaWG 3.1 Core, not legacy RPC."""
+
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["deploy", "reconfigure", "stop"]
+    config: dict[str, Any] | None = None
+    expected_generation: int | None = Field(default=None, ge=1)
+
+    @field_validator("config")
+    @classmethod
+    def awg_core_config(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        import json
+        if value is None:
+            return None
+        if len(json.dumps(value)) > 256_000:
+            raise ValueError("AmneziaWG config exceeds 256 KiB")
+        allowed_keys = {
+            "engine", "interface_name", "private_key", "listen_port", "address",
+            "amnezia", "peers", "public_key", "mtu", "pre_shared_key",
+        }
+        if set(value) - allowed_keys:
+            raise ValueError("unsupported AWG Core configuration fields")
+        if value.get("engine") not in ("amneziawg", "wireguard"):
+            raise ValueError("AWG Core requires an explicit AmneziaWG or plain WireGuard profile")
+        if value["engine"] == "wireguard" and value.get("amnezia") is not None:
+            raise ValueError("plain WireGuard must not contain obfuscation settings")
+        if value.get("pre_shared_key"):
+            raise ValueError("AWG pre-shared keys must be assigned per peer")
+        core = WireGuardConfig(value)
+        if len(core["interface_name"]) > 15 or len(core["address"]) > 16:
+            raise ValueError("AWG interface name or address count exceeds engine limit")
+        if isinstance(core["listen_port"], bool):
+            raise ValueError("AWG listen_port must be an integer")
+        peers = core.get("peers", [])
+        if not isinstance(peers, list) or len(peers) > 2048:
+            raise ValueError("AWG peers must be a bounded list")
+        seen = set()
+        for peer in peers:
+            if not isinstance(peer, dict) or set(peer) - {
+                "public_key", "pre_shared_key", "allowed_ips", "persistent_keepalive_interval"
+            }:
+                raise ValueError("unsupported AWG peer fields")
+            public_key = validate_wireguard_key(peer.get("public_key", ""), "public_key")
+            if public_key in seen:
+                raise ValueError("duplicate AWG peer public key")
+            seen.add(public_key)
+            if peer.get("pre_shared_key"):
+                validate_wireguard_key(peer["pre_shared_key"], "pre_shared_key")
+            allowed = peer.get("allowed_ips")
+            if not isinstance(allowed, list) or not (1 <= len(allowed) <= 64):
+                raise ValueError("AWG peer allowed_ips must contain 1-64 entries")
+            for cidr in allowed:
+                if not isinstance(cidr, str):
+                    raise ValueError("AWG peer CIDR must be a string")
+                ip_network(cidr, strict=False)
+            keepalive = peer.get("persistent_keepalive_interval", 0)
+            if isinstance(keepalive, bool) or not isinstance(keepalive, int) or not 0 <= keepalive <= 65535:
+                raise ValueError("invalid AWG peer keepalive")
+        return dict(core)
+
+
+@node_registry_router.get("/nodes/{node_uuid}/awg")
+async def get_desired_awg(
+    node_uuid: UUID, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    """Never return the server private key or peer pre-shared keys."""
+    row = (await db.execute(select(node_agent_awg_desired).where(
+        node_agent_awg_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if not row:
+        return {"configured": False}
+    return {
+        "configured": True, "generation": row["generation"],
+        "applied_generation": row["applied_generation"],
+        "action": row["action"], "status": row["runtime_status"],
+        "error_code": row["last_error"], "reported_at": row["reported_at"],
+    }
+
+
+@node_registry_router.put("/nodes/{node_uuid}/awg")
+async def set_desired_awg(
+    node_uuid: UUID, body: AWGDesiredInput, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update_core")),
+):
+    """Capability-gated AWG desired generation independent from Xray.
+
+    Until a Node has explicitly been enabled/accepted for AWG and advertises
+    awg.protobuf.binary, the API always rejects mutations with 409.
+    """
+    await begin_immediate_if_sqlite(db)
+    node = (await db.execute(select(
+        node_agent_registrations.c.status, node_agent_registrations.c.capabilities,
+    ).where(node_agent_registrations.c.node_uuid == str(node_uuid)))).one_or_none()
+    if not node or node.status != "approved" or "awg.protobuf.binary" not in (node.capabilities or []):
+        raise HTTPException(409, "Approved Node with accepted AWG capability required")
+    previous = (await db.execute(select(node_agent_awg_desired).where(
+        node_agent_awg_desired.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    if previous is not None:
+        if body.expected_generation != previous["generation"]:
+            raise HTTPException(409, "Reload current AWG generation before changing it")
+        if previous["runtime_status"] == "pending":
+            raise HTTPException(409, "An AWG operation is still pending")
+    elif body.action != "deploy":
+        raise HTTPException(409, "AWG must be deployed before changing it")
+    if body.action == "reconfigure" and previous["runtime_status"] != "running":
+        raise HTTPException(409, "AWG must be running for peer reconfiguration")
+    if body.action == "deploy" and previous and previous["runtime_status"] == "running":
+        raise HTTPException(409, "Stop AWG before deploying another interface")
+    config = body.config if body.config is not None else (previous["config"] if previous else None)
+    if body.action in {"deploy", "reconfigure"} and config is None:
+        raise HTTPException(422, "AWG Core configuration required")
+    generation = previous["generation"] + 1 if previous else 1
+    fields = dict(generation=generation, action=body.action, config=config,
+                  runtime_status="pending", last_error=None, updated_at=datetime.now(UTC))
+    if previous:
+        await db.execute(update(node_agent_awg_desired).where(
+            node_agent_awg_desired.c.node_uuid == str(node_uuid)).values(**fields))
+    else:
+        await db.execute(insert(node_agent_awg_desired).values(node_uuid=str(node_uuid), **fields))
+    await db.commit()
+    return {"generation": generation, "status": "pending", "action": body.action}
 
 
 class EditorRoutingInput(BaseModel):

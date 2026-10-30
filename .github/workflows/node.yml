@@ -4,10 +4,16 @@ on:
     branches: [main, development, migration/waylane-monorepo]
     paths:
       - "services/node/**"
+      - "services/agent/**"
+      - "deploy/node/**/*.yaml"
+      - "!services/node/**/*.md"
       - ".github/workflows/node.yml"
   pull_request:
     paths:
       - "services/node/**"
+      - "services/agent/**"
+      - "deploy/node/**/*.yaml"
+      - "!services/node/**/*.md"
       - ".github/workflows/node.yml"
 permissions:
   contents: read
@@ -23,20 +29,10 @@ jobs:
         with:
           go-version-file: services/node/go.mod
       - run: ./scripts/verify.sh
-  image:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./services/node
-          file: ./services/node/Dockerfile
-          push: false
-          platforms: linux/amd64
-          tags: waylane-node:ci
-  agent-images:
+      - name: Verify stable Agent source
+        working-directory: services/agent
+        run: ./verify.sh
+  node-images:
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -45,20 +41,27 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./services/node/agent/Dockerfile
+          file: ./services/node/node.Dockerfile
+          push: false
+          platforms: linux/amd64
+          tags: waylane-node:ci
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./services/agent/agent.Dockerfile
           push: false
           platforms: linux/amd64
           tags: waylane-agent:ci
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./services/node/bootstrap/Dockerfile
+          file: ./services/agent/bootstrap.Dockerfile
           push: false
           platforms: linux/amd64
           tags: waylane-bootstrap:ci
 
   agent-compose-smoke:
-    needs: agent-images
+    needs: node-images
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -69,20 +72,20 @@ jobs:
       - name: Enforce two-service bootstrap-agent contract
         run: |
           set -euo pipefail
-          docker compose -p waylane-node-ci -f services/node/docker-compose.node.discovery.yaml config --format json |
+          docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml config --format json |
             python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert set(s)=={"bootstrap","agent"}, set(s); assert s["bootstrap"]["privileged"] is True; assert not s["agent"].get("privileged",False); assert all("/var/run/docker.sock" not in str(m) and "/run/docker.sock" not in str(m) for c in s.values() for m in c.get("volumes",[]))'
           # Validate both canonical Node installation modes and their Coolify adapters.
           python3 - <<'PYCOMPOSE'
           from pathlib import Path
           for mode in ("classic", "discovery"):
-              path = Path(f"services/node/docker-compose.node.{mode}.coolify.yaml")
+              path = Path(f"deploy/node/{mode}/docker-compose.coolify.yaml")
               source = path.read_text()
               assert source.count("    exclude_from_hc: true\n") == 1
-              Path(f"services/node/.node.{mode}.native-check.yaml").write_text(
+              Path(f"deploy/node/{mode}/.node.native-check.yaml").write_text(
                   source.replace("    exclude_from_hc: true\n", "    x-coolify-exclude-from-health: true\n")
               )
           PYCOMPOSE
-          trap 'rm -f services/node/.node.*.native-check.yaml' EXIT
+          trap 'rm -f deploy/node/*/.node.native-check.yaml' EXIT
           for mode in classic discovery; do
             if [ "$mode" = classic ]; then
               export NODE_TOKEN=wl_node_01234567-89ab-4cde-a012-3456789abcde_0123456789012345678901234567890123456789012
@@ -91,9 +94,34 @@ jobs:
               export NODE_TOKEN=
               export DISCOVERY_TOKEN=wl_disc_ci-only
             fi
-            docker compose -p waylane-node-ci -f "services/node/.node.$mode.native-check.yaml" config --format json |
-              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert not s["agent"].get("privileged",False); assert "CONTROL_TRANSPORT" not in s["agent"]["environment"]; assert "GRPC_DEV_INSECURE" not in s["agent"]["environment"]; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
+            docker compose -p waylane-node-ci -f "deploy/node/$mode/.node.native-check.yaml" config --format json |
+              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert s["agent"]["network_mode"]=="host"; assert not s["agent"].get("privileged",False); assert "CONTROL_TRANSPORT" not in s["agent"]["environment"]; assert "GRPC_DEV_INSECURE" not in s["agent"]["environment"]; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
           done
+          # Both independent generic entrypoints must keep identical security
+          # and runtime shape; only their registration credential may differ.
+          python3 - <<'PYRUNTIME'
+          import copy, json, os, subprocess
+          configs = []
+          for mode in ("classic", "discovery"):
+              env = dict(os.environ)
+              env["CONTROL_PANEL_URL"] = "https://panel.example.invalid"
+              env["NODE_TOKEN"] = "synthetic-ci-only" if mode == "classic" else ""
+              env["DISCOVERY_TOKEN"] = "synthetic-ci-only" if mode == "discovery" else ""
+              source = subprocess.check_output(
+                  ["docker", "compose", "-p", "waylane-node-ci",
+                   "-f", f"deploy/node/{mode}/docker-compose.yaml",
+                   "config", "--format", "json"], env=env, text=True
+              )
+              parsed = json.loads(source)
+              assert parsed["services"]["agent"]["build"]["context"] == os.getcwd()
+              assert parsed["services"]["bootstrap"]["build"]["context"] == os.getcwd()
+              parsed = copy.deepcopy(parsed)
+              parsed["services"]["agent"]["environment"]["NODE_TOKEN"] = "CREDENTIAL"
+              parsed["services"]["agent"]["environment"]["DISCOVERY_TOKEN"] = "CREDENTIAL"
+              configs.append(parsed)
+          assert configs[0] == configs[1], "Classic/Discovery runtime divergence"
+          print("Both Node modes have identical Compose runtime/security")
+          PYRUNTIME
       # Hosted Linux runners may forbid creation of nested user namespaces.
       # Probe precisely the RootlessKit operation; do not grant privileges to
       # the Agent or alter host sysctls to make a runner accept it.
@@ -114,18 +142,18 @@ jobs:
         if: steps.rootless-capability.outputs.supported == 'true'
         run: |
           set -euo pipefail
-          docker compose -p waylane-node-ci -f services/node/docker-compose.node.discovery.yaml up -d --build agent
-          docker compose -p waylane-node-ci -f services/node/docker-compose.node.discovery.yaml ps -a
+          docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml up -d --build agent
+          docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml ps -a
           for n in $(seq 1 40); do
-            if docker compose -p waylane-node-ci -f services/node/docker-compose.node.discovery.yaml exec -T agent \
+            if docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml exec -T agent \
               docker -H unix:///run/user/1000/docker.sock info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless; then
               echo 'Agent-owned rootless Docker is operational'
               exit 0
             fi
             sleep 2
           done
-          docker compose -p waylane-node-ci -f services/node/docker-compose.node.discovery.yaml logs --no-color --tail=80 bootstrap agent
+          docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml logs --no-color --tail=80 bootstrap agent
           exit 1
       - name: Remove disposable CI test stack
         if: always()
-        run: docker compose -p waylane-node-ci -f services/node/docker-compose.node.discovery.yaml down -v
+        run: docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml down -v

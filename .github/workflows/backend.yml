@@ -42,11 +42,13 @@ jobs:
           tests/test_dashboard_api_only.py
           tests/test_direct_otlp.py
           tests/test_compose_contract.py
+          tests/test_node_deployment_layout.py
           tests/test_external_compose_contract.py
           tests/test_access_log_redaction.py
           tests/test_amneziawg_core.py
           tests/test_node_registry.py
           tests/test_node_binary_control.py
+          tests/test_node_awg_desired.py
           tests/test_node_resource_routing.py
           tests/test_pgbouncer_bootstrap.py
   image:

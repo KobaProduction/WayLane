@@ -14,9 +14,13 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
   node orchestration, telemetry relay/export.
 - services/frontend/: separately built React/Vite UI and browser diagnostics.
   No database credentials or SigNoz bearer may enter this bundle.
-- services/node/: separately deployed legacy Go VPN node plus an autonomous WayLane Node deployment.
-  The legacy node remains host-network/NET_ADMIN dependent; do not ascribe those
-  privileges or its single-core lifecycle to WayLane Node Agent.
+- services/agent/: stable installed supervisor and rootless Docker owner;
+  manages replaceable Node image via private versioned Unix control API.
+- services/node/: independently updatable Go Node image; owns one outbound
+  WSS/Protobuf connection and manages VPN Cores using Agent-owned private Docker.
+- deploy/node/{classic,discovery}/: separate Git-backed deployment owners,
+  each with `docker-compose.yaml` and `docker-compose.coolify.yaml`; shared operator README at `deploy/node/README.md`.
+  See `deploy/node/README.md` for Watch Paths, secrets and test boundaries.
 - services/external/: approved contracts for separate PostgreSQL,
   API load balancer/ingress, external SigNoz OTLP endpoints.
 - shared/contracts/: narrowly scoped protocol DTOs, no ORM imports.
@@ -26,21 +30,19 @@ CI and Coolify Watch Paths must scope independently to each module.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
 
-## WayLane Node architecture authority
+## Agent -> Node -> Core architecture
 
-Read `services/node/AGENTS.md` and `services/node/agent/README.md` before
-changing the autonomous agent-based node. Its single Compose entrypoint has **exactly two services**:
-a one-shot privileged `bootstrap` preparing private volumes, then one
-non-privileged autonomous `agent`. The agent supervises its own embedded
-rootless Docker daemon through a private Unix socket. Neither host systemd,
-a separate Compose Docker sidecar, nor the host/system Docker socket belongs
-in this architecture. Only the agent communicates with the panel; the agent
-now owns a single DEV Xray child (deploy/pull/update/restart/stop,
-per-inbound account updates), while PasarGuard parity, multi-engine drivers,
-public UDP/TCP ingress and production traffic are **not** shipped.
-The security/runtime pilot is not accepted by source CI alone.
+The installation has exactly two outer Compose services: one-shot privileged
+bootstrap and a stable non-root Agent. Agent owns private rootless Docker
+Engine 29.5+ and independently versioned Node lifecycle/recovery.
+Node is a separate inner container with the only outbound binary WSS to Panel,
+and manages VPN Cores (AWG, WireGuard, Xray and future engines) as siblings.
+There is no additional host daemon or host Docker socket.
+Agent's private Unix API v1 updates Node without reinstalling Agent.
 
-The control channel and Node-versus-Core ownership contract is
-documented in shared/contracts/NODE_CONTROL.md. One Agent owns machine
-telemetry; child cores own only their separate service traffic and state.
-The Node control protocol is **WebSocket with binary Protobuf frames only**. The Node initiates one WSS session and receives panel commands on the same connection. No separate gRPC Node control server/client, HTTP polling, SSE, JSON frames, or compatibility transport aliases are supported. See shared/contracts/NODE_CONTROL.md; production WSS acceptance is separate.
+The outer Agent uses Linux host networking, and Node/Cores use host networking
+inside rootless Docker 29.5+. No static Compose port mappings: each Core
+controls its own unprivileged TCP/UDP listeners dynamically. Privileged ports
+below 1024, cloud firewalls, Docker Desktop network modes, TUN, UDP traffic
+and restart acceptance remain distinct operational gates. Source CI is not
+runtime acceptance.
