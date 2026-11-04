@@ -168,8 +168,12 @@ async def test_signed_webhook_really_delivers_and_retries_to_local_receiver(tmp_
                 id=1, enabled=True, scenarios=SCENARIOS,
                 webhook_url="http://127.0.0.1:" + str(port) + "/webhook",
                 webhook_enabled=True))
+            db.add(User(username="webhook-retry-test-user"))
+            await db.flush()
+            user_id = await db.scalar(select(User.id).where(User.username == "webhook-retry-test-user"))
+            assert user_id is not None
             event_id = await device_webhook.enqueue_device_event(
-                db, "device.added", 42, "device-003", {"device_os": "Android"}
+                db, "device.added", user_id, "device-003", {"device_os": "Android"}
             )
             await db.commit()
         assert not await device_webhook.deliver_device_event(event_id)
@@ -314,7 +318,11 @@ async def test_concurrent_dispatchers_claim_only_one_webhook(tmp_path, monkeypat
             await db.execute(insert(subscription_firewall_config).values(
                 id=1, enabled=False, scenarios=SCENARIOS, webhook_enabled=True,
                 webhook_url="http://127.0.0.1:" + str(port) + "/event"))
-            event_id = await device_webhook.enqueue_device_event(db, "device.removed", 10, "removed-hwid")
+            db.add(User(username="concurrent-webhook-test-user"))
+            await db.flush()
+            user_id = await db.scalar(select(User.id).where(User.username == "concurrent-webhook-test-user"))
+            assert user_id is not None
+            event_id = await device_webhook.enqueue_device_event(db, "device.removed", user_id, "removed-hwid")
             await db.commit()
         result = await asyncio.gather(
             device_webhook.deliver_device_event(event_id),

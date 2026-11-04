@@ -21,6 +21,7 @@ from sqlalchemy import and_, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import GetDB
+from app.db.models import User
 from app.db.subscription_firewall import subscription_device_events
 from app.subscription.firewall import load_config
 
@@ -90,10 +91,16 @@ async def enqueue_device_event(db: AsyncSession, event_type: str, user_id: int,
     # disabled. When enabled, delivery failures remain durably retriable.
     if not (await load_config(db))["webhook_enabled"]:
         return None
+    # A callback identifies the *provider user*, not a commercial user or
+    # device registration owned by the consumer. Do not disclose raw HWIDs to
+    # external webhook receivers: WayLane remains their sole owner.
+    username = await db.scalar(select(User.username).where(User.id == user_id))
+    if not username:
+        return None
     event_id = str(uuid4())
     payload = {
         "id": event_id, "type": event_type, "user_id": user_id,
-        "hwid": hwid, "details": details or {},
+        "username": username, "details": details or {},
         "occurred_at": datetime.now(UTC).isoformat(),
     }
     await db.execute(insert(subscription_device_events).values(

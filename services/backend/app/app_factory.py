@@ -390,6 +390,21 @@ def create_app() -> FastAPI:
                 span.set_status(Status(StatusCode.ERROR))
             return response
 
+    @app.middleware("http")
+    async def _private_subscription_response(request: Request, call_next):
+        """Never cache native bearer URL documents, previews, or token metadata."""
+        response = await call_next(request)
+        prefix = "/" + subscription_env_settings.path.strip("/") + "/"
+        if request.url.path.startswith(prefix):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            # Subscription URLs are bearer capabilities; they do not create
+            # web-login sessions and must not issue browser cookies.
+            if "set-cookie" in response.headers:
+                del response.headers["set-cookie"]
+        return response
+
     on_startup(_validate_subscription_path)
 
     if runtime_settings.role.runs_panel:

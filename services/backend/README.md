@@ -252,8 +252,8 @@ existing local HWID policy; explicit deny/limit decisions block access.
 The device event outbox records device.added, device.updated, device.removed and device.reset
 in the same database transaction as the HWID change, and then attempts
 delivery without blocking subscription requests. Events survive delivery
-failures and can be retried explicitly via the admin API. Recipient
-idempotency uses the event ID.
+failures and can be retried explicitly via the admin API. The receiving VPN Core owns all product notification decisions, user preferences, recipients, Telegram/email templates and message delivery. WayLane only records device state and forwards a signed event with the canonical provider username; it never sends user notifications or grants commercial access. The payload does not carry raw HWIDs.
+Receiver idempotency uses the event ID.
 
 To enable outgoing events set WAYLANE_DEVICE_WEBHOOK_SECRET to a protected,
 random secret of at least 32 characters, then configure a HTTPS URL in the

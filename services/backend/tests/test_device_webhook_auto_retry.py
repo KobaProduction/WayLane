@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from importlib import reload
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
+from app.db.models import User
 from app.db.subscription_firewall import subscription_device_events, subscription_firewall_config
 from app.routers.subscription_firewall import get_device_event_summary
 from app.subscription import device_webhook
@@ -51,17 +53,21 @@ async def test_due_worker_backoff_exhaustion_and_expired_leases(tmp_path, monkey
                 id=1, enabled=False, scenarios=SCENARIOS,
                 webhook_enabled=True, webhook_url=webhook_url,
             ))
+            db.add(User(username="retry-webhook-device-user"))
+            await db.flush()
+            user_id = await db.scalar(select(User.id).where(User.username == "retry-webhook-device-user"))
+            assert user_id is not None
             active_id = await device_webhook.enqueue_device_event(
-                db, "device.added", 17, "synthetic-hwid"
+                db, "device.added", user_id, "synthetic-hwid"
             )
             await db.execute(insert(subscription_device_events).values(
-                id=old_lease_id, event_type="device.removed", user_id=17,
+                id=old_lease_id, event_type="device.removed", user_id=user_id,
                 hwid="expired", payload={"id": old_lease_id, "type": "device.removed"},
                 status="sending", attempts=9, delivery_token=str(uuid4()),
                 lease_until=now - timedelta(seconds=90),
             ))
             await db.execute(insert(subscription_device_events).values(
-                id=exhausted_id, event_type="device.reset", user_id=17,
+                id=exhausted_id, event_type="device.reset", user_id=user_id,
                 hwid=None, payload={"id": exhausted_id, "type": "device.reset"},
                 status="failed", attempts=10,
             ))
@@ -124,6 +130,8 @@ def test_scheduler_job_registration_uses_existing_scheduler():
     from app.jobs import device_webhook_retry
     from config import runtime_settings
     if runtime_settings.role.runs_scheduler:
+        # Collection of unrelated tests can clear the shared test scheduler.
+        reload(device_webhook_retry)
         from app.scheduler import scheduler
         job = scheduler.get_job("retry_device_webhooks")
         assert job is not None
