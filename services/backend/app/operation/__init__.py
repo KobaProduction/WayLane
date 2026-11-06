@@ -20,7 +20,17 @@ from app.db.crud import (
 from app.db.crud.admin import get_admin_by_id
 from app.db.crud.group import get_groups_by_ids
 from app.db.crud.user import get_user_by_id, get_wireguard_subscription_user
-from app.db.models import Admin as DBAdmin, ClientTemplate, CoreConfig, Group, Node, ProxyHost, User, UserTemplate
+from app.db.models import (
+    Admin as DBAdmin,
+    ClientTemplate,
+    CoreConfig,
+    Group,
+    Node,
+    ProxyHost,
+    User,
+    UserStatus,
+    UserTemplate,
+)
 from app.models.admin import AdminDetails
 from app.models.group import BulkGroup
 from app.models.user import UserCreate, UserModify
@@ -165,9 +175,7 @@ class BaseOperation:
                 "load_lifetime_used_traffic": load_lifetime_used_traffic,
             }
             if sub.get("user_id") and wireguard_fast:
-                db_user = await get_wireguard_subscription_user(
-                    db, sub["user_id"], load_admin_role=load_admin_role
-                )
+                db_user = await get_wireguard_subscription_user(db, sub["user_id"], load_admin_role=load_admin_role)
             elif sub.get("user_id"):
                 db_user = await get_user_by_id(db, sub["user_id"], **load_kwargs)
             elif sub.get("username"):
@@ -186,6 +194,13 @@ class BaseOperation:
             or (db_user.sub_revoked_at and db_user.sub_revoked_at.astimezone(UTC) > sub["created_at"])
         ):
             await self.raise_error(message="Not Found", code=404)
+
+        # Subscription links must reflect provider-owned access immediately,
+        # not only after the background status-review loop has run. This guard
+        # applies to direct /sub requests as well as management-independent
+        # subscription formats and cannot be bypassed by a valid signed token.
+        if db_user.status not in (UserStatus.active, UserStatus.on_hold) or db_user.is_expired or db_user.is_limited:
+            await self.raise_error(message="Subscription access denied", code=403)
 
         return db_user
 
