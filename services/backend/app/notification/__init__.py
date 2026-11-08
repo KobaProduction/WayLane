@@ -1,34 +1,17 @@
+"""Provider-only notification publisher: webhook events, never chat-bot delivery."""
+
 import asyncio
 from functools import wraps
 
 from app.models.admin import AdminDetails
-from app.models.admin_role import AdminRoleResponse
-from app.models.api_key import APIKeyResponse
-from app.models.core import CoreResponse
-from app.models.group import GroupResponse
-from app.models.host import BaseHost
-from app.models.node import NodeNotification, NodeResponse
-from app.models.user import UserNotificationResponse
-from app.models.user_template import UserTemplateResponse
+from app.models.subscription_models import SubscriptionNotificationResponse
 from app.settings import notification_enable
 from app.utils.logger import get_logger
 
-from . import discord as ds, telegram as tg, webhook as wh
+from . import webhook as wh
 from .dedup import claim_notification_slot
 
 logger = get_logger("Notification")
-
-
-async def _gather_notifications(event_name: str, *aws):
-    results = await asyncio.gather(*aws, return_exceptions=True)
-    for result in results:
-        if isinstance(result, Exception):
-            logger.warning(
-                "Notification channel failed for %s: %s",
-                event_name,
-                result,
-                exc_info=(type(result), result, result.__traceback__),
-            )
 
 
 def _safe_notification_task(func):
@@ -42,322 +25,267 @@ def _safe_notification_task(func):
             raise
         except Exception as err:
             logger.warning(
-                "Notification task %s failed: %s",
+                "Webhook notification %s failed: %s",
                 func.__name__,
-                err,
+                type(err).__name__,
                 exc_info=(type(err), err, err.__traceback__),
             )
 
     return wrapper
 
 
-async def create_api_key(api_key: APIKeyResponse, admin_username: str, by: str):
+async def _emit(action: str, resource: str, resource_id=None, actor: str | None = None):
+    await wh.notify(wh.PanelEvent(action=action, resource=resource, resource_id=resource_id, actor=actor))
+
+
+async def create_api_key(api_key, admin_username, by):
     if (await notification_enable()).api_key.create:
-        await asyncio.gather(
-            ds.create_api_key(api_key, admin_username, by), tg.create_api_key_tg(api_key, admin_username, by)
-        )
+        await _emit("api_key.create", "api_key", getattr(api_key, "id", None), by)
 
 
-async def modify_api_key(api_key: APIKeyResponse, admin_username: str, by: str):
+async def modify_api_key(api_key, admin_username, by):
     if (await notification_enable()).api_key.modify:
-        await asyncio.gather(
-            ds.modify_api_key(api_key, admin_username, by), tg.modify_api_key_tg(api_key, admin_username, by)
-        )
+        await _emit("api_key.modify", "api_key", getattr(api_key, "id", None), by)
 
 
-async def remove_api_key(api_key: APIKeyResponse, admin_username: str, by: str):
+async def remove_api_key(api_key, admin_username, by):
     if (await notification_enable()).api_key.delete:
-        await asyncio.gather(
-            ds.remove_api_key(api_key, admin_username, by), tg.remove_api_key_tg(api_key, admin_username, by)
-        )
+        await _emit("api_key.delete", "api_key", getattr(api_key, "id", None), by)
 
 
-async def create_admin_role(role: AdminRoleResponse, by: str):
+async def create_admin_role(role, by):
     if (await notification_enable()).admin_role.create:
-        await _gather_notifications("create_admin_role", ds.create_admin_role(role, by), tg.create_admin_role(role, by))
+        await _emit("admin_role.create", "admin_role", role.id, by)
 
 
-async def modify_admin_role(role: AdminRoleResponse, by: str):
+async def modify_admin_role(role, by):
     if (await notification_enable()).admin_role.modify:
-        await _gather_notifications("modify_admin_role", ds.modify_admin_role(role, by), tg.modify_admin_role(role, by))
+        await _emit("admin_role.modify", "admin_role", role.id, by)
 
 
-async def remove_admin_role(role: AdminRoleResponse, by: str):
+async def remove_admin_role(role, by):
     if (await notification_enable()).admin_role.delete:
-        await _gather_notifications("remove_admin_role", ds.remove_admin_role(role, by), tg.remove_admin_role(role, by))
+        await _emit("admin_role.delete", "admin_role", role.id, by)
 
 
-async def create_host(host: BaseHost, by: str):
+async def create_host(host, by):
     if (await notification_enable()).host.create:
-        await _gather_notifications("create_host", ds.create_host(host, by), tg.create_host(host, by))
+        await _emit("host.create", "host", getattr(host, "id", None), by)
 
 
-async def modify_host(host: BaseHost, by: str):
+async def modify_host(host, by):
     if (await notification_enable()).host.modify:
-        await _gather_notifications("modify_host", ds.modify_host(host, by), tg.modify_host(host, by))
+        await _emit("host.modify", "host", getattr(host, "id", None), by)
 
 
-async def remove_host(host: BaseHost, by: str):
+async def remove_host(host, by):
     if (await notification_enable()).host.delete:
-        await _gather_notifications("remove_host", ds.remove_host(host, by), tg.remove_host(host, by))
+        await _emit("host.delete", "host", getattr(host, "id", None), by)
 
 
-async def modify_hosts(by: str):
+async def modify_hosts(by):
     if (await notification_enable()).host.modify_hosts:
-        await _gather_notifications("modify_hosts", ds.modify_hosts(by), tg.modify_hosts(by))
+        await _emit("host.modify_hosts", "host", None, by)
 
 
-async def create_user_template(user: UserTemplateResponse, by: str):
-    if (await notification_enable()).user_template.create:
-        await _gather_notifications(
-            "create_user_template", ds.create_user_template(user, by), tg.create_user_template(user, by)
-        )
+async def create_subscription_template(user, by):
+    if (await notification_enable()).subscription_template.create:
+        await _emit("subscription_template.create", "subscription_template", getattr(user, "id", None), by)
 
 
-async def modify_user_template(user: UserTemplateResponse, by: str):
-    if (await notification_enable()).user_template.modify:
-        await _gather_notifications(
-            "modify_user_template", ds.modify_user_template(user, by), tg.modify_user_template(user, by)
-        )
+async def modify_subscription_template(user, by):
+    if (await notification_enable()).subscription_template.modify:
+        await _emit("subscription_template.modify", "subscription_template", getattr(user, "id", None), by)
 
 
-async def remove_user_template(name: str, by: str):
-    if (await notification_enable()).user_template.delete:
-        await _gather_notifications(
-            "remove_user_template", ds.remove_user_template(name, by), tg.remove_user_template(name, by)
-        )
+async def remove_subscription_template(name, by):
+    if (await notification_enable()).subscription_template.delete:
+        await _emit("subscription_template.delete", "subscription_template", name, by)
 
 
-async def create_node(node: NodeResponse, by: str):
+async def create_node(node, by):
     if (await notification_enable()).node.create:
-        await _gather_notifications("create_node", ds.create_node(node, by), tg.create_node(node, by))
+        await _emit("node.create", "node", getattr(node, "id", None), by)
 
 
-async def modify_node(node: NodeResponse, by: str):
+async def modify_node(node, by):
     if (await notification_enable()).node.modify:
-        await _gather_notifications("modify_node", ds.modify_node(node, by), tg.modify_node(node, by))
+        await _emit("node.modify", "node", getattr(node, "id", None), by)
 
 
-async def remove_node(node: NodeResponse, by: str):
+async def remove_node(node, by):
     if (await notification_enable()).node.delete:
-        await _gather_notifications("remove_node", ds.remove_node(node, by), tg.remove_node(node, by))
+        await _emit("node.delete", "node", getattr(node, "id", None), by)
 
 
-async def connect_node(node: NodeNotification):
+async def connect_node(node):
     if (await notification_enable()).node.connect:
-        await _gather_notifications("connect_node", ds.connect_node(node), tg.connect_node(node))
+        await _emit("node.connect", "node", getattr(node, "id", None), None)
 
 
-async def recovered_node(node: NodeNotification):
+async def recovered_node(node):
     if (await notification_enable()).node.recovered:
-        await _gather_notifications("recovered_node", ds.recovered_node(node), tg.recovered_node(node))
+        await _emit("node.recovered", "node", getattr(node, "id", None), None)
 
 
-async def error_node(node: NodeNotification):
+async def error_node(node):
     if (await notification_enable()).node.error:
-        await _gather_notifications("error_node", ds.error_node(node), tg.error_node(node))
+        await _emit("node.error", "node", getattr(node, "id", None), None)
 
 
-async def limited_node(node: NodeNotification, data_limit: int, used_traffic: int):
+async def limited_node(node, data_limit, used_traffic):
     if (await notification_enable()).node.limited:
-        await _gather_notifications(
-            "limited_node",
-            ds.limited_node(node, data_limit, used_traffic),
-            tg.limited_node(node, data_limit, used_traffic),
-        )
+        await _emit("node.limited", "node", getattr(node, "id", None), None)
 
 
-async def reset_node_usage(node: NodeResponse, by: str, uplink: int, downlink: int):
+async def reset_node_usage(node, by, uplink, downlink):
     if (await notification_enable()).node.reset_usage:
-        await _gather_notifications(
-            "reset_node_usage",
-            ds.reset_node_usage(node, by, uplink, downlink),
-            tg.reset_node_usage(node, by, uplink, downlink),
-        )
+        await _emit("node.reset_usage", "node", getattr(node, "id", None), by)
 
 
-async def create_group(group: GroupResponse, by: str):
+async def create_group(group, by):
     if (await notification_enable()).group.create:
-        await _gather_notifications("create_group", ds.create_group(group, by), tg.create_group(group, by))
+        await _emit("group.create", "group", getattr(group, "id", None), by)
 
 
-async def modify_group(group: GroupResponse, by: str):
+async def modify_group(group, by):
     if (await notification_enable()).group.modify:
-        await _gather_notifications("modify_group", ds.modify_group(group, by), tg.modify_group(group, by))
+        await _emit("group.modify", "group", getattr(group, "id", None), by)
 
 
-async def remove_group(group_id: int, by: str):
+async def remove_group(group_id, by):
     if (await notification_enable()).group.delete:
-        await _gather_notifications("remove_group", ds.remove_group(group_id, by), tg.remove_group(group_id, by))
+        await _emit("group.delete", "group", group_id, by)
 
 
-async def create_admin(admin: AdminDetails, by: str):
+async def create_admin(admin, by):
     if (await notification_enable()).admin.create:
-        await _gather_notifications("create_admin", ds.create_admin(admin, by), tg.create_admin(admin, by))
+        await _emit("admin.create", "admin", getattr(admin, "id", None), by)
 
 
-async def modify_admin(admin: AdminDetails, by: str):
+async def modify_admin(admin, by):
     if (await notification_enable()).admin.modify:
-        await _gather_notifications("modify_admin", ds.modify_admin(admin, by), tg.modify_admin(admin, by))
+        await _emit("admin.modify", "admin", getattr(admin, "id", None), by)
 
 
-async def remove_admin(username: str, by: str):
+async def remove_admin(username, by):
     if (await notification_enable()).admin.delete:
-        await _gather_notifications("remove_admin", ds.remove_admin(username, by), tg.remove_admin(username, by))
+        await _emit("admin.delete", "admin", username, by)
 
 
-async def admin_usage_reset(admin: AdminDetails, by: str):
+async def admin_usage_reset(admin, by):
     if (await notification_enable()).admin.reset_usage:
-        await _gather_notifications(
-            "admin_usage_reset", ds.admin_reset_usage(admin, by), tg.admin_reset_usage(admin, by)
-        )
+        await _emit("admin.reset_usage", "admin", getattr(admin, "id", None), by)
 
 
-async def admin_usage_limit_reached(admin: AdminDetails, usage_percentage: int, threshold: int):
+async def admin_usage_limit_reached(admin, usage_percentage, threshold):
     if (await notification_enable()).admin.usage_limit_warning:
-        await _gather_notifications(
-            "admin_usage_limit_reached",
-            ds.admin_usage_limit_reached(admin, usage_percentage, threshold),
-            tg.admin_usage_limit_reached(admin, usage_percentage, threshold),
-        )
+        await _emit("admin.usage_limit_warning", "admin", getattr(admin, "id", None), None)
 
 
-async def admin_login(username: str, password: str, client_ip: str, success: bool):
+async def admin_login(username, password, client_ip, success):
     if (await notification_enable()).admin.login:
-        await _gather_notifications(
-            "admin_login",
-            ds.admin_login(username, password, client_ip, success),
-            tg.admin_login(username, password, client_ip, success),
-        )
+        await _emit("admin.login", "admin", None, None)
 
 
-async def user_status_change(user: UserNotificationResponse, by: AdminDetails):
-    if (await notification_enable()).user.status_change:
-        await _gather_notifications(
-            "user_status_change",
-            ds.user_status_change(user, by.username),
-            tg.user_status_change(user, by.username),
-            wh.status_change(user),
-        )
-
-
-async def create_user(user: UserNotificationResponse, by: AdminDetails):
-    if (await notification_enable()).user.create:
-        await _gather_notifications(
-            "create_user",
-            ds.create_user(user, by.username),
-            tg.create_user(user, by.username),
-            wh.notify(wh.UserCreated(username=user.username, user=user, by=by)),
-        )
-
-
-async def modify_user(user: UserNotificationResponse, by: AdminDetails):
-    if (await notification_enable()).user.modify:
-        await _gather_notifications(
-            "modify_user",
-            ds.modify_user(user, by.username),
-            tg.modify_user(user, by.username),
-            wh.notify(wh.UserUpdated(username=user.username, user=user, by=by)),
-        )
-
-
-async def remove_user(user: UserNotificationResponse, by: AdminDetails):
-    if (await notification_enable()).user.delete:
-        await _gather_notifications(
-            "remove_user",
-            ds.remove_user(user, by.username),
-            tg.remove_user(user, by.username),
-            wh.notify(wh.UserDeleted(username=user.username, user=user, by=by)),
-        )
-
-
-async def reset_user_data_usage(user: UserNotificationResponse, by: AdminDetails):
-    if (await notification_enable()).user.reset_data_usage:
-        await _gather_notifications(
-            "reset_user_data_usage",
-            ds.reset_user_data_usage(user, by.username),
-            tg.reset_user_data_usage(user, by.username),
-            wh.notify(wh.UserDataUsageReset(username=user.username, user=user, by=by)),
-        )
-
-
-async def user_data_reset_by_next(user: UserNotificationResponse, by: AdminDetails):
-    if (await notification_enable()).user.data_reset_by_next:
-        await _gather_notifications(
-            "user_data_reset_by_next",
-            ds.user_data_reset_by_next(user, by.username),
-            tg.user_data_reset_by_next(user, by.username),
-            wh.notify(wh.UserDataResetByNext(username=user.username, user=user, by=by)),
-        )
-
-
-async def user_subscription_revoked(user: UserNotificationResponse, by: AdminDetails):
-    if (await notification_enable()).user.subscription_revoked:
-        await _gather_notifications(
-            "user_subscription_revoked",
-            ds.user_subscription_revoked(user, by.username),
-            tg.user_subscription_revoked(user, by.username),
-            wh.notify(wh.UserSubscriptionRevoked(username=user.username, user=user, by=by)),
-        )
-
-
-async def create_core(core: CoreResponse, by: str):
+async def create_core(core, by):
     if (await notification_enable()).core.create:
-        await _gather_notifications("create_core", ds.create_core(core, by), tg.create_core(core, by))
+        await _emit("core.create", "core", getattr(core, "id", None), by)
 
 
-async def modify_core(core: CoreResponse, by: str):
+async def modify_core(core, by):
     if (await notification_enable()).core.modify:
-        await _gather_notifications("modify_core", ds.modify_core(core, by), tg.modify_core(core, by))
+        await _emit("core.modify", "core", getattr(core, "id", None), by)
 
 
-async def remove_core(core_id: int, by: str):
+async def remove_core(core_id, by):
     if (await notification_enable()).core.delete:
-        await _gather_notifications("remove_core", ds.remove_core(core_id, by), tg.remove_core(core_id, by))
+        await _emit("core.delete", "core", core_id, by)
 
 
-for _task_name in (
-    "create_api_key",
-    "modify_api_key",
-    "remove_api_key",
-    "create_admin_role",
-    "modify_admin_role",
-    "remove_admin_role",
-    "create_host",
-    "modify_host",
-    "remove_host",
-    "modify_hosts",
-    "create_user_template",
-    "modify_user_template",
-    "remove_user_template",
-    "create_node",
-    "modify_node",
-    "remove_node",
-    "connect_node",
-    "recovered_node",
-    "error_node",
-    "limited_node",
-    "reset_node_usage",
-    "create_group",
-    "modify_group",
-    "remove_group",
-    "create_admin",
-    "modify_admin",
-    "remove_admin",
-    "admin_usage_reset",
-    "admin_usage_limit_reached",
-    "admin_login",
-    "user_status_change",
-    "create_user",
-    "modify_user",
-    "remove_user",
-    "reset_user_data_usage",
-    "user_data_reset_by_next",
-    "user_subscription_revoked",
-    "create_core",
-    "modify_core",
-    "remove_core",
-):
-    globals()[_task_name] = _safe_notification_task(globals()[_task_name])
+async def subscription_status_change(user: SubscriptionNotificationResponse, by: AdminDetails):
+    if (await notification_enable()).subscription.status_change:
+        await wh.status_change(user)
 
-del _task_name
+
+async def _emit_subscription(action: str, subscription: SubscriptionNotificationResponse, by: AdminDetails) -> None:
+    await wh.notify(
+        wh.PanelEvent(
+            action=action,
+            resource="subscription",
+            subscription_uuid=subscription.uuid,
+            actor=by.username,
+        )
+    )
+
+
+async def create_subscription(user: SubscriptionNotificationResponse, by: AdminDetails):
+    if (await notification_enable()).subscription.create:
+        await _emit_subscription("subscription.create", user, by)
+
+
+async def modify_subscription(user: SubscriptionNotificationResponse, by: AdminDetails):
+    if (await notification_enable()).subscription.modify:
+        await _emit_subscription("subscription.update", user, by)
+
+
+async def remove_subscription(user: SubscriptionNotificationResponse, by: AdminDetails):
+    if (await notification_enable()).subscription.delete:
+        await _emit_subscription("subscription.delete", user, by)
+
+
+async def reset_subscription_data_usage(user: SubscriptionNotificationResponse, by: AdminDetails):
+    if (await notification_enable()).subscription.reset_data_usage:
+        await _emit_subscription("subscription.traffic_reset", user, by)
+
+
+async def subscription_data_reset_by_next(user: SubscriptionNotificationResponse, by: AdminDetails):
+    if (await notification_enable()).subscription.data_reset_by_next:
+        await _emit_subscription("subscription.next_plan_activated", user, by)
+
+
+async def subscription_access_revoked(user: SubscriptionNotificationResponse, by: AdminDetails):
+    if (await notification_enable()).subscription.subscription_revoked:
+        await _emit_subscription("subscription.access_revoked", user, by)
+
+
+create_api_key = _safe_notification_task(create_api_key)
+modify_api_key = _safe_notification_task(modify_api_key)
+remove_api_key = _safe_notification_task(remove_api_key)
+create_admin_role = _safe_notification_task(create_admin_role)
+modify_admin_role = _safe_notification_task(modify_admin_role)
+remove_admin_role = _safe_notification_task(remove_admin_role)
+create_host = _safe_notification_task(create_host)
+modify_host = _safe_notification_task(modify_host)
+remove_host = _safe_notification_task(remove_host)
+modify_hosts = _safe_notification_task(modify_hosts)
+create_subscription_template = _safe_notification_task(create_subscription_template)
+modify_subscription_template = _safe_notification_task(modify_subscription_template)
+remove_subscription_template = _safe_notification_task(remove_subscription_template)
+create_node = _safe_notification_task(create_node)
+modify_node = _safe_notification_task(modify_node)
+remove_node = _safe_notification_task(remove_node)
+connect_node = _safe_notification_task(connect_node)
+recovered_node = _safe_notification_task(recovered_node)
+error_node = _safe_notification_task(error_node)
+limited_node = _safe_notification_task(limited_node)
+reset_node_usage = _safe_notification_task(reset_node_usage)
+create_group = _safe_notification_task(create_group)
+modify_group = _safe_notification_task(modify_group)
+remove_group = _safe_notification_task(remove_group)
+create_admin = _safe_notification_task(create_admin)
+modify_admin = _safe_notification_task(modify_admin)
+remove_admin = _safe_notification_task(remove_admin)
+admin_usage_reset = _safe_notification_task(admin_usage_reset)
+admin_usage_limit_reached = _safe_notification_task(admin_usage_limit_reached)
+admin_login = _safe_notification_task(admin_login)
+create_core = _safe_notification_task(create_core)
+modify_core = _safe_notification_task(modify_core)
+remove_core = _safe_notification_task(remove_core)
+subscription_status_change = _safe_notification_task(subscription_status_change)
+create_subscription = _safe_notification_task(create_subscription)
+modify_subscription = _safe_notification_task(modify_subscription)
+remove_subscription = _safe_notification_task(remove_subscription)
+reset_subscription_data_usage = _safe_notification_task(reset_subscription_data_usage)
+subscription_data_reset_by_next = _safe_notification_task(subscription_data_reset_by_next)
+subscription_access_revoked = _safe_notification_task(subscription_access_revoked)

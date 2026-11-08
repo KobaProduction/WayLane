@@ -3,27 +3,20 @@ import { LoadingSpinner } from '@/components/common/loading-spinner'
 import PageHeader from '@/components/layout/page-header'
 import { getDocsUrl } from '@/utils/docs-url'
 import { useAdmin } from '@/hooks/use-admin'
-import { hasPermission, hasScopeAll } from '@/utils/rbac'
+import { hasPermission } from '@/utils/rbac'
 import { cn } from '@/lib/utils'
 import {
-  ArrowUpDown,
-  Bell,
-  Calendar,
   Cpu,
   Database,
   FileCode2,
   FileUser,
-  Group,
   ListTodo,
-  Lock,
   Logs,
   LucideIcon,
   Network,
   Palette,
-  Send,
   Settings as SettingsIcon,
   Share2,
-  UserPlus,
   Webhook,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -40,9 +33,7 @@ const NODES_TABS: TabDef[] = [
 
 const SETTINGS_SUDO_TABS: TabDef[] = [
   { id: 'general', labelKey: 'settings.general.title', icon: SettingsIcon, url: '/settings/general' },
-  { id: 'notifications', labelKey: 'settings.notifications.title', icon: Bell, url: '/settings/notifications' },
   { id: 'subscriptions', labelKey: 'settings.subscriptions.title', icon: ListTodo, url: '/settings/subscriptions' },
-  { id: 'telegram', labelKey: 'settings.telegram.title', icon: Send, url: '/settings/telegram' },
   { id: 'webhook', labelKey: 'settings.webhook.title', icon: Webhook, url: '/settings/webhook' },
   { id: 'cleanup', labelKey: 'settings.cleanup.title', icon: Database, url: '/settings/cleanup' },
   { id: 'theme', labelKey: 'theme.title', icon: Palette, url: '/settings/theme' },
@@ -50,18 +41,8 @@ const SETTINGS_SUDO_TABS: TabDef[] = [
 
 const SETTINGS_NON_SUDO_TABS: TabDef[] = [{ id: 'theme', labelKey: 'theme.title', icon: Palette, url: '/settings/theme' }]
 
-const BULK_SUDO_TABS: TabDef[] = [
-  { id: 'create', labelKey: 'bulk.createUsers', icon: UserPlus, url: '/bulk' },
-  { id: 'groups', labelKey: 'bulk.groups', icon: Group, url: '/bulk/groups' },
-  { id: 'expire', labelKey: 'bulk.expireDate', icon: Calendar, url: '/bulk/expire' },
-  { id: 'data', labelKey: 'bulk.dataLimit', icon: ArrowUpDown, url: '/bulk/data' },
-  { id: 'proxy', labelKey: 'bulk.proxySettings', icon: Lock, url: '/bulk/proxy' },
-]
-
-const BULK_NON_SUDO_TABS: TabDef[] = [{ id: 'create', labelKey: 'bulk.createUsers', icon: UserPlus, url: '/bulk' }]
-
 const TEMPLATES_TABS: TabDef[] = [
-  { id: 'templates.userTemplates', labelKey: 'templates.userTemplates', icon: FileUser, url: '/templates/user' },
+  { id: 'templates.subscriptionTemplates', labelKey: 'templates.subscriptionTemplates', icon: FileUser, url: '/templates/subscriptions' },
   { id: 'templates.clientTemplates', labelKey: 'templates.clientTemplates', icon: FileCode2, url: '/templates/client' },
 ]
 
@@ -88,26 +69,6 @@ function nodesHeader(pathname: string): { title: string; description: string } {
 function settingsActiveTabId(pathname: string, tabs: TabDef[]): string {
   const hit = tabs.find(t => pathname === t.url)
   return hit?.id ?? tabs[0].id
-}
-
-function bulkActiveTabId(pathname: string, tabs: TabDef[]): string {
-  const hit = tabs.find(tab => {
-    if (tab.id === 'create' && pathname === '/bulk/create') return true
-    return pathname === tab.url
-  })
-  return hit?.id ?? tabs[0].id
-}
-
-function bulkHeader(pathname: string): { title: string; description: string } {
-  const pathToHeader: Record<string, { title: string; description: string }> = {
-    '/bulk': { title: 'bulk.createUsers', description: 'bulk.createUsersDesc' },
-    '/bulk/create': { title: 'bulk.createUsers', description: 'bulk.createUsersDesc' },
-    '/bulk/groups': { title: 'bulk.groups', description: 'bulk.groupsDesc' },
-    '/bulk/expire': { title: 'bulk.expireDate', description: 'bulk.expireDateDesc' },
-    '/bulk/data': { title: 'bulk.dataLimit', description: 'bulk.dataLimitDesc' },
-    '/bulk/proxy': { title: 'bulk.proxySettings', description: 'bulk.proxySettingsDesc' },
-  }
-  return pathToHeader[pathname] ?? pathToHeader['/bulk']!
 }
 
 function templatesHeader(pathname: string): { title: string; description: string } {
@@ -183,24 +144,9 @@ function SettingsTabbedFallback({ pathname, isSudo }: { pathname: string; isSudo
   )
 }
 
-function BulkTabbedFallback({ pathname, isSudo }: { pathname: string; isSudo: boolean }) {
-  const tabs = isSudo ? BULK_SUDO_TABS : BULK_NON_SUDO_TABS
-  const activeId = bulkActiveTabId(pathname, tabs)
-  const header = bulkHeader(pathname)
-  return (
-    <div className="flex w-full flex-col items-start gap-0">
-      <PageHeader title={header.title} description={header.description} tutorialUrl={getDocsUrl(pathname)} />
-      <div className="w-full">
-        <TabStripPlaceholder tabs={tabs} activeId={activeId} />
-        <ContentSpinner />
-      </div>
-    </div>
-  )
-}
-
 function TemplatesTabbedFallback({ pathname }: { pathname: string }) {
   const header = templatesHeader(pathname)
-  const activeId = pathname === '/templates/client' ? 'templates.clientTemplates' : 'templates.userTemplates'
+  const activeId = pathname === '/templates/client' ? 'templates.clientTemplates' : 'templates.subscriptionTemplates'
   return (
     <div className="flex w-full flex-col items-start gap-0">
       <PageHeader title={header.title} description={header.description} tutorialUrl={getDocsUrl(pathname)} />
@@ -214,22 +160,18 @@ function TemplatesTabbedFallback({ pathname }: { pathname: string }) {
 
 /**
  * Suspense fallback for lazy tabbed layouts: real tab chrome + compact spinner (not full-screen).
- * Mirrors `_dashboard.nodes`, `_dashboard.settings`, `_dashboard.bulk`, `_dashboard.templates`.
+ * Mirrors `_dashboard.nodes`, `_dashboard.settings`, `_dashboard.templates`.
  */
 export function TabbedRouteSuspenseFallback() {
   const { pathname } = useLocation()
   const { admin } = useAdmin()
   const canUseSettings = (hasPermission(admin, 'settings', 'read') || hasPermission(admin, 'settings', 'read_general')) && hasPermission(admin, 'settings', 'update')
-  const canUseBulkAll = hasScopeAll(admin, 'users', 'update')
 
   if (pathname.startsWith('/nodes')) {
     return <NodesTabbedFallback pathname={pathname} />
   }
   if (pathname.startsWith('/settings')) {
     return <SettingsTabbedFallback pathname={pathname} isSudo={canUseSettings} />
-  }
-  if (pathname.startsWith('/bulk')) {
-    return <BulkTabbedFallback pathname={pathname} isSudo={canUseBulkAll} />
   }
   if (pathname.startsWith('/templates')) {
     return <TemplatesTabbedFallback pathname={pathname} />

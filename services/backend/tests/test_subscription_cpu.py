@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.db.models import UserStatus
+from app.db.models import SubscriptionStatus
 from app.models.subscription import SubscriptionInboundData, TCPTransportConfig, TLSConfig
 from app.subscription import config_cache
 from app.subscription.base import dumps_compact
@@ -95,7 +95,7 @@ def test_sub_config_cache_expires_and_evicts():
 
 @pytest.mark.asyncio
 async def test_generate_subscription_returns_cached_payload(monkeypatch: pytest.MonkeyPatch):
-    user = SimpleNamespace(id=7, status=UserStatus.active, inbounds=["tag"], data_limit=None, expire=None)
+    user = SimpleNamespace(id=7, status=SubscriptionStatus.active, inbounds=["tag"], data_limit=None, expire=None)
     monkeypatch.setattr(
         "app.subscription.share.subscription_client_templates",
         AsyncMock(side_effect=AssertionError("cache hit should skip rebuild")),

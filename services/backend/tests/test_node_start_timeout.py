@@ -2,8 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from waylane_node_bridge import Health, NodeAPIError
-from waylane_node_bridge.storage import LifecycleStatus
 from pydantic import ValidationError
 
 from app.db.models import NodeStatus
@@ -11,6 +9,8 @@ from app.jobs import node_checker
 from app.models.node import NodeModify
 from app.operation import node as node_operation_module
 from app.operation.node import NodeOperation
+from waylane_node_bridge import Health, NodeAPIError
+from waylane_node_bridge.storage import LifecycleStatus
 
 
 def test_default_timeout_allows_slow_node_startup():
@@ -54,7 +54,7 @@ async def test_start_or_attach_probes_broken_desired_healthy_lifecycle(monkeypat
     result = await NodeOperation._start_or_attach_node(
         pg_node,
         SimpleNamespace(name="slow-node"),
-        object(),
+        SimpleNamespace(type=None),
         [],
         object(),
     )

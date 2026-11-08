@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import nats
+
 from waylane_node_bridge import Health
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -38,7 +39,7 @@ async def main():
     node_operation.node_manager.get_node = AsyncMock(return_value=node)
     node_operation.core_manager.get_cores = AsyncMock(return_value={1: core})
     reads = AsyncMock(return_value=[])
-    node_operation.core_users = reads
+    node_operation.core_subscriptions = reads
     done = asyncio.Event()
     count = 0
 

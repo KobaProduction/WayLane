@@ -18,7 +18,7 @@ import {
   setDatePickerPreference,
   type ChartViewType,
   type DatePickerPreference,
-} from '@/utils/userPreferenceStorage'
+} from '@/utils/dashboardPreferenceStorage'
 import { BarChart3, CalendarClock, Check, FileJson2, Languages, Monitor, Moon, Palette, RotateCcw, Ruler, Sun, SunMoon, SwatchBook, TrendingUp } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'

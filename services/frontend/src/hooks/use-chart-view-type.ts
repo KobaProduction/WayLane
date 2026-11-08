@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CHART_VIEW_TYPE_CHANGE_EVENT, getChartViewTypePreference, type ChartViewType } from '@/utils/userPreferenceStorage'
+import { CHART_VIEW_TYPE_CHANGE_EVENT, getChartViewTypePreference, type ChartViewType } from '@/utils/dashboardPreferenceStorage'
 
 export const useChartViewType = () => {
   const [chartViewType, setChartViewType] = useState<ChartViewType>(() => getChartViewTypePreference())

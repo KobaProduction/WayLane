@@ -23,17 +23,17 @@ export type PermissionGroup = {
 
 export const PERMISSION_GROUPS: PermissionGroup[] = [
   {
-    labelKey: 'users',
+    labelKey: 'subscriptions',
     actions: [
-      { resource: 'users', action: 'read', scoped: true },
-      { resource: 'users', action: 'read_simple', scoped: true },
-      { resource: 'users', action: 'create' },
-      { resource: 'users', action: 'update', scoped: true },
-      { resource: 'users', action: 'delete', scoped: true },
-      { resource: 'users', action: 'reset_usage', scoped: true },
-      { resource: 'users', action: 'revoke_sub', scoped: true },
-      { resource: 'users', action: 'set_owner', scoped: true },
-      { resource: 'users', action: 'activate_next_plan', scoped: true },
+      { resource: 'subscriptions', action: 'read', scoped: true },
+      { resource: 'subscriptions', action: 'read_simple', scoped: true },
+      { resource: 'subscriptions', action: 'create' },
+      { resource: 'subscriptions', action: 'update', scoped: true },
+      { resource: 'subscriptions', action: 'delete', scoped: true },
+      { resource: 'subscriptions', action: 'reset_usage', scoped: true },
+      { resource: 'subscriptions', action: 'revoke_sub', scoped: true },
+      { resource: 'subscriptions', action: 'set_owner', scoped: true },
+      { resource: 'subscriptions', action: 'activate_next_plan', scoped: true },
     ],
   },
   {

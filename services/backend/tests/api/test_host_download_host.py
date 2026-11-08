@@ -12,7 +12,7 @@ from app.core.hosts import host_manager
 from app.db.crud.host import get_hosts
 from app.subscription import config_cache
 from tests.api import GetTestDB, client
-from tests.api.helpers import auth_headers, create_group, create_user, delete_group, delete_user, unique_name
+from tests.api.helpers import auth_headers, create_group, delete_group, unique_name
 
 
 def _xhttp_inbound(tag: str, port: int, path: str) -> dict:
@@ -68,7 +68,7 @@ async def _host_manager_setup() -> None:
 
 
 @pytest.fixture
-def download_pair(access_token):
+def download_pair(access_token, active_subscription_factory):
     """A core with two xHTTP inbounds, a download host on the second and a parent host on the first."""
     headers = auth_headers(access_token)
     up_inbound = _xhttp_inbound(unique_name("xhttp-up"), 18601, "/up")
@@ -78,7 +78,7 @@ def download_pair(access_token):
     assert response.status_code == status.HTTP_201_CREATED, response.text
     core_id = response.json()["id"]
     group = create_group(access_token, inbound_tags=[up_inbound["tag"], down_inbound["tag"]])
-    user = create_user(access_token, group_ids=[group["id"]])
+    user = active_subscription_factory(group_ids=[group["id"]])
 
     response = client.post(
         "/api/host",
@@ -116,14 +116,14 @@ def download_pair(access_token):
         download=download_host,
         parent=parent_host,
     )
-    assert _download_addresses(user["subscription_url"]) == ["download.example.com"]
+    assert _download_addresses(user["url"]) == ["download.example.com"]
     try:
         yield pair
     finally:
         # The parent goes first: a download host cannot be deleted while a host still uses it
         for host_id in (parent_host["id"], download_host["id"]):
             client.delete(f"/api/host/{host_id}", headers=headers)
-        delete_user(access_token, user["username"])
+        client.delete(f"/api/subscriptions/{user['uuid']}", headers=auth_headers(access_token))
         delete_group(access_token, group["id"])
         client.delete(f"/api/core/{core_id}", headers=headers)
 
@@ -144,7 +144,7 @@ def test_core_edit_removing_download_host_inbound_keeps_hosts_working(download_p
     assert pair.download["id"] not in host_manager._hosts
     assert pair.parent["id"] in host_manager._hosts
     # The parent is still served, without the download host
-    assert _download_addresses(pair.user["subscription_url"]) == []
+    assert _download_addresses(pair.user["url"]) == []
 
 
 def test_full_refresh_skips_a_host_that_cannot_be_prepared(download_pair, monkeypatch):
@@ -177,7 +177,7 @@ def test_delete_download_host_in_use_is_refused(download_pair):
     # Nothing changed: the host still exists and the parent still uses it
     response = client.get(f"/api/host/{pair.download['id']}", headers=pair.headers)
     assert response.status_code == status.HTTP_200_OK
-    assert _download_addresses(pair.user["subscription_url"]) == ["download.example.com"]
+    assert _download_addresses(pair.user["url"]) == ["download.example.com"]
 
 
 def test_delete_download_host_together_with_its_parent(download_pair):
@@ -200,18 +200,18 @@ def test_delete_download_host_after_parent_stops_using_it(download_pair):
 
     response = client.delete(f"/api/host/{pair.download['id']}", headers=pair.headers)
     assert response.status_code == status.HTTP_204_NO_CONTENT, response.text
-    assert _download_addresses(pair.user["subscription_url"]) == []
+    assert _download_addresses(pair.user["url"]) == []
 
 
 def test_bulk_disable_download_host_drops_it_from_parent(download_pair):
     pair = download_pair
     response = client.post("/api/hosts/bulk/disable", headers=pair.headers, json={"ids": [pair.download["id"]]})
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert _download_addresses(pair.user["subscription_url"]) == []
+    assert _download_addresses(pair.user["url"]) == []
 
     response = client.post("/api/hosts/bulk/enable", headers=pair.headers, json={"ids": [pair.download["id"]]})
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert _download_addresses(pair.user["subscription_url"]) == ["download.example.com"]
+    assert _download_addresses(pair.user["url"]) == ["download.example.com"]
 
 
 def test_disable_download_host_by_edit_drops_it_from_parent(download_pair):
@@ -220,11 +220,11 @@ def test_disable_download_host_by_edit_drops_it_from_parent(download_pair):
     download["is_disabled"] = True
     response = client.put(f"/api/host/{pair.download['id']}", headers=pair.headers, json=download)
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert _download_addresses(pair.user["subscription_url"]) == []
+    assert _download_addresses(pair.user["url"]) == []
 
     # A full rebuild must not bring the disabled download host back
     asyncio.run(_full_host_refresh())
-    assert _download_addresses(pair.user["subscription_url"]) == []
+    assert _download_addresses(pair.user["url"]) == []
 
 
 def test_unusable_download_host_does_not_fall_back_to_inbound_download_settings(download_pair):
@@ -241,22 +241,22 @@ def test_unusable_download_host_does_not_fall_back_to_inbound_download_settings(
     )
     assert response.status_code == status.HTTP_200_OK, response.text
     asyncio.run(_full_host_refresh())
-    assert _download_addresses(pair.user["subscription_url"]) == ["download.example.com"]
+    assert _download_addresses(pair.user["url"]) == ["download.example.com"]
 
     # The parent chose a download host: while that host is disabled the parent is served without one
     response = client.post("/api/hosts/bulk/disable", headers=pair.headers, json={"ids": [pair.download["id"]]})
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert _download_addresses(pair.user["subscription_url"]) == []
+    assert _download_addresses(pair.user["url"]) == []
     asyncio.run(_full_host_refresh())
     asyncio.run(_host_manager_setup())
-    assert _download_addresses(pair.user["subscription_url"]) == []
+    assert _download_addresses(pair.user["url"]) == []
 
     # A parent without a download host still inherits the inbound's downloadSettings
     parent = {key: value for key, value in pair.parent.items() if key != "id"}
     parent["transport_settings"]["xhttp_settings"]["download_settings"] = None
     response = client.put(f"/api/host/{pair.parent['id']}", headers=pair.headers, json=parent)
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert _download_addresses(pair.user["subscription_url"]) == ["inbound-default.example.com"]
+    assert _download_addresses(pair.user["url"]) == ["inbound-default.example.com"]
 
 
 class _FakeKV:

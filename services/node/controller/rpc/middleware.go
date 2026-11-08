@@ -207,22 +207,22 @@ func LoggingStreamInterceptor(s *Service) grpc.StreamServerInterceptor {
 }
 
 var backendMethods = map[string]bool{
-	"/waylane.node.v1.NodeService/GetStats":                 true,
-	"/waylane.node.v1.NodeService/GetUserOnlineStats":       true,
-	"/waylane.node.v1.NodeService/GetUserOnlineIpListStats": true,
-	"/waylane.node.v1.NodeService/GetBackendStats":          true,
-	"/waylane.node.v1.NodeService/GetSystemStats":           true,
-	"/waylane.node.v1.NodeService/Stop":                     true,
-	"/waylane.node.v1.NodeService/SyncUser":                 true,
-	"/waylane.node.v1.NodeService/SyncUsers":                true,
-	"/waylane.node.v1.NodeService/SyncUsersChunked":         true,
-	"/waylane.node.v1.NodeService/GetLogs":                  true,
-	"/waylane.node.v1.NodeService/ListRoutingRules":         true,
-	"/waylane.node.v1.NodeService/GetBalancerInfo":          true,
-	"/waylane.node.v1.NodeService/TestRoute":                true,
-	"/waylane.node.v1.NodeService/AddRoutingRule":           true,
-	"/waylane.node.v1.NodeService/RemoveRoutingRule":        true,
-	"/waylane.node.v1.NodeService/OverrideBalancerTarget":   true,
+	"/waylane.node.v1.NodeService/GetStats":                         true,
+	"/waylane.node.v1.NodeService/GetSubscriptionOnlineStats":       true,
+	"/waylane.node.v1.NodeService/GetSubscriptionOnlineIpListStats": true,
+	"/waylane.node.v1.NodeService/GetBackendStats":                  true,
+	"/waylane.node.v1.NodeService/GetSystemStats":                   true,
+	"/waylane.node.v1.NodeService/Stop":                             true,
+	"/waylane.node.v1.NodeService/SyncSubscription":                 true,
+	"/waylane.node.v1.NodeService/SyncSubscriptions":                true,
+	"/waylane.node.v1.NodeService/SyncSubscriptionsChunked":         true,
+	"/waylane.node.v1.NodeService/GetLogs":                          true,
+	"/waylane.node.v1.NodeService/ListRoutingRules":                 true,
+	"/waylane.node.v1.NodeService/GetBalancerInfo":                  true,
+	"/waylane.node.v1.NodeService/TestRoute":                        true,
+	"/waylane.node.v1.NodeService/AddRoutingRule":                   true,
+	"/waylane.node.v1.NodeService/RemoveRoutingRule":                true,
+	"/waylane.node.v1.NodeService/OverrideBalancerTarget":           true,
 }
 
 func ConditionalMiddleware(s *Service) grpc.UnaryServerInterceptor {

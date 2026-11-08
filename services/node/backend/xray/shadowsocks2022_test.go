@@ -156,12 +156,12 @@ func TestShadowsocks2022InboundStartedWithoutUsers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	user := &common.User{
-		Email:    "1",
-		Inbounds: []string{shadowsocks2022TestInbound},
-		Proxies:  &common.Proxy{Shadowsocks: &common.Shadowsocks{Password: "user-one-password"}},
+	user := &common.Subscription{
+		SubscriptionUuid: "1",
+		Inbounds:         []string{shadowsocks2022TestInbound},
+		Proxies:          &common.Proxy{Shadowsocks: &common.Shadowsocks{Password: "user-one-password"}},
 	}
-	if err := back.SyncUser(ctx, user); err != nil {
+	if err := back.SyncSubscription(ctx, user); err != nil {
 		t.Fatalf("adding the first user to the inbound failed: %v", err)
 	}
 

@@ -17,7 +17,7 @@ import (
 // setupUserAccount builds the user's account for every protocol it has usable
 // credentials for. wireguardErr reports WireGuard settings that carry a key but
 // are invalid; the other accounts are still set up.
-func setupUserAccount(user *common.User) (settings api.ProxySettings, wireguardErr error) {
+func setupUserAccount(user *common.Subscription) (settings api.ProxySettings, wireguardErr error) {
 	if user.GetProxies().GetVmess() != nil {
 		if vmessAccount, err := api.NewVmessAccount(user); err == nil {
 			settings.Vmess = vmessAccount
@@ -224,7 +224,7 @@ func (i *Inbound) removeBeforeAdd(account api.Account) bool {
 	return ok && wireguardPeerReplaced(current, next)
 }
 
-func (x *Xray) SyncUser(ctx context.Context, user *common.User) error {
+func (x *Xray) SyncSubscription(ctx context.Context, user *common.Subscription) error {
 	x.syncMu.Lock()
 	defer x.syncMu.Unlock()
 
@@ -251,7 +251,7 @@ func (x *Xray) SyncUser(ctx context.Context, user *common.User) error {
 		// Invalid WireGuard settings must not drop the live peer of an inbound
 		// the user stays on; its other inbounds are still applied.
 		if wireguardErr != nil && inbound.Protocol == Wireguard && slices.Contains(userInbounds, inbound.Tag) {
-			err := fmt.Errorf("wireguard user %s on inbound %s: %w", user.GetEmail(), inbound.Tag, wireguardErr)
+			err := fmt.Errorf("wireguard user %s on inbound %s: %w", user.GetSubscriptionUuid(), inbound.Tag, wireguardErr)
 			log.Println(err)
 			errMessage.WriteString("\n" + err.Error())
 			continue
@@ -265,20 +265,20 @@ func (x *Xray) SyncUser(ctx context.Context, user *common.User) error {
 		if isActive {
 			removeFirst := inbound.removeBeforeAdd(account)
 			if removeFirst {
-				if err := handler.RemoveInboundUser(ctx, inbound.Tag, user.GetEmail()); err != nil && inbound.Protocol == Wireguard {
-					return fmt.Errorf("failed to remove wireguard user %s from inbound %s: %w", user.GetEmail(), inbound.Tag, err)
+				if err := handler.RemoveInboundUser(ctx, inbound.Tag, user.GetSubscriptionUuid()); err != nil && inbound.Protocol == Wireguard {
+					return fmt.Errorf("failed to remove wireguard user %s from inbound %s: %w", user.GetSubscriptionUuid(), inbound.Tag, err)
 				}
 			}
 			inbound.updateUser(account)
 			err := handler.AddInboundUser(ctx, inbound.Tag, accountForAPI(inbound, account))
 			if err != nil {
-				inbound.removeUser(user.GetEmail())
+				inbound.removeUser(user.GetSubscriptionUuid())
 				log.Println(err)
 				errMessage.WriteString("\n" + err.Error())
 			}
 		} else {
-			_ = handler.RemoveInboundUser(ctx, inbound.Tag, user.GetEmail())
-			inbound.removeUser(user.GetEmail())
+			_ = handler.RemoveInboundUser(ctx, inbound.Tag, user.GetSubscriptionUuid())
+			inbound.removeUser(user.GetSubscriptionUuid())
 		}
 	}
 
@@ -288,7 +288,7 @@ func (x *Xray) SyncUser(ctx context.Context, user *common.User) error {
 	return nil
 }
 
-func (x *Xray) SyncUsers(ctx context.Context, users []*common.User) error {
+func (x *Xray) SyncSubscriptions(ctx context.Context, users []*common.Subscription) error {
 	x.syncMu.Lock()
 	defer x.syncMu.Unlock()
 
@@ -354,7 +354,7 @@ func (x *Xray) restorePreviousConfig(previous *Config) error {
 	return nil
 }
 
-func (x *Xray) UpdateUsers(ctx context.Context, users []*common.User) error {
+func (x *Xray) UpdateUsers(ctx context.Context, users []*common.Subscription) error {
 	x.syncMu.Lock()
 	defer x.syncMu.Unlock()
 
@@ -412,7 +412,7 @@ func (x *Xray) UpdateUsers(ctx context.Context, users []*common.User) error {
 	return nil
 }
 
-func (x *Xray) UpdateUsersAndRestart(ctx context.Context, users []*common.User) error {
+func (x *Xray) UpdateUsersAndRestart(ctx context.Context, users []*common.Subscription) error {
 	x.syncMu.Lock()
 	defer x.syncMu.Unlock()
 

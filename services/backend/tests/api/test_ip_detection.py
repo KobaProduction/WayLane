@@ -19,7 +19,7 @@ def test_get_client_ip_no_proxy():
     assert get_client_ip(request) == "1.1.1.1"
 
 
-def test_get_client_ip_with_proxy_middleware_behavior(access_token):
+def test_get_client_ip_with_proxy_middleware_behavior(access_token, active_subscription_factory):
     """
     Test the behavior of IP detection via the TestClient.
     Since we enabled proxy_headers in conftest.py, the middleware should process X-Forwarded-For.
@@ -38,29 +38,24 @@ def test_get_client_ip_with_proxy_middleware_behavior(access_token):
     # Based on grep, user_subscription_info returns IP
 
     from tests.api.helpers import (
+        auth_headers,
         create_core,
         create_group,
-        create_user,
         delete_core,
         delete_group,
-        delete_user,
     )
 
     core = create_core(access_token)
     group = create_group(access_token)
-    user = create_user(
-        access_token,
-        group_ids=[group["id"]],
-        payload={"username": "iptestuser"},
-    )
+    user = active_subscription_factory(group_ids=[group["id"]])
     try:
-        response = client.get(f"{user['subscription_url']}/info", headers={"X-Forwarded-For": ip})
+        response = client.get(f"{user['url']}/info", headers={"X-Forwarded-For": ip})
         assert response.status_code == 200
         # The subscription router uses request.client.host
         # If ProxyHeadersMiddleware is working, it will swap request.client.host with the value from X-Forwarded-For
         assert response.json()["ip"] == ip
     finally:
-        delete_user(access_token, "iptestuser")
+        client.delete(f"/api/subscriptions/{user['uuid']}", headers=auth_headers(access_token))
         delete_group(access_token, group["id"])
         delete_core(access_token, core["id"])
 

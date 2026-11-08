@@ -1,32 +1,24 @@
 """Regression tests for RBAC permission leaks."""
 
 import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi import status
 from sqlalchemy import select
 
-from app.db.crud.admin import build_admin_details, get_admin_by_id
 from app.db.models import Admin
 from app.models.admin import hash_password
-from app.models.user import UserListQuery
-from app.operation import OperatorType
-from app.operation.user import UserOperation
-from app.telegram.handlers.admin.user import search_user
 from tests.api import TestSession, client
 from tests.api.helpers import (
     auth_headers,
     create_admin,
     create_core,
     create_group,
-    create_user,
-    create_user_template,
+    create_subscription_template,
     delete_admin,
     delete_core,
     delete_group,
-    set_user_hwids,
     strong_password,
     unique_name,
 )
@@ -112,7 +104,7 @@ def test_api_key_with_empty_custom_permissions_grants_nothing(access_token):
             permissions={},
         )
 
-        response = client.get("/api/users", headers={"X-Api-Key": raw_key})
+        response = client.get("/api/subscriptions", headers={"X-Api-Key": raw_key})
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
     finally:
@@ -135,201 +127,61 @@ def test_owner_api_key_with_empty_custom_permissions_is_not_owner(access_token):
         _delete_admin_row(owner["username"])
 
 
-# --- User actions must be scoped on the action the route gates on ---
+# --- UUID subscription RBAC action scope must not leak foreign subscriptions ---
 
-# Can read every user, but may only change its own users.
+# Can inspect all UUID subscriptions but mutate only those owned by this admin.
 READ_ALL_WRITE_OWN = {
-    "users": {
+    "subscriptions": {
         "create": True,
         "read": SCOPE_ALL,
         "update": SCOPE_OWN,
         "delete": SCOPE_OWN,
         "reset_usage": SCOPE_OWN,
         "revoke_sub": SCOPE_OWN,
-        "set_owner": SCOPE_OWN,
-        "activate_next_plan": SCOPE_OWN,
-    }
-}
-
-# Can update every user, but the dedicated actions are limited to its own users.
-UPDATE_ALL_ACTIONS_OWN = {
-    "users": {
-        "create": True,
-        "read": SCOPE_ALL,
-        "update": SCOPE_ALL,
-        "reset_usage": SCOPE_OWN,
-        "set_owner": SCOPE_OWN,
-        "activate_next_plan": SCOPE_OWN,
     }
 }
 
 
 @pytest.fixture
 def scoped_actor(access_token):
-    """Build a non-owner admin with the given permissions, plus a user that admin does not own."""
+    """One foreign Core-managed UUID and an actor with caller-provided RBAC grants."""
+    core = create_core(access_token)
+    group = create_group(access_token)
     created = []
 
     def _build(permissions: dict) -> dict:
         role = _create_role(access_token, permissions)
         actor = create_admin(access_token, role_id=role["id"])
-        victim = create_user(access_token)
+        sid = str(uuid4())
+        response = client.post(
+            "/api/subscriptions",
+            headers=auth_headers(access_token),
+            json={"uuid": sid, "group_ids": [group["id"]]},
+        )
+        assert response.status_code == status.HTTP_201_CREATED, response.text
+        victim = {"uuid": sid}
         created.append((role, actor, victim))
-        return {"actor": actor, "token": _login(actor["username"], actor["password"]), "victim": victim}
+        return {
+            "actor": actor,
+            "token": _login(actor["username"], actor["password"]),
+            "victim": victim,
+            "group_id": group["id"],
+        }
 
     yield _build
 
     for role, actor, victim in created:
-        client.delete(f"/api/user/by-id/{victim['id']}", headers=auth_headers(access_token))
+        client.delete(f"/api/subscriptions/{victim['uuid']}", headers=auth_headers(access_token))
         delete_admin(access_token, actor["username"])
         _delete_role(access_token, role["id"])
-
-
-def _send_as_actor(context: dict, method: str, path: str, *, params: dict | None = None, json: dict | None = None):
-    """Send a request as the scoped actor against its victim; "<actor>" placeholders become the actor's username."""
-    victim = context["victim"]
-    actor_username = context["actor"]["username"]
-    if params is not None:
-        params = {key: actor_username if value == "<actor>" else value for key, value in params.items()}
-    if json is not None:
-        json = {key: actor_username if value == "<actor>" else value for key, value in json.items()}
-        if "ids" in json:
-            json["ids"] = [victim["id"]]
-    return client.request(
-        method,
-        path.format(username=victim["username"], user_id=victim["id"]),
-        headers=auth_headers(context["token"]),
-        params=params,
-        json=json,
-    )
-
-
-def _assert_victim_untouched(access_token: str, victim: dict) -> None:
-    response = client.get(f"/api/user/by-id/{victim['id']}", headers=auth_headers(access_token))
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json()["note"] == victim["note"]
-    assert (response.json()["admin"] or {}).get("username") == (victim["admin"] or {}).get("username")
-
-
-@pytest.mark.parametrize(
-    ("method", "path", "kwargs"),
-    [
-        pytest.param("PUT", "/api/user/{username}", {"json": {"note": "changed"}}, id="modify-legacy"),
-        pytest.param("PUT", "/api/user/by-username/{username}", {"json": {"note": "changed"}}, id="modify"),
-        pytest.param("DELETE", "/api/user/by-username/{username}", {}, id="delete"),
-        pytest.param("POST", "/api/user/by-username/{username}/reset", {}, id="reset-usage"),
-        pytest.param("POST", "/api/user/by-username/{username}/revoke_sub", {}, id="revoke-sub"),
-        pytest.param(
-            "PUT",
-            "/api/user/by-username/{username}/set_owner",
-            {"params": {"admin_username": "<actor>"}},
-            id="set-owner",
-        ),
-        pytest.param("POST", "/api/user/by-username/{username}/active_next", {}, id="activate-next-plan"),
-        pytest.param(
-            "PUT",
-            "/api/user/from_template/by-username/{username}",
-            {"json": {"user_template_id": 999999}},
-            id="modify-with-template",
-        ),
-    ],
-)
-def test_username_user_actions_respect_write_scope(access_token, scoped_actor, method, path, kwargs):
-    context = scoped_actor(READ_ALL_WRITE_OWN)
-
-    response = _send_as_actor(context, method, path, **kwargs)
-
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert response.json()["detail"] == "User not found"
-    _assert_victim_untouched(access_token, context["victim"])
-
-
-@pytest.mark.parametrize(
-    ("method", "path", "kwargs"),
-    [
-        pytest.param("POST", "/api/user/by-id/{user_id}/reset", {}, id="reset-usage"),
-        pytest.param("POST", "/api/user/by-id/{user_id}/active_next", {}, id="activate-next-plan"),
-        pytest.param(
-            "PUT",
-            "/api/user/by-id/{user_id}/set_owner",
-            {"params": {"admin_username": "<actor>"}},
-            id="set-owner",
-        ),
-        pytest.param(
-            "PUT",
-            "/api/users/bulk/set_owner",
-            {"json": {"ids": [], "admin_username": "<actor>"}},
-            id="bulk-set-owner",
-        ),
-    ],
-)
-def test_user_actions_by_id_use_their_own_scope(access_token, scoped_actor, method, path, kwargs):
-    context = scoped_actor(UPDATE_ALL_ACTIONS_OWN)
-
-    response = _send_as_actor(context, method, path, **kwargs)
-
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert response.json()["detail"] == "User not found"
-    _assert_victim_untouched(access_token, context["victim"])
-
-
-@pytest.mark.parametrize(
-    ("method", "path", "expected_status"),
-    [
-        pytest.param("PUT", "/api/user/by-username/{username}", status.HTTP_200_OK, id="modify"),
-        pytest.param("POST", "/api/user/by-username/{username}/reset", status.HTTP_200_OK, id="reset-usage"),
-        pytest.param("POST", "/api/user/by-id/{user_id}/reset", status.HTTP_200_OK, id="reset-usage-by-id"),
-        pytest.param("POST", "/api/user/by-username/{username}/revoke_sub", status.HTTP_200_OK, id="revoke-sub"),
-        pytest.param("DELETE", "/api/user/by-username/{username}", status.HTTP_204_NO_CONTENT, id="delete"),
-    ],
-)
-def test_scoped_admin_can_still_act_on_own_users(scoped_actor, method, path, expected_status):
-    token = scoped_actor(READ_ALL_WRITE_OWN)["token"]
-    own_user = create_user(token)
-    try:
-        response = client.request(
-            method,
-            path.format(username=own_user["username"], user_id=own_user["id"]),
-            headers=auth_headers(token),
-            json={"note": "changed"} if method == "PUT" else None,
-        )
-
-        assert response.status_code == expected_status, response.text
-    finally:
-        client.delete(f"/api/user/by-id/{own_user['id']}", headers=auth_headers(token))
-
-
-@pytest.mark.parametrize(
-    ("path", "params", "permissions"),
-    [
-        pytest.param(
-            "/api/users",
-            "username",
-            {"users": {"read": SCOPE_OWN, "read_simple": SCOPE_ALL}},
-            id="users-read-own-simple-all",
-        ),
-        pytest.param("/api/users", "username", {"users": {"read": SCOPE_OWN}}, id="users-read-own-no-simple"),
-        pytest.param(
-            "/api/users/simple",
-            "search",
-            {"users": {"read": SCOPE_ALL, "read_simple": SCOPE_OWN}},
-            id="users-simple-own",
-        ),
-    ],
-)
-def test_user_lists_use_the_scope_of_the_permission_their_route_checks(scoped_actor, path, params, permissions):
-    context = scoped_actor(permissions)
-    victim = context["victim"]
-
-    response = client.get(path, headers=auth_headers(context["token"]), params={params: victim["username"]})
-
-    assert response.status_code == status.HTTP_200_OK
-    assert victim["username"] not in {user["username"] for user in response.json()["users"]}
+    delete_group(access_token, group["id"])
+    delete_core(access_token, core["id"])
 
 
 def _api_key_actor(scoped_actor):
     return scoped_actor(
         {
-            "users": {"read": SCOPE_OWN, "read_simple": SCOPE_OWN},
+            "subscriptions": {"read": SCOPE_OWN, "read_simple": SCOPE_OWN},
             "api_keys": {"create": True, "read": True, "update": True},
         }
     )
@@ -344,7 +196,9 @@ def test_api_key_patch_cannot_carry_permissions_beyond_the_admin(scoped_actor):
 
     # Permissions sent while the key still inherits are accepted but not stored...
     patched = client.patch(
-        f"/api/api_key/{key_id}", headers=headers, json={"permissions": {"users": {"read": True, "read_simple": True}}}
+        f"/api/api_key/{key_id}",
+        headers=headers,
+        json={"permissions": {"subscriptions": {"read": True, "read_simple": True}}},
     )
     assert patched.status_code == status.HTTP_200_OK, patched.text
     stored = client.get(f"/api/api_key/{key_id}", headers=headers).json()["permissions"]
@@ -353,9 +207,7 @@ def test_api_key_patch_cannot_carry_permissions_beyond_the_admin(scoped_actor):
     # ...so switching inheritance off afterwards leaves a key with no permissions at all.
     switched = client.patch(f"/api/api_key/{key_id}", headers=headers, json={"inherit_permissions": False})
     assert switched.status_code == status.HTTP_200_OK, switched.text
-    response = client.get(
-        "/api/users", headers={"X-Api-Key": raw_key}, params={"username": context["victim"]["username"]}
-    )
+    response = client.get("/api/subscriptions", headers={"X-Api-Key": raw_key})
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -369,7 +221,7 @@ def test_api_key_patch_with_null_permissions_keeps_the_key_working(scoped_actor)
         json={
             "name": unique_name("api_key"),
             "inherit_permissions": False,
-            "permissions": {"users": {"read": SCOPE_OWN}},
+            "permissions": {"subscriptions": {"read": SCOPE_OWN}},
         },
     )
     assert created.status_code == status.HTTP_201_CREATED, created.text
@@ -384,104 +236,6 @@ def test_api_key_patch_with_null_permissions_keeps_the_key_working(scoped_actor)
     assert client.get("/api/admin", headers={"X-Api-Key": raw_key}).status_code == status.HTTP_200_OK
 
 
-def test_get_users_requires_users_read_without_a_router_gate(scoped_actor):
-    # The Telegram inline search calls get_users directly; no route checks users.read for it.
-    actor_id = scoped_actor({"users": {"create": True}})["actor"]["id"]
-
-    async def _search():
-        async with TestSession() as db:
-            admin = build_admin_details(await get_admin_by_id(db, actor_id, load_users=False, load_usage_logs=False))
-            return await UserOperation(OperatorType.TELEGRAM).get_users(db, admin, UserListQuery(limit=50))
-
-    with pytest.raises(ValueError, match="users.read"):
-        asyncio.run(_search())
-
-
-def test_telegram_inline_search_answers_instead_of_raising_without_users_read(scoped_actor):
-    # Inline queries fire on every keystroke and the bot's error handler does not cover them, so a
-    # refusal must become an answer, not an exception (one traceback per keystroke otherwise).
-    context = scoped_actor({"users": {"create": True}})
-    actor_id = context["actor"]["id"]
-    # Search for a real user, so the test also fails if the refusal ever turns into a leak.
-    event = SimpleNamespace(query=context["victim"]["username"], answer=AsyncMock())
-
-    async def _inline_search():
-        async with TestSession() as db:
-            admin = build_admin_details(await get_admin_by_id(db, actor_id, load_users=False, load_usage_logs=False))
-            await search_user(event, admin, db)
-
-    asyncio.run(_inline_search())
-
-    results = event.answer.await_args.args[0]
-    assert len(results) == 1  # only the "user not found" article (its id can equal a real user id)
-    assert context["victim"]["username"] not in results[0].title
-
-
-@pytest.mark.parametrize(
-    ("method", "path", "permissions"),
-    [
-        pytest.param(
-            "POST",
-            "/api/user/{user_id}/hwids/reset",
-            {"users": {"read": SCOPE_OWN}, "hwids": {"delete": True}},
-            id="reset-read-own",
-        ),
-        pytest.param("POST", "/api/user/{user_id}/hwids/reset", {"hwids": {"delete": True}}, id="reset-no-users-perms"),
-        pytest.param(
-            "DELETE",
-            "/api/user/{user_id}/hwids/some-device",
-            {"users": {"read": SCOPE_OWN}, "hwids": {"delete": True}},
-            id="delete-read-own",
-        ),
-        pytest.param("GET", "/api/user/{user_id}/hwids", {"hwids": {"read": True}}, id="list-no-users-perms"),
-    ],
-)
-def test_hwid_endpoints_only_reach_users_the_admin_can_see(scoped_actor, method, path, permissions):
-    context = scoped_actor(permissions)
-
-    response = client.request(
-        method, path.format(user_id=context["victim"]["id"]), headers=auth_headers(context["token"])
-    )
-
-    assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert response.json()["detail"] == "User not found"
-
-
-@pytest.mark.parametrize(
-    ("permissions", "sees_counts"),
-    [
-        pytest.param({"users": {"read": SCOPE_ALL}}, False, id="without-hwids-read"),
-        pytest.param({"users": {"read": SCOPE_ALL}, "hwids": {"read": True}}, True, id="with-hwids-read"),
-    ],
-)
-def test_user_list_shows_device_counts_only_with_hwids_read(access_token, scoped_actor, permissions, sees_counts):
-    context = scoped_actor(permissions)
-    tag = unique_name("hwid_scope")
-    # Device count order and username order disagree, so the listing shows which sort applied
-    first, second = [create_user(access_token, username=f"{tag}_{name}") for name in ("a", "b")]
-    try:
-        set_user_hwids(first["id"], 2)
-        set_user_hwids(second["id"], 0)
-
-        response = client.get(
-            "/api/users",
-            headers=auth_headers(context["token"]),
-            params={"search": tag, "sort": "-hwid_count,-username"},
-        )
-
-        assert response.status_code == status.HTTP_200_OK, response.text
-        listed = [(user["username"], user["hwid_count"]) for user in response.json()["users"]]
-        if sees_counts:
-            assert listed == [(first["username"], 2), (second["username"], 0)]
-        else:
-            assert listed == [(second["username"], None), (first["username"], None)]
-    finally:
-        for user in (first, second):
-            # SQLite keeps a deleted user's devices and can hand its id to a later test's user
-            set_user_hwids(user["id"], 0)
-            client.delete(f"/api/user/by-id/{user['id']}", headers=auth_headers(access_token))
-
-
 # --- Group / template access lists ---
 
 
@@ -491,8 +245,8 @@ def restricted_catalog(access_token):
     core = create_core(access_token)
     allowed_group = create_group(access_token)
     hidden_group = create_group(access_token)
-    allowed_template = create_user_template(access_token, group_ids=[allowed_group["id"]])
-    hidden_template = create_user_template(access_token, group_ids=[hidden_group["id"]])
+    allowed_template = create_subscription_template(access_token, group_ids=[allowed_group["id"]])
+    hidden_template = create_subscription_template(access_token, group_ids=[hidden_group["id"]])
     role = _create_role(
         access_token,
         {
@@ -517,7 +271,7 @@ def restricted_catalog(access_token):
         delete_admin(access_token, admin["username"])
         _delete_role(access_token, role["id"])
         for template in (allowed_template, hidden_template):
-            client.delete(f"/api/user_template/{template['id']}", headers=auth_headers(access_token))
+            client.delete(f"/api/subscription_template/{template['id']}", headers=auth_headers(access_token))
         for group in (allowed_group, hidden_group):
             delete_group(access_token, group["id"])
         delete_core(access_token, core["id"])
@@ -528,8 +282,8 @@ def restricted_catalog(access_token):
     [
         pytest.param("/api/groups", "hidden_group", "groups", id="groups"),
         pytest.param("/api/groups/simple", "hidden_group", "groups", id="groups-simple"),
-        pytest.param("/api/user_templates", "hidden_template", None, id="templates"),
-        pytest.param("/api/user_templates/simple", "hidden_template", "templates", id="templates-simple"),
+        pytest.param("/api/subscription_templates", "hidden_template", None, id="templates"),
+        pytest.param("/api/subscription_templates/simple", "hidden_template", "templates", id="templates-simple"),
     ],
 )
 def test_listing_only_disallowed_ids_returns_nothing(restricted_catalog, path, item, list_key):
@@ -550,7 +304,7 @@ def test_listing_only_disallowed_ids_returns_nothing(restricted_catalog, path, i
 @pytest.mark.parametrize("action", ["delete", "disable"])
 def test_bulk_template_action_on_disallowed_ids_touches_nothing(access_token, restricted_catalog, action):
     response = client.post(
-        f"/api/user_templates/bulk/{action}",
+        f"/api/subscription_templates/bulk/{action}",
         headers=auth_headers(restricted_catalog["token"]),
         json={"ids": [restricted_catalog["hidden_template"]["id"]]},
     )
@@ -558,7 +312,7 @@ def test_bulk_template_action_on_disallowed_ids_touches_nothing(access_token, re
     assert response.status_code == status.HTTP_404_NOT_FOUND
     for key in ("allowed_template", "hidden_template"):
         template = client.get(
-            f"/api/user_template/{restricted_catalog[key]['id']}",
+            f"/api/subscription_template/{restricted_catalog[key]['id']}",
             headers=auth_headers(access_token),
         )
         assert template.status_code == status.HTTP_200_OK
@@ -605,7 +359,7 @@ def test_deleting_group_or_template_drops_it_from_role_allowlists(access_token, 
         if kind == "group":
             item = create_group(access_token)
         else:
-            item = create_user_template(access_token, group_ids=[kept_group["id"]])
+            item = create_subscription_template(access_token, group_ids=[kept_group["id"]])
         created.append((kind, item["id"]))
         return item
 
@@ -620,8 +374,8 @@ def test_deleting_group_or_template_drops_it_from_role_allowlists(access_token, 
     admin = create_admin(access_token, role_id=role["id"])
     try:
         token = _login(admin["username"], admin["password"])
-        item_path = "/api/group" if kind == "group" else "/api/user_template"
-        bulk_path = "/api/groups/bulk/delete" if kind == "group" else "/api/user_templates/bulk/delete"
+        item_path = "/api/group" if kind == "group" else "/api/subscription_template"
+        bulk_path = "/api/groups/bulk/delete" if kind == "group" else "/api/subscription_templates/bulk/delete"
         if bulk:
             response = client.post(bulk_path, headers=auth_headers(access_token), json={"ids": [target["id"]]})
             assert response.status_code == status.HTTP_200_OK
@@ -646,6 +400,78 @@ def test_deleting_group_or_template_drops_it_from_role_allowlists(access_token, 
         _delete_role(access_token, role["id"])
         _delete_role(access_token, only_target_role["id"])
         for item_kind, item_id in reversed(created):
-            path = "/api/group" if item_kind == "group" else "/api/user_template"
+            path = "/api/group" if item_kind == "group" else "/api/subscription_template"
             client.delete(f"{path}/{item_id}", headers=auth_headers(access_token))
         delete_core(access_token, core["id"])
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        pytest.param("DELETE", "/api/subscriptions/{uuid}", None, id="delete-own-only"),
+        pytest.param("POST", "/api/subscriptions/{uuid}/rotate-access", None, id="rotate-own-only"),
+        pytest.param("POST", "/api/subscriptions/{uuid}/reissue", None, id="reissue-own-only"),
+        pytest.param("POST", "/api/subscriptions/bulk/disable", "selection", id="disable-bulk-own-only"),
+        pytest.param("POST", "/api/subscriptions/bulk/delete", "selection", id="delete-bulk-own-only"),
+    ],
+)
+def test_uuid_subscription_mutations_do_not_cross_admin_action_scope(scoped_actor, method, path, body):
+    context = scoped_actor(READ_ALL_WRITE_OWN)
+    sid = context["victim"]["uuid"]
+    payload = {"uuids": [sid]} if body == "selection" else None
+    response = client.request(method, path.format(uuid=sid), headers=auth_headers(context["token"]), json=payload)
+    assert response.status_code == 404, response.text
+    # This admin can still inspect, but could not change the foreign record.
+    details = client.get(f"/api/subscriptions/{sid}", headers=auth_headers(context["token"]))
+    assert details.status_code == 200
+    assert details.json()["technical_status"] == "active"
+    assert details.json()["entitlement"] == "payment_required"
+    assert details.json()["policy_revision"] == 0
+
+
+def test_scoped_admin_can_rotate_reissue_and_delete_only_own_uuid_subscription(scoped_actor):
+    context = scoped_actor(READ_ALL_WRITE_OWN)
+    sid = str(uuid4())
+    headers = auth_headers(context["token"])
+    try:
+        created = client.post(
+            "/api/subscriptions",
+            headers=headers,
+            json={"uuid": sid, "group_ids": [context["group_id"]]},
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["entitlement"] == "payment_required"
+        rotated = client.post(f"/api/subscriptions/{sid}/rotate-access", headers=headers)
+        assert rotated.status_code == 200, rotated.text
+        reissued = client.post(f"/api/subscriptions/{sid}/reissue", headers=headers)
+        assert reissued.status_code == 200, reissued.text
+        details = client.get(f"/api/subscriptions/{sid}", headers=headers)
+        assert details.status_code == 200, details.text
+        assert details.json()["entitlement"] == "payment_required"
+        deleted = client.delete(f"/api/subscriptions/{sid}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        assert client.get(f"/api/subscriptions/{sid}", headers=headers).status_code == 404
+    finally:
+        client.delete(f"/api/subscriptions/{sid}", headers=headers)
+
+
+@pytest.mark.parametrize(
+    ("read_scope", "simple_scope", "victim_visible"),
+    [
+        pytest.param(SCOPE_OWN, SCOPE_ALL, False, id="read-own-simple-all"),
+        pytest.param(SCOPE_OWN, None, False, id="read-own-no-simple"),
+        pytest.param(SCOPE_ALL, SCOPE_OWN, True, id="read-all-simple-own"),
+    ],
+)
+def test_uuid_subscription_list_uses_read_permission_scope_not_simple_scope(
+    scoped_actor, read_scope, simple_scope, victim_visible
+):
+    permissions = {"subscriptions": {"read": read_scope}}
+    if simple_scope is not None:
+        permissions["subscriptions"]["read_simple"] = simple_scope
+    context = scoped_actor(permissions)
+    response = client.get("/api/subscriptions", headers=auth_headers(context["token"]), params={"limit": 100})
+    assert response.status_code == 200, response.text
+    uuids = {item["uuid"] for item in response.json()["items"]}
+    assert (context["victim"]["uuid"] in uuids) is victim_visible
+    assert all("id" not in item and "username" not in item for item in response.json()["items"])

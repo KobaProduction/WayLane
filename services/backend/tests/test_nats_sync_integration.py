@@ -16,11 +16,11 @@ import nats
 import pytest
 import pytest_asyncio
 from nats.js.errors import KeyNotFoundError
-from waylane_node_bridge.common.service_pb2 import User
 
 from app.nats.kv_cleanup import compact_deleted_keys
 from app.nats.kv_watch import KvWatcher, watch_kv
-from app.node.nats_memory import NatsUserSyncStore
+from app.node.nats_memory import NatsSubscriptionSyncStore
+from waylane_node_bridge.common.service_pb2 import Subscription
 
 
 @pytest_asyncio.fixture(loop_scope="function")
@@ -127,12 +127,12 @@ async def test_sync_recovery_preserves_queued_users_and_active_claims(jetstream,
     from unittest.mock import AsyncMock
 
     import certifi
-    from waylane_node_bridge.controller import Controller, Health
 
     from app.db.models import NodeStatus
     from app.jobs import node_checker
+    from waylane_node_bridge.controller import Controller, Health
 
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     node = Controller(
         server_ca=certifi.contents(),
         api_key=str(uuid4()),
@@ -161,7 +161,7 @@ async def test_sync_recovery_preserves_queued_users_and_active_claims(jetstream,
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await store.enqueue_users("91", [User(email=f"user-{index}") for index in range(20)])
+        await store.enqueue_users("91", [Subscription(subscription_uuid=f"user-{index}") for index in range(20)])
         claimed = await store.claim_users("91", "original-worker", 5, 60)
         for _ in range(5):
             await node._increment_user_sync_failure()
@@ -174,7 +174,7 @@ async def test_sync_recovery_preserves_queued_users_and_active_claims(jetstream,
         assert not worker.done()
         assert (await jetstream.js.stream_info(f"KV_{jetstream.bucket}")).state.last_seq == revision
         remaining = await store.claim_users("91", "other-worker", 30, 60)
-        assert {item.user.email for item in claimed + remaining} == {f"user-{index}" for index in range(20)}
+        assert {item.user.subscription_uuid for item in claimed + remaining} == {f"user-{index}" for index in range(20)}
         assert len(claimed + remaining) == 20
         await store.ack_users("91", [item.token for item in claimed + remaining])
     finally:
@@ -189,19 +189,19 @@ async def test_restored_queue_retries_and_drains_after_attach(jetstream, monkeyp
     from unittest.mock import AsyncMock
 
     import certifi
-    from waylane_node_bridge import NodeType
 
     from app.node.bridge import create_node
     from app.operation import node as node_operation
     from config import nats_settings
+    from waylane_node_bridge import NodeType
 
     monkeypatch.setattr(nats_settings, "node_update_users_batch_size", 100)
-    original = NatsUserSyncStore(jetstream.kv)
+    original = NatsSubscriptionSyncStore(jetstream.kv)
     try:
-        await original.enqueue_users("91", [User(email=f"restored-{index}") for index in range(1200)])
+        await original.enqueue_users("91", [Subscription(subscription_uuid=f"restored-{index}") for index in range(1200)])
     finally:
         await original.close()
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     node = create_node(
         connection=NodeType(transport),
         server_ca=certifi.contents(),
@@ -228,7 +228,7 @@ async def test_restored_queue_retries_and_drains_after_attach(jetstream, monkeyp
         await asyncio.sleep(0.02)
         if attempts == 1:
             return users
-        delivered.extend(user.email for user in users)
+        delivered.extend(user.subscription_uuid for user in users)
         return []
 
     monkeypatch.setattr(node, "sync_users_chunked", sync_chunked, raising=False)
@@ -255,18 +255,18 @@ async def test_health_poll_recovers_claim_that_expires_after_startup(jetstream, 
     from unittest.mock import AsyncMock
 
     import certifi
-    from waylane_node_bridge import Health
-    from waylane_node_bridge.controller import Controller
 
     from app.db.models import NodeStatus
     from app.jobs import node_checker
     from app.node import nats_memory
     from app.operation import node as node_operation
+    from waylane_node_bridge import Health
+    from waylane_node_bridge.controller import Controller
 
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     now = [time.time()]
     monkeypatch.setattr(nats_memory, "time", SimpleNamespace(time=lambda: now[0]))
-    await store.enqueue_users("93", [User(email="orphan")])
+    await store.enqueue_users("93", [Subscription(subscription_uuid="orphan")])
     assert len(await store.claim_users("93", "departed-worker", 1, 60)) == 1
     node = Controller(
         server_ca=certifi.contents(),
@@ -295,7 +295,7 @@ async def test_health_poll_recovers_claim_that_expires_after_startup(jetstream, 
             SimpleNamespace(id=93, name="restored", status=NodeStatus.connected, default_timeout=10), node
         )
         await asyncio.wait_for(node._sync_worker_task, timeout=5)
-        assert [user.email for user in sync.await_args.args[0]] == ["orphan"]
+        assert [user.subscription_uuid for user in sync.await_args.args[0]] == ["orphan"]
         await wait_for_keys(store, "c.93.", 0)
         await wait_for_keys(store, "p.93.", 0)
     finally:
@@ -394,7 +394,7 @@ async def test_stopping_partial_snapshot_removes_consumer(jetstream):
 
 
 async def test_idle_polls_do_not_create_consumers_or_send_requests(jetstream):
-    stores = [NatsUserSyncStore(jetstream.kv) for _ in range(4)]
+    stores = [NatsSubscriptionSyncStore(jetstream.kv) for _ in range(4)]
     try:
         # Seed deletion markers for completed claims.
         for number in range(300):
@@ -424,7 +424,7 @@ async def test_idle_polls_do_not_create_consumers_or_send_requests(jetstream):
 async def test_repeated_clear_does_not_replay_old_deletion_markers(jetstream):
     for number in range(1000):
         await jetstream.kv.delete(f"c.1.{number}")
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     try:
         assert await store._key_index.keys("c.1.") == []
         received = jetstream.nc.stats["in_msgs"]
@@ -464,7 +464,7 @@ async def test_clear_catches_unobserved_writes_and_preserves_other_nodes(jetstre
     kv = jetstream.kv
     for key in ("p.1.cached", "c.1.cached"):
         await kv.put(key, b"{}")
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     try:
         assert await store._key_index.keys("p.1.") == ["p.1.cached"]
         gate.clear()
@@ -472,7 +472,7 @@ async def test_clear_catches_unobserved_writes_and_preserves_other_nodes(jetstre
             await kv.put(key, b"{}")
         await kv.delete("p.1.cached")
         await kv.put("p.1.cached", b"{}")
-        await store.enqueue_users("1", [User(email="local")])
+        await store.enqueue_users("1", [Subscription(subscription_uuid="local")])
         await store.clear("1")
         for key in ("p.1.cached", "c.1.cached", "p.1.new", "c.1.new", store._pending_key("1", "local")):
             with pytest.raises(KeyNotFoundError):
@@ -484,15 +484,15 @@ async def test_clear_catches_unobserved_writes_and_preserves_other_nodes(jetstre
 
 
 async def test_concurrent_workers_claim_each_update_once(jetstream):
-    stores = [NatsUserSyncStore(jetstream.kv) for _ in range(4)]
-    users = [User(email=f"user{i}", inbounds=["in"]) for i in range(80)]
+    stores = [NatsSubscriptionSyncStore(jetstream.kv) for _ in range(4)]
+    users = [Subscription(subscription_uuid=f"user{i}", inbounds=["in"]) for i in range(80)]
     try:
         await stores[0].enqueue_users("1", users)
         await asyncio.gather(*(wait_for_keys(store, "p.1.", 80) for store in stores))
         batches = await asyncio.gather(
             *(store.claim_users("1", str(worker), 80, 30) for worker, store in enumerate(stores))
         )
-        emails = [item.user.email for batch in batches for item in batch]
+        emails = [item.user.subscription_uuid for batch in batches for item in batch]
         assert len(emails) == len(set(emails)) == 80
         await asyncio.gather(
             *(store.ack_users("1", [item.token for item in batch]) for store, batch in zip(stores, batches))
@@ -506,11 +506,11 @@ async def test_concurrent_workers_claim_each_update_once(jetstream):
 
 
 async def test_live_enqueue_and_expired_claim_recovery(jetstream):
-    first = NatsUserSyncStore(jetstream.kv)
-    second = NatsUserSyncStore(jetstream.kv)
+    first = NatsSubscriptionSyncStore(jetstream.kv)
+    second = NatsSubscriptionSyncStore(jetstream.kv)
     try:
         assert await second.claim_users("1", "other", 10, 30) == []
-        await first.enqueue_users("1", [User(email="recover", inbounds=["in"])])
+        await first.enqueue_users("1", [Subscription(subscription_uuid="recover", inbounds=["in"])])
         await wait_for_keys(second, "p.1.", 1)
         claimed = await first.claim_users("1", "crashed", 10, 0)
         assert len(claimed) == 1
@@ -519,7 +519,7 @@ async def test_live_enqueue_and_expired_claim_recovery(jetstream):
             while (await second._key_index.entries("p.1.")).get(first._pending_key("1", "recover")) is None:
                 await asyncio.sleep(0.005)
         recovered = await second.claim_users("1", "replacement", 10, 30)
-        assert [item.user.email for item in recovered] == ["recover"]
+        assert [item.user.subscription_uuid for item in recovered] == ["recover"]
         assert recovered[0].token != claimed[0].token
         await second.ack_users("1", [item.token for item in recovered])
         await wait_for_keys(second, "p.1.", 0)
@@ -554,10 +554,10 @@ async def test_capture_sees_another_workers_claim_before_its_watch_event_arrives
         return DelayedWatcher(await real_watch(*args, **kwargs))
 
     monkeypatch.setattr("app.nats.kv_index.watch_kv", delayed_watch)
-    waiter = NatsUserSyncStore(jetstream.kv)
-    other = NatsUserSyncStore(jetstream.kv)
+    waiter = NatsSubscriptionSyncStore(jetstream.kv)
+    other = NatsSubscriptionSyncStore(jetstream.kv)
     try:
-        await other.enqueue_users("1", [User(email="u", inbounds=["in"])])
+        await other.enqueue_users("1", [Subscription(subscription_uuid="u", inbounds=["in"])])
         await wait_for_keys(waiter, "p.1.", 1)
         await wait_for_keys(other, "p.1.", 1)  # both live indexes are built while events still flow
         assert await waiter.capture_queued("1") == (
@@ -601,18 +601,18 @@ async def test_enqueue_is_claimable_even_when_watch_notifications_are_delayed(je
         return DelayedWatcher(await real_watch(*args, **kwargs))
 
     monkeypatch.setattr("app.nats.kv_index.watch_kv", delayed_watch)
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     try:
         assert await store.claim_users("1", "local", 10, 30) == []
-        await store.enqueue_users("1", [User(email="immediate")])
+        await store.enqueue_users("1", [Subscription(subscription_uuid="immediate")])
         claimed = await store.claim_users("1", "local", 10, 0)
-        assert [item.user.email for item in claimed] == ["immediate"]
+        assert [item.user.subscription_uuid for item in claimed] == ["immediate"]
         recovered = await store.claim_users("1", "local", 10, 30)
-        assert [item.user.email for item in recovered] == ["immediate"]
+        assert [item.user.subscription_uuid for item in recovered] == ["immediate"]
         assert recovered[0].token != claimed[0].token
         claimed = recovered
         await store.requeue_users("1", claimed)
-        assert [item.user.email for item in await store.claim_users("1", "local", 10, 30)] == ["immediate"]
+        assert [item.user.subscription_uuid for item in await store.claim_users("1", "local", 10, 30)] == ["immediate"]
     finally:
         await store.close()
 
@@ -719,7 +719,7 @@ async def test_incomplete_compaction_snapshot_does_not_purge(jetstream, monkeypa
 
 async def test_watcher_resumes_after_network_disconnect(jetstream):
     nc = await nats.connect(jetstream.url, reconnect_time_wait=0.05)
-    store = NatsUserSyncStore(await nc.jetstream().key_value(jetstream.bucket))
+    store = NatsSubscriptionSyncStore(await nc.jetstream().key_value(jetstream.bucket))
     try:
         assert await store.claim_users("1", "reader", 10, 30) == []
         # Drop only this client's TCP transport; the writer remains connected.
@@ -729,7 +729,7 @@ async def test_watcher_resumes_after_network_disconnect(jetstream):
             while nc.stats["reconnects"] == 0:
                 await asyncio.sleep(0.02)
         await wait_for_keys(store, "p.1.", 1)
-        assert [item.user.email for item in await store.claim_users("1", "reader", 10, 30)] == ["new"]
+        assert [item.user.subscription_uuid for item in await store.claim_users("1", "reader", 10, 30)] == ["new"]
     finally:
         await store.close()
         with contextlib.suppress(Exception):
@@ -737,10 +737,10 @@ async def test_watcher_resumes_after_network_disconnect(jetstream):
 
 
 async def test_four_python_processes_deliver_every_update_once(jetstream):
-    writer = NatsUserSyncStore(jetstream.kv)
+    writer = NatsSubscriptionSyncStore(jetstream.kv)
     expected = {f"node{node}-user{user}" for node in range(4) for user in range(250)}
     for node in range(4):
-        await writer.enqueue_users(str(node), [User(email=f"node{node}-user{user}") for user in range(250)])
+        await writer.enqueue_users(str(node), [Subscription(subscription_uuid=f"node{node}-user{user}") for user in range(250)])
     processes = []
     try:
         for worker in range(4):
@@ -777,23 +777,23 @@ async def test_four_python_processes_deliver_every_update_once(jetstream):
 
 
 async def test_server_restart_preserves_pending_work_and_watch_updates(jetstream):
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     try:
-        await store.enqueue_users("1", [User(email="before-restart")])
+        await store.enqueue_users("1", [Subscription(subscription_uuid="before-restart")])
         await wait_for_keys(store, "p.1.", 1)
         await jetstream.restart()
         # A separate store writes after reconnect so the reader must receive a
         # watch notification, rather than using its own immediate-write hint.
-        writer = NatsUserSyncStore(jetstream.kv)
+        writer = NatsSubscriptionSyncStore(jetstream.kv)
         try:
-            await writer.enqueue_users("1", [User(email="after-restart")])
+            await writer.enqueue_users("1", [Subscription(subscription_uuid="after-restart")])
         finally:
             await writer.close()
         # nats-py checks heartbeat activity every 10 seconds and the first
         # check clears the initial active flag. Allow two activity checks.
         await wait_for_keys(store, "p.1.", 2, timeout=30)
         claimed = await store.claim_users("1", "restarted", 10, 30)
-        assert {item.user.email for item in claimed} == {"before-restart", "after-restart"}
+        assert {item.user.subscription_uuid for item in claimed} == {"before-restart", "after-restart"}
         await store.ack_users("1", [item.token for item in claimed])
         await wait_for_keys(store, "c.1.", 0)
     finally:
@@ -801,14 +801,14 @@ async def test_server_restart_preserves_pending_work_and_watch_updates(jetstream
 
 
 async def test_repeated_sync_compaction_and_idle_keep_resources_bounded(jetstream):
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     stream = f"KV_{jetstream.bucket}"
     try:
         for cycle in range(20):
-            users = [User(email=f"cycle{cycle}-user{number}") for number in range(50)]
+            users = [Subscription(subscription_uuid=f"cycle{cycle}-user{number}") for number in range(50)]
             await store.enqueue_users("1", users)
             claimed = await store.claim_users("1", "worker", 100, 30)
-            assert {item.user.email for item in claimed} == {user.email for user in users}
+            assert {item.user.subscription_uuid for item in claimed} == {user.subscription_uuid for user in users}
             await store.ack_users("1", [item.token for item in claimed])
             await wait_for_keys(store, "p.1.", 0)
             await wait_for_keys(store, "c.1.", 0)
@@ -824,27 +824,27 @@ async def test_repeated_sync_compaction_and_idle_keep_resources_bounded(jetstrea
         assert await store.claim_users("1", "idle", 100, 30) == []
         assert jetstream.nc.stats["out_msgs"] == sent
         assert (await jetstream.js.stream_info(stream)).state.consumer_count == 1
-        await store.enqueue_users("1", [User(email="after-idle")])
-        assert [item.user.email for item in await store.claim_users("1", "worker", 100, 30)] == ["after-idle"]
+        await store.enqueue_users("1", [Subscription(subscription_uuid="after-idle")])
+        assert [item.user.subscription_uuid for item in await store.claim_users("1", "worker", 100, 30)] == ["after-idle"]
     finally:
         await store.close()
 
 
 async def test_live_index_survives_consumer_recreation(jetstream):
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     try:
         assert await store.claim_users("1", "reader", 10, 30) == []
         consumers = await jetstream.js.consumers_info(f"KV_{jetstream.bucket}")
         assert len(consumers) == 1
         await jetstream.js.delete_consumer(f"KV_{jetstream.bucket}", consumers[0].name)
-        writer = NatsUserSyncStore(jetstream.kv)
+        writer = NatsSubscriptionSyncStore(jetstream.kv)
         try:
-            await writer.enqueue_users("1", [User(email="after-consumer-loss")])
+            await writer.enqueue_users("1", [Subscription(subscription_uuid="after-consumer-loss")])
         finally:
             await writer.close()
         async with asyncio.timeout(30):
             while not await store._key_index.keys("p.1."):
                 await asyncio.sleep(0.05)
-        assert [item.user.email for item in await store.claim_users("1", "reader", 10, 30)] == ["after-consumer-loss"]
+        assert [item.user.subscription_uuid for item in await store.claim_users("1", "reader", 10, 30)] == ["after-consumer-loss"]
     finally:
         await store.close()

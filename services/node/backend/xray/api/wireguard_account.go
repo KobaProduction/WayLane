@@ -26,7 +26,7 @@ func (wa *WireguardAccount) Message() (*serial.TypedMessage, error) {
 	})
 }
 
-func NewWireguardAccount(user *common.User) (*WireguardAccount, error) {
+func NewWireguardAccount(user *common.Subscription) (*WireguardAccount, error) {
 	wg := user.GetProxies().GetWireguard()
 	if wg == nil || wg.GetPublicKey() == "" {
 		return nil, fmt.Errorf("wireguard public_key is required")
@@ -57,7 +57,7 @@ func NewWireguardAccount(user *common.User) (*WireguardAccount, error) {
 
 	return &WireguardAccount{
 		BaseAccount: BaseAccount{
-			Email: user.GetEmail(),
+			Email: user.GetSubscriptionUuid(),
 			Level: 0,
 		},
 		PublicKey:    pubHex,

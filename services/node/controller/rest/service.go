@@ -43,14 +43,14 @@ func (s *Service) setRouter() {
 		private.Route("/stats", func(statsGroup chi.Router) {
 			statsGroup.Get("/", s.GetStats)
 			statsGroup.Get("/latency", s.GetOutboundsLatency)
-			statsGroup.Get("/user/online", s.GetUserOnlineStat)
-			statsGroup.Get("/user/online_ip", s.GetUserOnlineIpListStats)
+			statsGroup.Get("/subscription/online", s.GetUserOnlineStat)
+			statsGroup.Get("/subscription/online_ip", s.GetSubscriptionOnlineIpListStats)
 			statsGroup.Get("/backend", s.GetBackendStats)
 			statsGroup.Get("/system", s.GetSystemStats)
 		})
-		private.Put("/user/sync", s.SyncUser)
-		private.Put("/users/sync", s.SyncUsers)
-		private.Put("/users/sync/chunked", s.SyncUsersChunked)
+		private.Put("/subscription/sync", s.SyncSubscription)
+		private.Put("/subscriptions/sync", s.SyncSubscriptions)
+		private.Put("/subscriptions/sync/chunked", s.SyncSubscriptionsChunked)
 
 		// routing api (xray-only; non-xray backends get codes.Unimplemented -> 501).
 		// Balancer info and test-route carry protobuf request bodies, so they use

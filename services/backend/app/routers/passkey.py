@@ -273,7 +273,7 @@ async def passkey_register_options(
         rp_id=rp_id,
         rp_name="WayLane",
         user_name=db_admin.username,
-        user_id=str(db_admin.id).encode(),
+        subscription_uuid=str(db_admin.id).encode(),
         user_display_name=db_admin.username,
         challenge=challenge,
         authenticator_selection=AuthenticatorSelectionCriteria(

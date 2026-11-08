@@ -10,15 +10,15 @@ from uuid import uuid4
 import certifi
 import nats.errors as nats_errors
 import pytest
-from waylane_node_bridge import Health, InMemoryUserSyncStore, NodeAPIError, NodeType
-from waylane_node_bridge.common.service_pb2 import Empty, User
-from waylane_node_bridge.grpclib import Node as GrpcNode
-from waylane_node_bridge.rest import Node as RestNode
 
 from app.nats.kv_cas import MemoryCasKv, kv_get_json
 from app.node import NodeManager, bridge as bridge_module
 from app.node.bridge import create_node, register_refresh_handler
-from app.node.nats_memory import NatsUserSyncStore
+from app.node.nats_memory import NatsSubscriptionSyncStore
+from waylane_node_bridge import Health, InMemoryUserSyncStore, NodeAPIError, NodeType
+from waylane_node_bridge.common.service_pb2 import Empty, Subscription
+from waylane_node_bridge.grpclib import Node as GrpcNode
+from waylane_node_bridge.rest import Node as RestNode
 
 
 def make_node(transport, store=None, **kwargs):
@@ -60,13 +60,13 @@ class FakeNodeState:
         if self.gate is not None:
             await self.gate.wait()
         for user in users:
-            self.users[user.email] = list(user.inbounds)
-        self.deltas.append([user.email for user in users])
+            self.users[user.subscription_uuid] = list(user.inbounds)
+        self.deltas.append([user.subscription_uuid for user in users])
         return []
 
     async def apply_snapshot(self, users):
-        self.users = {user.email: list(user.inbounds) for user in users}
-        self.snapshots.append([user.email for user in users])
+        self.users = {user.subscription_uuid: list(user.inbounds) for user in users}
+        self.snapshots.append([user.subscription_uuid for user in users])
         return Empty()
 
 
@@ -117,7 +117,7 @@ async def wait_until(predicate, timeout=5):
 async def test_explicit_per_user_fallback_still_uses_original_transport(monkeypatch, transport):
     node = make_node(transport)
     base = GrpcNode if transport == "grpc" else RestNode
-    users = [User(email="retry")]
+    users = [Subscription(subscription_uuid="retry")]
     fallback = AsyncMock(return_value=users)
     monkeypatch.setattr(base, "_sync_batch_users", fallback)
     chunked = AsyncMock(return_value=[])
@@ -142,9 +142,9 @@ async def test_queued_sync_keeps_legacy_node_protocol(monkeypatch, transport):
     monkeypatch.setattr(node, "sync_users_chunked", chunked)
     try:
         await node.connect("0.1.0", "26.3.27")
-        await node.update_users([User(email="legacy")])
+        await node.update_users([Subscription(subscription_uuid="legacy")])
         await wait_until(lambda: fallback.await_count == 1)
-        assert fallback.await_args.args[0][0].email == "legacy"
+        assert fallback.await_args.args[0][0].subscription_uuid == "legacy"
         chunked.assert_not_awaited()
     finally:
         await close_node(node)
@@ -155,12 +155,12 @@ async def test_queued_sync_keeps_legacy_node_protocol(monkeypatch, transport):
 async def test_update_enqueued_during_an_empty_claim_is_delivered_without_another_wake(monkeypatch, transport):
     """The lost-wake interleaving: a sibling consumes the only candidate while this worker reads it."""
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node(transport, store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
-    old, new = User(email="old"), User(email="new")
+    old, new = Subscription(subscription_uuid="old"), Subscription(subscription_uuid="new")
     await store.enqueue_users(node.node_id, [old])
-    old_key = store._pending_key(node.node_id, old.email)
+    old_key = store._pending_key(node.node_id, old.subscription_uuid)
     reading_old, resume_old = asyncio.Event(), asyncio.Event()
     original_get = kv.get
 
@@ -176,7 +176,7 @@ async def test_update_enqueued_during_an_empty_claim_is_delivered_without_anothe
         await asyncio.wait_for(reading_old.wait(), 2)
         await node.update_user(new)
         sibling = await store.claim_users(node.node_id, "sibling", limit=1, lease_seconds=30)
-        assert [item.user.email for item in sibling] == ["old"]
+        assert [item.user.subscription_uuid for item in sibling] == ["old"]
         await store.ack_users(node.node_id, [item.token for item in sibling])
         resume_old.set()
         await wait_until(lambda: "new" in state.users)
@@ -202,7 +202,7 @@ async def test_update_that_races_the_idle_exit_restarts_delivery(monkeypatch):
         if calls == 1:
             # Simulate the idle timeout firing just as an update arrives: the
             # base loop returns while the wake signal is already set again.
-            await self.update_user(User(email="late"))
+            await self.update_user(Subscription(subscription_uuid="late"))
             assert self._sync_worker_task is not None and not self._sync_worker_task.done()
             return
         await original(self)
@@ -225,7 +225,7 @@ async def test_repeated_updates_around_idle_exits_are_all_delivered(monkeypatch)
         await node.connect("0.5.4", "26.3.27")
         for number in range(60):
             await asyncio.sleep(0.008 + (number % 5) * 0.002)
-            await node.update_user(User(email=f"u{number}"))
+            await node.update_user(Subscription(subscription_uuid=f"u{number}"))
         await wait_until(lambda: len(state.users) == 60)
     finally:
         await close_node(node)
@@ -252,7 +252,7 @@ async def test_worker_backs_off_then_recovers_from_store_errors_without_an_exter
     monkeypatch.setattr(store, "claim_users", flaky_claim)
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="u"))
+        await node.update_user(Subscription(subscription_uuid="u"))
         await wait_until(lambda: "u" in state.users, timeout=10)
         assert failures == 3
         gaps = [later - earlier for earlier, later in itertools.pairwise(timeline)]
@@ -265,7 +265,7 @@ async def test_worker_backs_off_then_recovers_from_store_errors_without_an_exter
 async def test_transient_store_error_during_claim_does_not_strand_pending_work(monkeypatch):
     """One failed KV write inside the real claim path must not turn into an idle exit on durable work."""
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     original_update = kv.update
@@ -280,7 +280,7 @@ async def test_transient_store_error_during_claim_does_not_strand_pending_work(m
 
     kv.update = flaky_update
     try:
-        await store.enqueue_users(node.node_id, [User(email="u")])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u")])
         await node.connect("0.5.4", "26.3.27")  # the connect wake is the only wake this work ever gets
         await wait_until(lambda: "u" in state.users, timeout=10)
         assert injected == 1
@@ -293,19 +293,19 @@ async def test_transient_store_error_during_claim_does_not_strand_pending_work(m
 
 @pytest.mark.asyncio
 async def test_disconnect_keeps_queued_work_for_the_next_attachment(monkeypatch):
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store, sync_lease_seconds=0.3)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     state.gate = asyncio.Event()
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="in-flight"))
+        await node.update_user(Subscription(subscription_uuid="in-flight"))
         await asyncio.wait_for(state.delta_started.wait(), 2)
-        await store.enqueue_users(node.node_id, [User(email="queued")])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued")])
         await node.disconnect()  # cancels the worker mid-delivery; nothing is cleared
         state.gate.set()
         # The newer bridge releases its cancelled in-flight claim immediately.
-        assert {item.user.email for item in await store.claim_users(node.node_id, "inspector", 10, 0)} == {
+        assert {item.user.subscription_uuid for item in await store.claim_users(node.node_id, "inspector", 10, 0)} == {
             "in-flight",
             "queued",
         }
@@ -323,21 +323,21 @@ async def test_delta_delivered_across_a_full_snapshot_is_reapplied_from_current_
     """Check-to-send window: the worker passes the fence check, the snapshot starts, the delta lands
     after the snapshot's database read, and the ack happens only after the fence was released."""
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     state.gate = asyncio.Event()
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [User(email=e, inbounds=["db"]) for e in emails])
+        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails])
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="u", inbounds=["delta"]))
+        await node.update_user(Subscription(subscription_uuid="u", inbounds=["delta"]))
         await asyncio.wait_for(state.delta_started.wait(), 2)  # claimed at generation 0, send in flight
         token = await store.begin_full_sync(node.node_id, "other-worker", 120)
         assert (await store.capture_queued(node.node_id))[1] == 1  # the in-flight claim is visible
         # The other worker's snapshot was read before the delta existed and lands first.
-        await state.apply_snapshot([User(email="u", inbounds=["snapshot-old"])])
+        await state.apply_snapshot([Subscription(subscription_uuid="u", inbounds=["snapshot-old"])])
         await store.end_full_sync(node.node_id, token)
         state.gate.set()  # the delta lands after the snapshot; its ack sees a newer generation
         await wait_until(lambda: state.users.get("u") == ["db"])
@@ -354,13 +354,13 @@ async def test_delta_delivered_across_a_full_snapshot_is_reapplied_from_current_
 @pytest.mark.asyncio
 async def test_worker_defers_claims_while_a_snapshot_is_fenced_and_resumes_after(monkeypatch):
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     try:
         await node.connect("0.5.4", "26.3.27")
         token = await store.begin_full_sync(node.node_id, "other-worker", 120)
-        await node.update_user(User(email="during"))
+        await node.update_user(Subscription(subscription_uuid="during"))
         await asyncio.sleep(0.1)
         assert state.deltas == []
         await store.end_full_sync(node.node_id, token)
@@ -373,19 +373,19 @@ async def test_worker_defers_claims_while_a_snapshot_is_fenced_and_resumes_after
 @pytest.mark.asyncio
 async def test_unconfirmed_ack_leaves_a_marker_resolved_from_the_source_of_truth(monkeypatch):
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     state.gate = asyncio.Event()
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [User(email=e, inbounds=["db"]) for e in emails])
+        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails])
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="u", inbounds=["old"]))
+        await node.update_user(Subscription(subscription_uuid="u", inbounds=["old"]))
         await asyncio.wait_for(state.delta_started.wait(), 2)
         # A newer state is queued while ours is in flight; it keeps our claim visible.
-        await store.enqueue_users(node.node_id, [User(email="u", inbounds=["newer"])])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["newer"])])
         assert await store.claim_users(node.node_id, "other", 10, 30) == []
         # The entry vanishes underneath our acknowledgement (delivered elsewhere / drained).
         await kv.delete(store._pending_key(node.node_id, "u"))
@@ -414,20 +414,20 @@ async def make_manager(node):
 @pytest.mark.parametrize("flush", [True, False])
 async def test_sync_full_covers_users_created_after_the_snapshot_was_requested(monkeypatch, flush):
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
-    created = User(email="created-later", inbounds=["in"])
+    created = Subscription(subscription_uuid="created-later", inbounds=["in"])
 
     async def load_users():
         # The database read happens inside the fence; a user created right now
         # is either in this snapshot or still queued behind the fence.
         await node.update_user(created)
-        return [User(email="existing", inbounds=["in"])]
+        return [Subscription(subscription_uuid="existing", inbounds=["in"])]
 
     try:
-        await store.enqueue_users(node.node_id, [User(email="queued-before", inbounds=["in"])])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued-before", inbounds=["in"])])
         await manager.sync_full(1, load_users, flush_pending=flush)
         assert state.snapshots == [["existing"]]
         assert "created-later" not in state.users  # queued behind the fence, not lost
@@ -448,7 +448,7 @@ async def test_sync_full_covers_users_created_after_the_snapshot_was_requested(m
 @pytest.mark.parametrize("failure", ["loader", "rpc"])
 async def test_failed_full_sync_leaves_queued_work_deliverable(monkeypatch, failure):
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
@@ -464,12 +464,12 @@ async def test_failed_full_sync_leaves_queued_work_deliverable(monkeypatch, fail
     if failure == "rpc":
         node.sync_users = failing_full
     try:
-        await store.enqueue_users(node.node_id, [User(email="queued", inbounds=["in"])])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["in"])])
         await store.request_refresh(node.node_id, ["marked"])
         with pytest.raises((RuntimeError, NodeAPIError)):
             await manager.sync_full(1, load_users, flush_pending=True)
         assert len([key for key in kv._data if key.startswith(f"p.{node.node_id}.")]) == 2
-        register_refresh_handler(AsyncMock(return_value=[User(email="marked", inbounds=["db"])]))
+        register_refresh_handler(AsyncMock(return_value=[Subscription(subscription_uuid="marked", inbounds=["db"])]))
         await node.connect("0.5.4", "26.3.27")
         await wait_until(lambda: {"queued", "marked"} <= set(state.users))
     finally:
@@ -481,7 +481,7 @@ async def test_failed_full_sync_leaves_queued_work_deliverable(monkeypatch, fail
 @pytest.mark.asyncio
 async def test_full_sync_waits_for_in_flight_delivery_before_reading_the_snapshot(monkeypatch):
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store, sync_lease_seconds=0.5)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     state.gate = asyncio.Event()
@@ -494,7 +494,7 @@ async def test_full_sync_waits_for_in_flight_delivery_before_reading_the_snapsho
 
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="slow"))
+        await node.update_user(Subscription(subscription_uuid="slow"))
         await asyncio.wait_for(state.delta_started.wait(), 2)
         sync = asyncio.create_task(manager.sync_full(1, load_users, flush_pending=True))
         await asyncio.sleep(0.1)
@@ -511,7 +511,7 @@ async def test_full_sync_waits_for_in_flight_delivery_before_reading_the_snapsho
 @pytest.mark.asyncio
 async def test_concurrent_full_sync_on_another_worker_is_rejected():
     kv = MemoryCasKv()
-    first, second = NatsUserSyncStore(kv), NatsUserSyncStore(kv)
+    first, second = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", first)
     other = make_node("grpc", second, node_id=node.node_id)
     try:
@@ -533,7 +533,7 @@ async def test_concurrent_full_sync_on_another_worker_is_rejected():
 @pytest.mark.parametrize("loss", ["stolen", "renewal_errors"])
 async def test_full_sync_that_loses_its_fence_lease_sends_and_retires_nothing(monkeypatch, loss):
     kv = MemoryCasKv()
-    store, rival = NatsUserSyncStore(kv), NatsUserSyncStore(kv)
+    store, rival = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
@@ -549,10 +549,10 @@ async def test_full_sync_that_loses_its_fence_lease_sends_and_retires_nothing(mo
             await kv.update(store._fence_key(node.node_id), json.dumps(doc).encode(), last=rev)
             assert await rival.begin_full_sync(node.node_id, "rival", 30) is not None
         await asyncio.sleep(0.5)
-        return [User(email="snapshot", inbounds=["in"])]
+        return [Subscription(subscription_uuid="snapshot", inbounds=["in"])]
 
     try:
-        await store.enqueue_users(node.node_id, [User(email="queued", inbounds=["in"])])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["in"])])
         with pytest.raises(NodeAPIError) as info:
             await manager.sync_full(1, slow_loader, flush_pending=True)
         assert info.value.code == 409
@@ -567,14 +567,14 @@ async def test_full_sync_that_loses_its_fence_lease_sends_and_retires_nothing(mo
 @pytest.mark.asyncio
 async def test_full_sync_fails_closed_when_deliveries_never_quiesce(monkeypatch):
     kv = MemoryCasKv()
-    store, other = NatsUserSyncStore(kv), NatsUserSyncStore(kv)
+    store, other = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store, sync_lease_seconds=0.2)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
     monkeypatch.setattr(bridge_module, "FULL_SYNC_LEASE_SECONDS", 5.0)
     loaded = []
     try:
-        await store.enqueue_users(node.node_id, [User(email="u", inbounds=["in"])])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["in"])])
         # Another worker's claim keeps getting refreshed (its lease never lapses).
         claimed = await other.claim_users(node.node_id, "other", 10, 60)
         assert len(claimed) == 1
@@ -592,7 +592,7 @@ async def test_full_sync_fails_closed_when_deliveries_never_quiesce(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_fence_hold_reports_expiry_even_before_the_renewal_task_notices():
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store)
     try:
         async with node.full_sync_fence(lease_seconds=60) as held:
@@ -612,7 +612,7 @@ async def test_delivery_blocked_past_its_claim_lease_is_never_sent(monkeypatch, 
     """A worker parked behind the node lock (chunked) or a stalled per-user stream (legacy) past its
     lease must not send after a full snapshot retired the entry or a newer state was acknowledged."""
     kv = MemoryCasKv()
-    store, other = NatsUserSyncStore(kv), NatsUserSyncStore(kv)
+    store, other = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store, sync_lease_seconds=2.0)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     legacy = node_version == "0.1.0"
@@ -622,7 +622,7 @@ async def test_delivery_blocked_past_its_claim_lease_is_never_sent(monkeypatch, 
         await node.connect(node_version, "26.3.27")
         block = contextlib.nullcontext() if legacy else node._node_lock  # a Start/full-sync RPC holds the node lock
         async with block:
-            await node.update_user(User(email="u", inbounds=["old"]))
+            await node.update_user(Subscription(subscription_uuid="u", inbounds=["old"]))
             await asyncio.sleep(0.3)  # claimed; the send is now blocked
             # A sibling's full snapshot begins: no further claims by this worker until it ends.
             token = await other.begin_full_sync(node.node_id, "other", 120)
@@ -630,11 +630,11 @@ async def test_delivery_blocked_past_its_claim_lease_is_never_sent(monkeypatch, 
             if superseded_by == "full_sync_retirement":
                 captured, active = await other.capture_queued(node.node_id)
                 assert active == 0 and len(captured) == 1
-                await state.apply_snapshot([User(email="u", inbounds=["snapshot"])])
+                await state.apply_snapshot([Subscription(subscription_uuid="u", inbounds=["snapshot"])])
                 assert await other.retire_captured(node.node_id, captured) == 1
                 expected = ["snapshot"]
             else:
-                await other.enqueue_users(node.node_id, [User(email="u", inbounds=["newer"])])
+                await other.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["newer"])])
                 newer = await other.claim_users(node.node_id, "other", 10, 30)
                 assert [list(item.user.inbounds) for item in newer] == [["newer"]]
                 state.users["u"] = ["newer"]
@@ -658,13 +658,13 @@ async def test_delivery_blocked_past_its_claim_lease_is_never_sent(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_slow_send_is_cut_before_its_claim_lease_expires(monkeypatch):
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store, sync_lease_seconds=2.0)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     state.gate = asyncio.Event()  # the stream never completes
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="u"))
+        await node.update_user(Subscription(subscription_uuid="u"))
         await asyncio.wait_for(state.delta_started.wait(), 2)
         deadline = node._delivery_deadline
         assert node._delivery_budget() > 0
@@ -682,7 +682,7 @@ async def test_slow_send_is_cut_before_its_claim_lease_expires(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fence_lease_is_renewed_while_the_snapshot_is_slow():
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store)
     try:
         async with node.full_sync_fence(lease_seconds=0.3):
@@ -700,12 +700,12 @@ async def test_in_memory_store_capture_holds_entries_and_settles_after_snapshot(
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
     store = node._user_sync_store
-    await store.enqueue_users(node.node_id, [User(email="a"), User(email="b")])
+    await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="a"), Subscription(subscription_uuid="b")])
     try:
         captured = await node.capture_queued_work()
         assert set(captured) == {"a", "b"}
         await node.release_queued_work(captured)
-        assert {item.user.email for item in await store.claim_users(node.node_id, "x", 10, 0)} == {"a", "b"}
+        assert {item.user.subscription_uuid for item in await store.claim_users(node.node_id, "x", 10, 0)} == {"a", "b"}
         await asyncio.sleep(0.01)
         await manager.sync_full(1, lambda: asyncio.sleep(0, result=[]), flush_pending=True)
         assert await store.claim_users(node.node_id, "x", 10, 30) == []
@@ -717,14 +717,14 @@ async def test_in_memory_store_capture_holds_entries_and_settles_after_snapshot(
 @pytest.mark.asyncio
 async def test_bulk_updates_use_the_fenced_durable_queue(monkeypatch):
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
     try:
         await node.connect("0.5.4", "26.3.27")
         token = await store.begin_full_sync(node.node_id, "other", 120)
-        await manager._sync_users_to_node(1, node, [User(email=f"bulk-{n}", inbounds=["in"]) for n in range(150)])
+        await manager._sync_users_to_node(1, node, [Subscription(subscription_uuid=f"bulk-{n}", inbounds=["in"]) for n in range(150)])
         await asyncio.sleep(0.2)
         assert state.deltas == []  # recorded durably, held behind the fence
         captured, _ = await store.capture_queued(node.node_id)
@@ -742,7 +742,7 @@ async def test_bulk_state_committed_after_an_older_queued_payload_wins(monkeypat
     """Queued enabled-v1, then a bulk disable commits: the node must end disabled even if the
     first delivery attempt fails."""
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
@@ -758,8 +758,8 @@ async def test_bulk_state_committed_after_an_older_queued_payload_wins(monkeypat
 
     state.apply_delta = flaky_delta
     try:
-        await store.enqueue_users(node.node_id, [User(email="u", inbounds=["enabled-v1"])])
-        await manager._sync_users_to_node(1, node, [User(email="u", inbounds=[])])  # disabled-v2
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["enabled-v1"])])
+        await manager._sync_users_to_node(1, node, [Subscription(subscription_uuid="u", inbounds=[])])  # disabled-v2
         await node.connect("0.5.4", "26.3.27")
         await wait_until(lambda: "u" in state.users, timeout=10)
         assert state.users["u"] == [] and attempts == 2
@@ -773,18 +773,18 @@ async def test_bulk_state_committed_after_an_older_queued_payload_wins(monkeypat
 @pytest.mark.asyncio
 async def test_refresh_request_never_displaces_a_queued_payload_or_an_active_claim(monkeypatch):
     kv = MemoryCasKv()
-    store, other = NatsUserSyncStore(kv), NatsUserSyncStore(kv)
+    store, other = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [User(email=e, inbounds=["db"]) for e in emails])
+        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails])
     )
     try:
-        await store.enqueue_users(node.node_id, [User(email="claimed", inbounds=["payload"])])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="claimed", inbounds=["payload"])])
         claimed = await other.claim_users(node.node_id, "other", 10, 30)
-        assert [item.user.email for item in claimed] == ["claimed"]
-        await store.enqueue_users(node.node_id, [User(email="queued", inbounds=["payload"])])
-        await node.request_refresh([User(email="queued"), User(email="claimed"), User(email="fresh")])
+        assert [item.user.subscription_uuid for item in claimed] == ["claimed"]
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["payload"])])
+        await node.request_refresh([Subscription(subscription_uuid="queued"), Subscription(subscription_uuid="claimed"), Subscription(subscription_uuid="fresh")])
         # Raw queue invariants: the queued payload and the sibling's claim are untouched, only "fresh" got a marker.
         docs = {
             json.loads(v)["email"]: json.loads(v)
@@ -813,17 +813,17 @@ async def test_refresh_request_never_displaces_a_queued_payload_or_an_active_cla
 @pytest.mark.parametrize("shared_store", [False, True])
 async def test_edits_queued_in_reverse_commit_order_converge_to_the_database_state(monkeypatch, shared_store):
     """Edit A (disable) commits first, edit B (new inbounds) second; A's enqueue lands last."""
-    store = NatsUserSyncStore(MemoryCasKv()) if shared_store else None
+    store = NatsSubscriptionSyncStore(MemoryCasKv()) if shared_store else None
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     database = {"u": ["v2"]}  # final committed state is B's
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [User(email=e, inbounds=database.get(e, [])) for e in emails])
+        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=database.get(e, [])) for e in emails])
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="u", inbounds=["v2"]))  # B's serialization, enqueued first
-        await node.update_user(User(email="u", inbounds=[]))  # A's older serialization, enqueued last
+        await node.update_user(Subscription(subscription_uuid="u", inbounds=["v2"]))  # B's serialization, enqueued first
+        await node.update_user(Subscription(subscription_uuid="u", inbounds=[]))  # A's older serialization, enqueued last
         await wait_until(lambda: state.users.get("u") == ["v2"], timeout=10)
         await asyncio.wait_for(node._sync_worker_task, 10)
         assert state.users["u"] == ["v2"]  # never regressed to A's state
@@ -837,17 +837,17 @@ async def test_edits_queued_in_reverse_commit_order_converge_to_the_database_sta
 @pytest.mark.asyncio
 async def test_stale_single_update_after_a_bulk_update_converges(monkeypatch):
     kv = MemoryCasKv()
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
     database = {f"u{n}": ["bulk-v2"] for n in range(5)}
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [User(email=e, inbounds=database.get(e, [])) for e in emails])
+        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=database.get(e, [])) for e in emails])
     )
     try:
-        await manager._sync_users_to_node(1, node, [User(email=f"u{n}", inbounds=["bulk-v2"]) for n in range(5)])
-        await store.enqueue_users(node.node_id, [User(email="u2", inbounds=["single-v1"])])  # older edit, later enqueue
+        await manager._sync_users_to_node(1, node, [Subscription(subscription_uuid=f"u{n}", inbounds=["bulk-v2"]) for n in range(5)])
+        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u2", inbounds=["single-v1"])])  # older edit, later enqueue
         await node.connect("0.5.4", "26.3.27")
         await wait_until(lambda: len(state.users) == 5, timeout=10)
         await asyncio.wait_for(node._sync_worker_task, 10)
@@ -860,7 +860,7 @@ async def test_stale_single_update_after_a_bulk_update_converges(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_failed_current_state_read_requeues_the_batch_and_never_acknowledges_stale_state(monkeypatch):
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     attempts = 0
@@ -870,12 +870,12 @@ async def test_failed_current_state_read_requeues_the_batch_and_never_acknowledg
         attempts += 1
         if attempts == 1:
             raise RuntimeError("database unavailable")
-        return [User(email=e, inbounds=["db"]) for e in emails]
+        return [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails]
 
     register_refresh_handler(flaky)
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(User(email="u", inbounds=["queued"]))
+        await node.update_user(Subscription(subscription_uuid="u", inbounds=["queued"]))
         await wait_until(lambda: state.users.get("u") == ["db"], timeout=10)
         assert attempts == 2 and state.deltas == [["u"]]  # nothing was sent while the read was failing
         await asyncio.wait_for(node._sync_worker_task, 10)
@@ -890,7 +890,7 @@ async def test_failed_current_state_read_requeues_the_batch_and_never_acknowledg
 async def test_start_snapshot_and_start_rpc_run_inside_the_fence(monkeypatch):
     from app.operation.node import NodeOperation
 
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store)
     seen = []
 
@@ -921,7 +921,7 @@ async def test_start_yields_to_a_snapshot_in_progress_elsewhere(monkeypatch):
     from app.operation.node import NodeOperation
 
     kv = MemoryCasKv()
-    store, other = NatsUserSyncStore(kv), NatsUserSyncStore(kv)
+    store, other = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
     node = make_node("grpc", store)
     monkeypatch.setattr(node, "get_lifecycle_state", AsyncMock(return_value=None))
     monkeypatch.setattr(node, "start", AsyncMock())
@@ -942,7 +942,7 @@ async def test_start_yields_to_a_snapshot_in_progress_elsewhere(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_refresh_handler_registration_survives_missing_handler():
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store)
     try:
         register_refresh_handler(None)
@@ -955,13 +955,13 @@ async def test_refresh_handler_registration_survives_missing_handler():
 
 @pytest.mark.asyncio
 async def test_health_transitions_do_not_lose_queued_work(monkeypatch):
-    store = NatsUserSyncStore(MemoryCasKv())
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     try:
         await node.connect("0.5.4", "26.3.27")
         await node.set_health(Health.BROKEN)
-        await node.update_user(User(email="while-broken"))
+        await node.update_user(Subscription(subscription_uuid="while-broken"))
         await asyncio.sleep(0.05)
         assert state.deltas == []
         await node.set_health(Health.HEALTHY)

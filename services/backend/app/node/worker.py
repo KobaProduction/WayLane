@@ -2,16 +2,16 @@ import asyncio
 import contextlib
 import json
 import uuid
+from uuid import UUID
 
 from nats.aio.subscription import Subscription
-from waylane_node_bridge import NodeAPIError
-from waylane_node_bridge.common.service_pb2 import User as ProtoUser
+from sqlalchemy import select
 
 from app import on_shutdown, on_startup
 from app.core.manager import core_manager
 from app.db import GetDB
 from app.db.crud.node import get_node_by_id, get_nodes
-from app.db.models import NodeStatus
+from app.db.models import NodeStatus, Subscription as DatabaseSubscription
 from app.models.node import NodeCoreUpdate, NodeGeoFilesUpdate, NodeListQuery
 from app.nats.proto_utils import deserialize_proto_message, deserialize_proto_messages
 from app.nats.rpc_service import BaseRpcService
@@ -20,6 +20,8 @@ from app.operation import OperatorType
 from app.operation.node import NodeOperation
 from app.utils.logger import get_logger
 from config import nats_settings, runtime_settings
+from waylane_node_bridge import NodeAPIError
+from waylane_node_bridge.common.service_pb2 import Subscription as ProtoSubscription
 
 logger = get_logger("node-worker")
 
@@ -55,9 +57,9 @@ class NodeWorkerService(BaseRpcService):
         self.register_rpc_handler("get_node_system_stats", self._get_node_system_stats)
         self.register_rpc_handler("get_nodes_system_stats", self._get_nodes_system_stats)
         self.register_rpc_handler("get_outbounds_latency", self._get_outbounds_latency)
-        self.register_rpc_handler("get_user_online_stats", self._get_user_online_stats_by_node)
-        self.register_rpc_handler("get_user_ip_list", self._get_user_ip_list_by_node)
-        self.register_rpc_handler("get_user_ip_list_all", self._get_user_ip_list_all_nodes)
+        self.register_rpc_handler("get_subscription_online_stats", self._get_subscription_online_stats_by_node)
+        self.register_rpc_handler("get_subscription_ip_list", self._get_subscription_ip_list_by_node)
+        self.register_rpc_handler("get_subscription_ip_list_all", self._get_subscription_ip_list_all_nodes)
         self.register_rpc_handler("update_node_api", self._update_node_api)
         self.register_rpc_handler("update_core", self._update_core)
         self.register_rpc_handler("update_geofiles", self._update_geofiles)
@@ -139,14 +141,14 @@ class NodeWorkerService(BaseRpcService):
         user_dict = data.get("user")
         if not user_dict:
             return
-        proto_user = deserialize_proto_message(user_dict, ProtoUser)
+        proto_user = deserialize_proto_message(user_dict, ProtoSubscription)
         await node_manager.update_user(proto_user)
 
     async def _update_users(self, data: dict):
-        users_dicts = data.get("users") or []
+        users_dicts = data.get("subscriptions") or []
         if not users_dicts:
             return
-        proto_users = deserialize_proto_messages(users_dicts, ProtoUser)
+        proto_users = deserialize_proto_messages(users_dicts, ProtoSubscription)
         await node_manager.update_users(proto_users)
 
     async def _update_node(self, data: dict):
@@ -171,9 +173,7 @@ class NodeWorkerService(BaseRpcService):
         # Refresh from KV before connecting to avoid stale core cache races.
         await core_manager._reload_from_cache()
         async with GetDB() as db:
-            await self._node_operator.connect_single_node(
-                db, node_id, force_start=bool(data.get("force_start"))
-            )
+            await self._node_operator.connect_single_node(db, node_id, force_start=bool(data.get("force_start")))
 
     async def _connect_nodes_bulk(self, data: dict):
         node_ids = data.get("node_ids")
@@ -239,29 +239,43 @@ class NodeWorkerService(BaseRpcService):
         )
         return latency.model_dump()
 
-    async def _get_user_online_stats_by_node(self, data: dict) -> dict:
-        node_id = data.get("node_id")
-        user_id = data.get("user_id")
-        if not node_id or not user_id:
-            raise RuntimeError("node_id and user_id are required")
-        async with GetDB() as db:
-            return await self._node_operator.get_user_online_stats_by_node(db, node_id, user_id)
+    async def _subscription_uuid_for_rpc(self, db, data: dict) -> UUID:
+        """Resolve canonical UUID to a private node protocol row key."""
+        raw = data.get("subscription_uuid")
+        if not isinstance(raw, str):
+            raise TypeError("subscription_uuid must be a string")
+        try:
+            sid = UUID(raw)
+        except ValueError as exc:
+            raise RuntimeError("Invalid subscription UUID") from exc
+        if sid.version != 4 or str(sid) != raw:
+            raise RuntimeError("Invalid subscription UUIDv4")
+        subscription_uuid = await db.scalar(select(DatabaseSubscription.uuid).where(DatabaseSubscription.uuid == sid))
+        if subscription_uuid is None:
+            raise RuntimeError("Subscription not found")
+        return subscription_uuid
 
-    async def _get_user_ip_list_by_node(self, data: dict) -> dict:
+    async def _get_subscription_online_stats_by_node(self, data: dict) -> dict:
         node_id = data.get("node_id")
-        user_id = data.get("user_id")
-        if not node_id or not user_id:
-            raise RuntimeError("node_id and user_id are required")
+        if not node_id:
+            raise RuntimeError("node_id is required")
         async with GetDB() as db:
-            user_ips = await self._node_operator.get_user_ip_list_by_node(db, node_id, user_id)
+            subscription_uuid = await self._subscription_uuid_for_rpc(db, data)
+            return await self._node_operator.get_subscription_online_stats_by_node(db, node_id, subscription_uuid)
+
+    async def _get_subscription_ip_list_by_node(self, data: dict) -> dict:
+        node_id = data.get("node_id")
+        if not node_id:
+            raise RuntimeError("node_id is required")
+        async with GetDB() as db:
+            subscription_uuid = await self._subscription_uuid_for_rpc(db, data)
+            user_ips = await self._node_operator.get_user_ip_list_by_node(db, node_id, subscription_uuid)
         return user_ips.model_dump()
 
-    async def _get_user_ip_list_all_nodes(self, data: dict) -> dict:
-        user_id = data.get("user_id")
-        if not user_id:
-            raise RuntimeError("user_id is required")
+    async def _get_subscription_ip_list_all_nodes(self, data: dict) -> dict:
         async with GetDB() as db:
-            user_ips = await self._node_operator.get_user_ip_list_all_nodes(db, user_id)
+            subscription_uuid = await self._subscription_uuid_for_rpc(db, data)
+            user_ips = await self._node_operator.get_user_ip_list_all_nodes(db, subscription_uuid)
         return user_ips.model_dump()
 
     async def _update_node_api(self, data: dict) -> dict:

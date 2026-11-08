@@ -24,9 +24,9 @@ func TestParseStatNameValid(t *testing.T) {
 
 func TestParseStatNameRejectsMalformed(t *testing.T) {
 	tests := []string{
-		"user>>>alice@example.com>>>online",  // too short
-		"user>>>>>>traffic>>>uplink",         // empty name
-		"user>>>alice@example.com>>>>>>uplink", // empty link
+		"user>>>alice@example.com>>>online",     // too short
+		"user>>>>>>traffic>>>uplink",            // empty name
+		"user>>>alice@example.com>>>>>>uplink",  // empty link
 		"user>>>alice@example.com>>>traffic>>>", // empty type
 	}
 

@@ -14,7 +14,7 @@ import { Calendar as PersianCalendar } from '@/components/ui/persian-calendar'
 import { formatDateByLocale, formatDateShort, isDateDisabled, isPersianLocaleLanguage, serializeDatePickerValue } from '@/utils/datePickerUtils'
 import { parseDateInput } from '@/utils/dateTimeParsing'
 import { useTheme } from '@/app/providers/theme-provider'
-import { DATE_PICKER_PREFERENCE_KEY, getDatePickerPreference, type DatePickerPreference } from '@/utils/userPreferenceStorage'
+import { DATE_PICKER_PREFERENCE_KEY, getDatePickerPreference, type DatePickerPreference } from '@/utils/dashboardPreferenceStorage'
 import useDirDetection from '@/hooks/use-dir-detection'
 import { useIsMobile } from '@/hooks/use-mobile'
 

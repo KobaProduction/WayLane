@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useCommandCreate } from '@/hooks/use-command-create'
-import { getCoresListUseConfigModal } from '@/utils/userPreferenceStorage'
+import { getCoresListUseConfigModal } from '@/utils/dashboardPreferenceStorage'
 
 interface Tab {
   id: string

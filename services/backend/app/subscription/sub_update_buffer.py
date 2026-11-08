@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime as dt
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import insert, select
 
 from app.db import GetDB
-from app.db.models import User, UserSubscriptionUpdate
+from app.db.models import Subscription, SubscriptionUpdate
 from app.lifecycle import on_shutdown, on_startup
 from app.utils.logger import get_logger
 from config import runtime_settings
@@ -24,9 +25,9 @@ FLUSH_INTERVAL_SECONDS = 2.0
 FLUSH_BATCH_SIZE = 100
 _MAX_BUFFER = 50_000
 
-_USER_AGENT_MAX_LEN = UserSubscriptionUpdate.__table__.columns.user_agent.type.length or 512
-_IP_MAX_LEN = UserSubscriptionUpdate.__table__.columns.ip.type.length or 64
-_HWID_MAX_LEN = UserSubscriptionUpdate.__table__.columns.hwid.type.length or 256
+_USER_AGENT_MAX_LEN = SubscriptionUpdate.__table__.columns.user_agent.type.length or 512
+_IP_MAX_LEN = SubscriptionUpdate.__table__.columns.ip.type.length or 64
+_HWID_MAX_LEN = SubscriptionUpdate.__table__.columns.hwid.type.length or 256
 
 _pending: list[dict[str, Any]] = []
 _lock = asyncio.Lock()
@@ -34,11 +35,11 @@ _drain_lock = asyncio.Lock()
 _flush_task: asyncio.Task | None = None
 
 
-def _sanitize_record(user_id: int, user_agent: str, ip: str | None, hwid: str | None) -> dict[str, Any]:
+def _sanitize_record(subscription_uuid: UUID, user_agent: str, ip: str | None, hwid: str | None) -> dict[str, Any]:
     sanitized_ip = (ip or "")[:_IP_MAX_LEN] or None
     sanitized_hwid = (hwid or "")[:_HWID_MAX_LEN] or None
     return {
-        "user_id": user_id,
+        "subscription_uuid": subscription_uuid,
         "user_agent": (user_agent or "")[:_USER_AGENT_MAX_LEN],
         "ip": sanitized_ip,
         "hwid": sanitized_hwid,
@@ -56,9 +57,11 @@ async def reset_user_sub_update_buffer() -> None:
         _pending.clear()
 
 
-async def queue_user_sub_update(user_id: int, user_agent: str, ip: str | None = None, hwid: str | None = None) -> None:
+async def queue_user_sub_update(
+    subscription_uuid: UUID, user_agent: str, ip: str | None = None, hwid: str | None = None
+) -> None:
     """Enqueue a subscription-update row; may kick a background flush."""
-    record = _sanitize_record(user_id, user_agent, ip, hwid)
+    record = _sanitize_record(subscription_uuid, user_agent, ip, hwid)
     should_flush = False
     dropped = 0
     async with _lock:
@@ -90,18 +93,18 @@ async def flush_user_sub_updates() -> int:
                     # Users can be deleted after their subscription request was queued.
                     # Lock surviving parents until commit so concurrent deletes cannot
                     # invalidate the foreign keys between this read and the insert.
-                    user_ids = sorted({record["user_id"] for record in batch})
-                    existing_user_ids = set(
+                    subscription_uuids = sorted({record["subscription_uuid"] for record in batch})
+                    existing_subscription_uuids = set(
                         await db.scalars(
-                            select(User.id)
-                            .where(User.id.in_(user_ids))
-                            .order_by(User.id)
+                            select(Subscription.uuid)
+                            .where(Subscription.uuid.in_(subscription_uuids))
+                            .order_by(Subscription.uuid)
                             .with_for_update(read=True, key_share=True)
                         )
                     )
-                    live_records = [record for record in batch if record["user_id"] in existing_user_ids]
+                    live_records = [record for record in batch if record["subscription_uuid"] in existing_subscription_uuids]
                     if live_records:
-                        await db.execute(insert(UserSubscriptionUpdate.__table__), live_records)
+                        await db.execute(insert(SubscriptionUpdate.__table__), live_records)
                     await db.commit()
                 written += len(live_records)
             except Exception:

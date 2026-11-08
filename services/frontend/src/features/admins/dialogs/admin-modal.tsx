@@ -257,11 +257,9 @@ export default function AdminModal({ isDialogOpen, onOpenChange, editingAdminId,
         password: values.password || undefined,
         ...(form.formState.dirtyFields.status ? { status: values.status || 'active' } : {}),
         ...dataLimitPayload,
-        discord_webhook: values.discord_webhook,
         sub_domain: values.sub_domain,
         sub_template: values.sub_template,
         support_url: values.support_url,
-        telegram_id: values.telegram_id,
         profile_title: values.profile_title,
         custom_variables: normalizeCustomVariablesForPayload(values.custom_variables),
         note: values.note,
@@ -300,11 +298,9 @@ export default function AdminModal({ isDialogOpen, onOpenChange, editingAdminId,
           password: values.password, // Ensure password is present
           status: values.status || 'active',
           ...dataLimitPayload,
-          discord_webhook: values.discord_webhook,
           sub_domain: values.sub_domain,
           sub_template: values.sub_template,
           support_url: values.support_url,
-          telegram_id: values.telegram_id,
           profile_title: values.profile_title,
           custom_variables: normalizeCustomVariablesForPayload(values.custom_variables),
           note: values.note,
@@ -333,11 +329,9 @@ export default function AdminModal({ isDialogOpen, onOpenChange, editingAdminId,
         'role_id',
         'status',
         'data_limit',
-        'discord_webhook',
         'sub_domain',
         'sub_template',
         'support_url',
-        'telegram_id',
         'profile_title',
         'custom_variables',
         'note',
@@ -552,41 +546,6 @@ export default function AdminModal({ isDialogOpen, onOpenChange, editingAdminId,
                     <div className="grid grid-cols-1 gap-4 pb-2 sm:grid-cols-2">
                       <FormField
                         control={form.control}
-                        name="telegram_id"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{t('admins.telegramId')}</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                placeholder={t('Telegram ID (e.g. 36548974)')}
-                                autoComplete="off"
-                                onChange={e => {
-                                  const value = e.target.value
-                                  field.onChange(value ? parseInt(value) : 0)
-                                }}
-                                value={field.value ? field.value : ''}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="discord_webhook"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{t('admins.discord')}</FormLabel>
-                            <FormControl>
-                              <Input placeholder={t('admins.discord')} autoComplete="off" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
                         name="support_url"
                         render={({ field }) => (
                           <FormItem>
@@ -709,7 +668,7 @@ export default function AdminModal({ isDialogOpen, onOpenChange, editingAdminId,
                                   <Textarea
                                     value={variable.value}
                                     onChange={event => updateCustomVariable(index, { value: event.target.value })}
-                                    placeholder="{USERNAME}.example.com"
+                                    placeholder="{SUBSCRIPTION_UUID}.example.com"
                                     className="min-h-[60px] resize-none font-mono text-xs"
                                     rows={2}
                                   />
@@ -956,7 +915,7 @@ function AdminDataLimitField({ form }: { form: AdminForm }) {
                   emptyValue={undefined}
                   className="pr-10"
                 />
-                <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium">{t('userDialog.gb', { defaultValue: 'GB' })}</span>
+                <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium">{t('subscriptionDialog.gb', { defaultValue: 'GB' })}</span>
               </div>
             </FormControl>
             {numericValue != null && numericValue > 0 && numericValue < ONE_GB_IN_BYTES && (
@@ -1023,7 +982,7 @@ function BytesLimitField({ form, name, labelKey }: { form: AdminForm; name: any;
                   emptyValue={undefined}
                   className="pr-10"
                 />
-                <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium">{t('userDialog.gb', { defaultValue: 'GB' })}</span>
+                <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium">{t('subscriptionDialog.gb', { defaultValue: 'GB' })}</span>
               </div>
             </FormControl>
             {numericValue != null && numericValue > 0 && numericValue < ONE_GB_IN_BYTES && (

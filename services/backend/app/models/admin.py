@@ -14,9 +14,8 @@ from app.models.settings import CustomVariable, validate_custom_variables
 from app.models.stats import Period
 from app.utils.helpers import has_markup_unsafe_chars
 
-from .notification_enable import UserNotificationEnable
+from .notification_enable import SubscriptionNotificationEnable
 from .validators import (
-    DiscordValidator,
     ListValidator,
     NumericValidatorMixin,
     OptionalAwareDatetime,
@@ -90,13 +89,11 @@ class AdminBase(BaseModel):
 class AdminContactInfo(AdminBase):
     """Base model containing the core admin identification fields."""
 
-    telegram_id: int | None = None
-    discord_webhook: str | None = None
     sub_domain: str | None = None
     profile_title: str | None = None
     support_url: str | None = None
     custom_variables: list[CustomVariable] = Field(default_factory=list)
-    notification_enable: UserNotificationEnable | None = None
+    notification_enable: SubscriptionNotificationEnable | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -113,13 +110,13 @@ class AdminContactInfo(AdminBase):
     @field_validator("notification_enable", mode="before")
     @classmethod
     def convert_notification_enable(cls, value):
-        """Convert dict to UserNotificationEnable object when loading from database."""
+        """Convert dict to SubscriptionNotificationEnable object when loading from database."""
         if value is None:
             return None
-        if isinstance(value, UserNotificationEnable):
+        if isinstance(value, SubscriptionNotificationEnable):
             return value
         if isinstance(value, dict):
-            return UserNotificationEnable(**value)
+            return SubscriptionNotificationEnable(**value)
         return value
 
 
@@ -166,8 +163,6 @@ class AdminDetails(AdminContactInfo):
 
 class AdminModify(BaseModel):
     password: str | None = None
-    telegram_id: int | None = None
-    discord_webhook: str | None = None
     status: AdminStatusModify | None = None
     data_limit: int | None = None
     sub_template: str | None = None
@@ -176,14 +171,9 @@ class AdminModify(BaseModel):
     support_url: str | None = None
     custom_variables: list[CustomVariable] | None = None
     note: str | None = None
-    notification_enable: UserNotificationEnable | None = None
+    notification_enable: SubscriptionNotificationEnable | None = None
     role_id: int | None = None
     permission_overrides: RoleLimits | None = None
-
-    @field_validator("discord_webhook")
-    @classmethod
-    def validate_discord_webhook(cls, value):
-        return DiscordValidator.validate_webhook(value)
 
     @field_validator("custom_variables")
     @classmethod

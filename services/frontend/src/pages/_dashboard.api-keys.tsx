@@ -31,8 +31,8 @@ import { usePersistedViewMode } from '@/hooks/use-persisted-view-mode'
 import { useAdmin } from '@/hooks/use-admin'
 import { useClipboard } from '@/hooks/use-clipboard'
 import { hasPermission } from '@/utils/rbac'
-import { BulkActionItem, BulkActionsBar } from '@/features/users/components/bulk-actions-bar'
-import { BulkActionAlertDialog } from '@/features/users/components/bulk-action-alert-dialog'
+import { BulkActionItem, BulkActionsBar } from '@/components/common/bulk-actions-bar'
+import { BulkActionAlertDialog } from '@/components/common/bulk-action-alert-dialog'
 
 export default function ApiKeysPage() {
   const { t } = useTranslation()

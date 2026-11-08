@@ -61,7 +61,7 @@ type Inbound struct {
 	clients        map[string]api.Account // Runtime-only map: email -> account (never serialized)
 }
 
-func (c *Config) syncUsers(users []*common.User) {
+func (c *Config) syncUsers(users []*common.Subscription) {
 	for _, i := range c.InboundConfigs {
 		if i.exclude {
 			continue
@@ -91,7 +91,7 @@ func (i *Inbound) canHoldUsers() bool {
 	return true
 }
 
-func (c *Config) buildInboundUpdates(users []*common.User) (map[string]*Inbound, map[string]*inboundUpdate) {
+func (c *Config) buildInboundUpdates(users []*common.Subscription) (map[string]*Inbound, map[string]*inboundUpdate) {
 	inboundByTag := make(map[string]*Inbound)
 	for _, inbound := range c.InboundConfigs {
 		if inbound.exclude || !inbound.canHoldUsers() {
@@ -110,7 +110,7 @@ func (c *Config) buildInboundUpdates(users []*common.User) (map[string]*Inbound,
 	for _, user := range users {
 		settings, _ := setupUserAccount(user)
 		userInbounds := user.GetInbounds()
-		userEmail := user.GetEmail()
+		userEmail := user.GetSubscriptionUuid()
 
 		for tag, inbound := range inboundByTag {
 			account, isActive := isActiveInbound(inbound, userInbounds, settings)
@@ -126,7 +126,7 @@ func (c *Config) buildInboundUpdates(users []*common.User) (map[string]*Inbound,
 	return inboundByTag, updates
 }
 
-func (c *Config) updateUsers(users []*common.User) {
+func (c *Config) updateUsers(users []*common.Subscription) {
 	inboundByTag, updates := c.buildInboundUpdates(users)
 	for tag, inbound := range inboundByTag {
 		update := updates[tag]
@@ -138,7 +138,7 @@ func (c *Config) updateUsers(users []*common.User) {
 	}
 }
 
-func (i *Inbound) syncUsers(users []*common.User) {
+func (i *Inbound) syncUsers(users []*common.Subscription) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -154,10 +154,10 @@ func (i *Inbound) syncUsers(users []*common.User) {
 			if slices.Contains(user.Inbounds, i.Tag) {
 				account, err := api.NewVmessAccount(user)
 				if err != nil {
-					log.Println("error for user", user.GetEmail(), ":", err)
+					log.Println("error for user", user.GetSubscriptionUuid(), ":", err)
 					continue
 				}
-				i.clients[user.GetEmail()] = account
+				i.clients[user.GetSubscriptionUuid()] = account
 			}
 		}
 
@@ -169,10 +169,10 @@ func (i *Inbound) syncUsers(users []*common.User) {
 			if slices.Contains(user.Inbounds, i.Tag) {
 				account, err := api.NewVlessAccount(user)
 				if err != nil {
-					log.Println("error for user", user.GetEmail(), ":", err)
+					log.Println("error for user", user.GetSubscriptionUuid(), ":", err)
 					continue
 				}
-				i.clients[user.GetEmail()] = account
+				i.clients[user.GetSubscriptionUuid()] = account
 			}
 		}
 
@@ -182,7 +182,7 @@ func (i *Inbound) syncUsers(users []*common.User) {
 				continue
 			}
 			if slices.Contains(user.Inbounds, i.Tag) {
-				i.clients[user.GetEmail()] = api.NewTrojanAccount(user)
+				i.clients[user.GetSubscriptionUuid()] = api.NewTrojanAccount(user)
 			}
 		}
 
@@ -196,7 +196,7 @@ func (i *Inbound) syncUsers(users []*common.User) {
 				if slices.Contains(user.Inbounds, i.Tag) {
 					account := api.NewShadowsocksAccount(user)
 					newAccount := checkShadowsocks2022(method, *account)
-					i.clients[user.GetEmail()] = &newAccount
+					i.clients[user.GetSubscriptionUuid()] = &newAccount
 				}
 			}
 		} else {
@@ -205,7 +205,7 @@ func (i *Inbound) syncUsers(users []*common.User) {
 					continue
 				}
 				if slices.Contains(user.Inbounds, i.Tag) {
-					i.clients[user.GetEmail()] = api.NewShadowsocksTcpAccount(user)
+					i.clients[user.GetSubscriptionUuid()] = api.NewShadowsocksTcpAccount(user)
 				}
 			}
 		}
@@ -216,7 +216,7 @@ func (i *Inbound) syncUsers(users []*common.User) {
 				continue
 			}
 			if slices.Contains(user.Inbounds, i.Tag) {
-				i.clients[user.GetEmail()] = api.NewHysteriaAccount(user)
+				i.clients[user.GetSubscriptionUuid()] = api.NewHysteriaAccount(user)
 			}
 		}
 
@@ -229,7 +229,7 @@ func (i *Inbound) syncUsers(users []*common.User) {
 			if slices.Contains(user.Inbounds, i.Tag) {
 				account, err := api.NewWireguardAccount(user)
 				if err != nil {
-					log.Println("error for user", user.GetEmail(), ":", err)
+					log.Println("error for user", user.GetSubscriptionUuid(), ":", err)
 					continue
 				}
 				if filtered, ok := i.wireguardAccountForInbound(account); ok {

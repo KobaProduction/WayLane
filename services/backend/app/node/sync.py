@@ -1,30 +1,31 @@
 import asyncio
+from uuid import UUID
 
-from waylane_node_bridge.common.service_pb2 import User as ProtoUser
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_object_session
 
 from app.db import GetDB
-from app.db.models import Admin, AdminRole, AdminStatus, User
-from app.models.user import UserNotificationResponse
+from app.db.models import Admin, AdminRole, AdminStatus, Subscription
+from app.models.subscription_models import SubscriptionNotificationResponse
 from app.nats.node_rpc import encode_node_command, node_nats_client
 from app.nats.proto_utils import serialize_proto_message, serialize_proto_messages
 from app.node import node_manager
 from app.node.bridge import register_refresh_handler
-from app.node.user import (
-    _serialize_user_for_node,
-    core_users,
-    removal_users,
-    serialize_user,
-    serialize_users_for_node,
+from app.node.subscription import (
+    _serialize_subscription_for_node,
+    core_subscriptions,
+    removal_subscriptions,
+    serialize_subscription,
+    serialize_subscriptions_for_node,
 )
 from app.utils.logger import get_logger
 from config import nats_settings, runtime_settings
+from waylane_node_bridge.common.service_pb2 import Subscription as ProtoSubscription
 
 logger = get_logger("node-sync")
 
 
-def _chunk_serialized_users_for_nats(users: list[dict]) -> list[list[dict]]:
+def _chunk_serialized_subscriptions_for_nats(users: list[dict]) -> list[list[dict]]:
     if not users:
         return []
 
@@ -32,12 +33,12 @@ def _chunk_serialized_users_for_nats(users: list[dict]) -> list[list[dict]]:
     max_batch_size = max(1, nats_settings.node_update_users_batch_size)
     chunks: list[list[dict]] = []
     current: list[dict] = []
-    envelope_bytes = len(encode_node_command("update_users", {"users": []}))
+    envelope_bytes = len(encode_node_command("update_users", {"subscriptions": []}))
     current_bytes = envelope_bytes
 
     for user in users:
         # Reuse the wire encoder so JSON escaping and the command envelope are counted exactly.
-        single_user_bytes = len(encode_node_command("update_users", {"users": [user]}))
+        single_user_bytes = len(encode_node_command("update_users", {"subscriptions": [user]}))
         user_bytes = single_user_bytes - envelope_bytes
         candidate_bytes = current_bytes + user_bytes + (1 if current else 0)  # JSON array comma
         if current and (len(current) >= max_batch_size or candidate_bytes > max_payload_bytes):
@@ -49,10 +50,7 @@ def _chunk_serialized_users_for_nats(users: list[dict]) -> list[list[dict]]:
         current_bytes = candidate_bytes
 
         if single_user_bytes > max_payload_bytes:
-            logger.warning(
-                "Single serialized user update exceeds configured NATS node command payload limit: user=%s",
-                user.get("email") or user.get("id") or "unknown",
-            )
+            logger.warning("Single serialized subscription update exceeds configured NATS node command payload limit")
 
     if current:
         chunks.append(current)
@@ -77,17 +75,17 @@ def _loaded_admin_sync_blocked(admin: Admin) -> bool | None:
     return bool(role.disconnect_users_when_disabled)
 
 
-async def _user_sync_blocked(db_user: User) -> bool:
-    if not db_user.admin_id:
+async def _subscription_sync_blocked(db_subscription: Subscription) -> bool:
+    if not db_subscription.admin_id:
         return False
 
-    admin = getattr(db_user, "__dict__", {}).get("admin")
+    admin = getattr(db_subscription, "__dict__", {}).get("admin")
     if admin is not None:
         loaded_result = _loaded_admin_sync_blocked(admin)
         if loaded_result is not None:
             return loaded_result
 
-    session = async_object_session(db_user)
+    session = async_object_session(db_subscription)
     if session is None:
         return False
 
@@ -95,13 +93,13 @@ async def _user_sync_blocked(db_user: User) -> bool:
         select(Admin.status, AdminRole.disconnect_users_when_limited, AdminRole.disconnect_users_when_disabled)
         .select_from(Admin)
         .join(AdminRole, AdminRole.id == Admin.role_id)
-        .where(Admin.id == db_user.admin_id)
+        .where(Admin.id == db_subscription.admin_id)
     )
     row = (await session.execute(stmt)).one_or_none()
     return bool(row and ((row[0] == AdminStatus.limited and row[1]) or (row[0] == AdminStatus.disabled and row[2])))
 
 
-async def _blocked_admin_ids_for_users(users: list[User]) -> set[int]:
+async def _blocked_admin_ids_for_subscriptions(users: list[Subscription]) -> set[int]:
     admin_ids = {user.admin_id for user in users if user.admin_id is not None}
     if not admin_ids:
         return set()
@@ -140,27 +138,29 @@ async def _blocked_admin_ids_for_users(users: list[User]) -> set[int]:
 
 if runtime_settings.role.runs_node:
 
-    async def _dispatch_user_update(proto_user):
-        await node_manager.update_user(proto_user)
+    async def _dispatch_subscription_update(proto_subscription):
+        await node_manager.update_user(proto_subscription)
 
-    async def _dispatch_users_update(proto_users, *, await_dispatch: bool = False):
+    async def _dispatch_subscriptions_update(proto_subscriptions, *, await_dispatch: bool = False):
         """Dispatch a batch locally, optionally waiting for node queue acceptance."""
         if await_dispatch:
-            await node_manager.update_users(proto_users, await_dispatch=True)
+            await node_manager.update_users(proto_subscriptions, await_dispatch=True)
         else:
-            await node_manager.update_users(proto_users)
+            await node_manager.update_users(proto_subscriptions)
 
 else:
+    # Preserve the existing internal NATS action names until API and worker
+    # deployment are atomically switched; they are not product identifiers.
 
-    async def _dispatch_user_update(proto_user):
-        user_dict = serialize_proto_message(proto_user)
+    async def _dispatch_subscription_update(proto_subscription):
+        user_dict = serialize_proto_message(proto_subscription)
         await node_nats_client.publish("update_user", {"user": user_dict})
 
-    async def _dispatch_users_update(proto_users, *, await_dispatch: bool = False):
+    async def _dispatch_subscriptions_update(proto_subscriptions, *, await_dispatch: bool = False):
         """Publish bounded batches to the node worker before returning."""
-        users_dicts = serialize_proto_messages(proto_users)
-        for users_chunk in _chunk_serialized_users_for_nats(users_dicts):
-            await node_nats_client.publish("update_users", {"users": users_chunk})
+        users_dicts = serialize_proto_messages(proto_subscriptions)
+        for users_chunk in _chunk_serialized_subscriptions_for_nats(users_dicts):
+            await node_nats_client.publish("update_users", {"subscriptions": users_chunk})
 
 
 class CurrentStateReader:
@@ -180,32 +180,32 @@ class CurrentStateReader:
         # A hung database call must fail its own batch, not block every later
         # request behind it; waiters see a TimeoutError and their delivery is requeued.
         self._query_timeout = query_timeout
-        self._pending: dict[int, list[asyncio.Future]] = {}
+        self._pending: dict[UUID, list[asyncio.Future]] = {}
         self._task: asyncio.Task | None = None
 
-    async def get(self, user_ids: list[int]) -> dict[int, ProtoUser | None]:
-        """Current node payload per id; a removal carries no inbounds, and ``None`` means the user is gone."""
-        if not user_ids:
+    async def get(self, subscription_uuids: list[UUID]) -> dict[UUID, ProtoSubscription | None]:
+        """Node payloads keyed by subscription UUID; ``None`` means no persisted subscription."""
+        if not subscription_uuids:
             return {}
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        for user_id in user_ids:
-            self._pending.setdefault(user_id, []).append(future)
+        for subscription_uuid in subscription_uuids:
+            self._pending.setdefault(subscription_uuid, []).append(future)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run(), name="node-current-state-reader")
         result = await future
-        return {user_id: result.get(user_id) for user_id in user_ids}
+        return {subscription_uuid: result.get(subscription_uuid) for subscription_uuid in subscription_uuids}
 
-    async def _query(self, user_ids: list[int]) -> dict[int, ProtoUser | None]:
-        result: dict[int, ProtoUser | None] = dict.fromkeys(user_ids)
+    async def _query(self, subscription_uuids: list[UUID]) -> dict[UUID, ProtoSubscription | None]:
+        result: dict[UUID, ProtoSubscription | None] = dict.fromkeys(subscription_uuids)
         async with asyncio.timeout(self._query_timeout), GetDB() as db:
-            for start in range(0, len(user_ids), self._max_ids):
-                chunk = user_ids[start : start + self._max_ids]
-                for proto in await core_users(db, user_ids=chunk):
-                    result[int(proto.email)] = proto
-                # Users a core must not carry are removals that keep their stored credentials.
-                if missing := [user_id for user_id in chunk if result[user_id] is None]:
-                    for proto in await removal_users(db, missing):
-                        result[int(proto.email)] = proto
+            for start in range(0, len(subscription_uuids), self._max_ids):
+                chunk = subscription_uuids[start : start + self._max_ids]
+                for proto in await core_subscriptions(db, subscription_uuids=chunk):
+                    result[UUID(proto.subscription_uuid)] = proto
+                # Revoked subscriptions become removal payloads retaining stored credentials.
+                if missing := [subscription_uuid for subscription_uuid in chunk if result[subscription_uuid] is None]:
+                    for proto in await removal_subscriptions(db, missing):
+                        result[UUID(proto.subscription_uuid)] = proto
         return result
 
     async def _run(self) -> None:
@@ -239,70 +239,81 @@ class CurrentStateReader:
 _current_state = CurrentStateReader()
 
 
-async def refresh_node_users(node_id: str, emails: list[str]) -> list[ProtoUser]:
-    """Return the current database state of users, as node payloads, for delivery or refresh markers.
+async def refresh_node_subscriptions(node_id: str, subscription_uuids: list[str]) -> list[ProtoSubscription]:
+    """Resolve fresh Node subscription payloads immediately before queued delivery.
 
-    Called by the queue worker right before a claimed batch is sent (so what
-    reaches a node is the state committed at that moment, whatever order the
-    updates were queued in) and when a refresh marker is resolved. Users that
-    no longer exist, are not active/on-hold, have no inbounds, or whose admin
-    blocks synchronization resolve to removals, matching a full snapshot.
-    Removals keep the stored credentials. A user that no longer exists has
-    none, so its removal carries no ``proxies`` and the queue keeps the
-    credentials of the payload it holds. Non-numeric emails (not panel users)
-    are not answered; callers keep their queued payload for those.
+    Only canonical UUIDv4 identifiers belong to WayLane-owned subscriptions.
+    Unknown UUIDs produce an empty-credential removal so the existing queue
+    can retain credentials needed to revoke a previously installed account.
+    Non-UUID external account keys are left to their queue payloads.
     """
-    ids = [int(email) for email in dict.fromkeys(emails) if email.isdigit()]
+    ids: list[UUID] = []
+    for value in dict.fromkeys(subscription_uuids):
+        try:
+            candidate = UUID(value)
+        except TypeError, ValueError, AttributeError:
+            continue
+        if candidate.version == 4 and str(candidate) == value:
+            ids.append(candidate)
     if not ids:
         return []
     state = await _current_state.get(ids)
-    return [proto if proto is not None else ProtoUser(email=str(user_id)) for user_id, proto in state.items()]
+    return [
+        proto if proto is not None else ProtoSubscription(subscription_uuid=str(subscription_uuid))
+        for subscription_uuid, proto in state.items()
+    ]
 
 
-register_refresh_handler(refresh_node_users)
+register_refresh_handler(refresh_node_subscriptions)
 
 
-async def sync_user(db_user: User) -> None:
-    if await _user_sync_blocked(db_user):
+async def sync_subscription_access(db_subscription: Subscription) -> None:
+    """Dispatch the current commercial admission state before acknowledging it.
+
+    The node delivery queue re-reads committed DB state, so older deliveries
+    cannot re-install credentials after a newer payment suspension.
+    """
+    if await _subscription_sync_blocked(db_subscription):
+        return
+    await _dispatch_subscription_update(await serialize_subscription(db_subscription))
+
+
+async def sync_subscription(db_subscription: Subscription) -> None:
+    if await _subscription_sync_blocked(db_subscription):
         return
 
-    proto_user = await serialize_user(db_user)
-    asyncio.create_task(_dispatch_user_update(proto_user))
+    proto_subscription = await serialize_subscription(db_subscription)
+    asyncio.create_task(_dispatch_subscription_update(proto_subscription))
 
 
-async def remove_user(user: UserNotificationResponse) -> None:
-    proto_user = _serialize_user_for_node(user.id, user.proxy_settings.dict())
-    asyncio.create_task(_dispatch_user_update(proto_user))
+async def remove_subscription(user: SubscriptionNotificationResponse) -> None:
+    proto_subscription = _serialize_subscription_for_node(user.uuid, user.proxy_settings.dict())
+    asyncio.create_task(_dispatch_subscription_update(proto_subscription))
 
 
-async def remove_user_awaited(user: UserNotificationResponse) -> None:
-    """Remove a user from nodes and await confirmation before returning.
-
-    Unlike :func:`remove_user`, this coroutine directly awaits the node
-    dispatch so callers can be sure the node update completed (or raised)
-    before committing the corresponding database deletion.
-    """
-    proto_user = _serialize_user_for_node(user.id, user.proxy_settings.dict())
-    await _dispatch_user_update(proto_user)
+async def remove_subscription_awaited(user: SubscriptionNotificationResponse) -> None:
+    """Await node removal dispatch before committing a subscription deletion."""
+    proto_subscription = _serialize_subscription_for_node(user.uuid, user.proxy_settings.dict())
+    await _dispatch_subscription_update(proto_subscription)
 
 
-async def remove_users(users: list[User], *, await_dispatch: bool = False) -> None:
-    """Batch-remove users, optionally awaiting dispatch before loading the next batch."""
+async def remove_subscriptions(users: list[Subscription], *, await_dispatch: bool = False) -> None:
+    """Batch-remove subscriptions, optionally awaiting node dispatch."""
     if not users:
         return
-    proto_users = [_serialize_user_for_node(u.id, u.proxy_settings) for u in users]
+    proto_subscriptions = [_serialize_subscription_for_node(u.uuid, u.proxy_settings) for u in users]
     if await_dispatch:
-        await _dispatch_users_update(proto_users, await_dispatch=True)
+        await _dispatch_subscriptions_update(proto_subscriptions, await_dispatch=True)
     else:
-        asyncio.create_task(_dispatch_users_update(proto_users))
+        asyncio.create_task(_dispatch_subscriptions_update(proto_subscriptions))
 
 
-async def sync_users(users: list[User], *, await_dispatch: bool = False) -> None:
-    """Sync eligible users, optionally awaiting dispatch before loading the next batch."""
-    blocked_admin_ids = await _blocked_admin_ids_for_users(users)
+async def sync_subscriptions(users: list[Subscription], *, await_dispatch: bool = False) -> None:
+    """Sync eligible subscriptions, optionally awaiting node dispatch."""
+    blocked_admin_ids = await _blocked_admin_ids_for_subscriptions(users)
     filtered = [user for user in users if user.admin_id not in blocked_admin_ids]
-    proto_users = await serialize_users_for_node(filtered)
+    proto_subscriptions = await serialize_subscriptions_for_node(filtered)
     if await_dispatch:
-        await _dispatch_users_update(proto_users, await_dispatch=True)
+        await _dispatch_subscriptions_update(proto_subscriptions, await_dispatch=True)
     else:
-        asyncio.create_task(_dispatch_users_update(proto_users))
+        asyncio.create_task(_dispatch_subscriptions_update(proto_subscriptions))

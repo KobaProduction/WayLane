@@ -40,7 +40,7 @@ from waylane_node_bridge.storage import (
     SnapshotUserSyncStoreProtocol,
     UserSyncStoreProtocol,
 )
-from waylane_node_bridge.utils import create_proxy, create_user
+from waylane_node_bridge.utils import create_proxy, create_subscription
 
 
 class NodeType(str, Enum):
@@ -177,6 +177,6 @@ __all__ = [
     "create_node_from_config",
     "create_node_from_registry",
     "create_proxy",
-    "create_user",
+    "create_subscription",
     "save_node_config",
 ]

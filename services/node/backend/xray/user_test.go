@@ -10,8 +10,8 @@ import (
 )
 
 func TestAccountForAPIUsesInboundFlowOverrideWhenPresent(t *testing.T) {
-	user := &common.User{
-		Email: "user@example.com",
+	user := &common.Subscription{
+		SubscriptionUuid: "user@example.com",
 		Proxies: &common.Proxy{
 			Vless: &common.Vless{
 				Id:   uuid.New().String(),
@@ -45,8 +45,8 @@ func TestAccountForAPIUsesInboundFlowOverrideWhenPresent(t *testing.T) {
 }
 
 func TestAccountForAPIUsesUserFlowWhenInboundFlowEmpty(t *testing.T) {
-	user := &common.User{
-		Email: "user@example.com",
+	user := &common.Subscription{
+		SubscriptionUuid: "user@example.com",
 		Proxies: &common.Proxy{
 			Vless: &common.Vless{
 				Id:   uuid.New().String(),
@@ -77,9 +77,9 @@ func TestAccountForAPIUsesUserFlowWhenInboundFlowEmpty(t *testing.T) {
 }
 
 func TestIsActiveInboundKeepsUserFlowForConfigStorage(t *testing.T) {
-	user := &common.User{
-		Email:    "user@example.com",
-		Inbounds: []string{"vless-in"},
+	user := &common.Subscription{
+		SubscriptionUuid: "user@example.com",
+		Inbounds:         []string{"vless-in"},
 		Proxies: &common.Proxy{
 			Vless: &common.Vless{
 				Id:   uuid.New().String(),

@@ -21,7 +21,7 @@ enum BackendType {
 message Backend {
   BackendType type = 1;
   string config = 2;
-  repeated User users = 3;
+  repeated Subscription subscriptions = 3;
   uint64 keep_alive = 4;
   repeated string exclude_inbounds = 5;
 }
@@ -48,8 +48,8 @@ enum StatType {
   Outbound = 1;
   Inbounds = 2;
   Inbound = 3;
-  UsersStat = 4;
-  UserStat = 5;
+  SubscriptionsStat = 4;
+  SubscriptionStat = 5;
 }
 
 message StatRequest {
@@ -109,7 +109,7 @@ message SystemStatsResponse {
     uint64 uptime = 7;
 }
 
-// User
+// Xray protocol-specific account credentials; VLESS/VMess id values remain Xray-defined UUIDs.
 message Vmess {
     string id = 1;
 }
@@ -152,18 +152,20 @@ message Proxy {
     Masque masque = 7;
 }
 
-message User {
-    string email = 1;
+message Subscription {
+    // Canonical WayLane subscription UUIDv4, independent of Xray account
+    // terminology. Xray adapters map it into their required `email` field.
+    string subscription_uuid = 1;
     Proxy proxies = 2;
     repeated string inbounds = 3;
 }
 
-message Users {
-  repeated User users = 1;
+message Subscriptions {
+  repeated Subscription subscriptions = 1;
 }
 
-message UsersChunk {
-  repeated User users = 1;
+message SubscriptionsChunk {
+  repeated Subscription subscriptions = 1;
   uint64 index = 2;
   bool last = 3;
 }
@@ -188,7 +190,7 @@ message TestRouteRequest {
   string target_domain = 4;
   uint32 target_port = 5;
   string protocol = 6;
-  string user = 7;
+  string subscription_uuid = 7;
   map<string, string> attributes = 8;
   repeated string field_selectors = 9;
   bool publish_result = 10;
@@ -228,12 +230,12 @@ service NodeService {
   rpc GetStats (StatRequest) returns (StatResponse) {}
   rpc GetOutboundsLatency (LatencyRequest) returns (LatencyResponse) {}
 
-  rpc GetUserOnlineStats (StatRequest) returns (OnlineStatResponse) {}
-  rpc GetUserOnlineIpListStats(StatRequest) returns (StatsOnlineIpListResponse) {}
+  rpc GetSubscriptionOnlineStats (StatRequest) returns (OnlineStatResponse) {}
+  rpc GetSubscriptionOnlineIpListStats(StatRequest) returns (StatsOnlineIpListResponse) {}
 
-  rpc SyncUser (stream User) returns (Empty) {}
-  rpc SyncUsers (Users) returns (Empty) {}
-  rpc SyncUsersChunked (stream UsersChunk) returns (Empty) {}
+  rpc SyncSubscription (stream Subscription) returns (Empty) {}
+  rpc SyncSubscriptions (Subscriptions) returns (Empty) {}
+  rpc SyncSubscriptionsChunked (stream SubscriptionsChunk) returns (Empty) {}
 
   rpc ListRoutingRules (Empty) returns (RoutingRulesResponse) {}
   rpc GetBalancerInfo (BalancerInfoRequest) returns (BalancerInfoResponse) {}

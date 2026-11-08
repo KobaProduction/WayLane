@@ -15,7 +15,7 @@ import (
 	"github.com/KobaProduction/waylane/services/node/controller"
 )
 
-func (s *Service) SyncUser(w http.ResponseWriter, r *http.Request) {
+func (s *Service) SyncSubscription(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -23,20 +23,20 @@ func (s *Service) SyncUser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	user := &common.User{}
+	user := &common.Subscription{}
 	if err = proto.Unmarshal(body, user); err != nil {
 		http.Error(w, "Failed to decode user", http.StatusBadRequest)
 		return
 	}
 
-	if user.GetEmail() == "" {
+	if user.GetSubscriptionUuid() == "" {
 		http.Error(w, "email is required", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Got user: %v", user.GetEmail())
+	log.Printf("Got user: %v", user.GetSubscriptionUuid())
 
-	if err = s.Backend().SyncUser(r.Context(), user); err != nil {
+	if err = s.Backend().SyncSubscription(r.Context(), user); err != nil {
 		log.Printf("Error syncing user: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -51,7 +51,7 @@ func (s *Service) SyncUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Service) SyncUsers(w http.ResponseWriter, r *http.Request) {
+func (s *Service) SyncSubscriptions(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -59,13 +59,13 @@ func (s *Service) SyncUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	users := &common.Users{}
+	users := &common.Subscriptions{}
 	if err = proto.Unmarshal(body, users); err != nil {
 		http.Error(w, "Failed to decode user", http.StatusBadRequest)
 		return
 	}
 
-	if err = s.Backend().SyncUsers(r.Context(), users.GetUsers()); err != nil {
+	if err = s.Backend().SyncSubscriptions(r.Context(), users.GetSubscriptions()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -79,11 +79,11 @@ func (s *Service) SyncUsers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Service) SyncUsersChunked(w http.ResponseWriter, r *http.Request) {
+func (s *Service) SyncSubscriptionsChunked(w http.ResponseWriter, r *http.Request) {
 	reader := bufio.NewReader(r.Body)
 	defer r.Body.Close()
 
-	chunks := make(map[uint64][]*common.User)
+	chunks := make(map[uint64][]*common.Subscription)
 	var (
 		lastIndex uint64
 		sawLast   bool
@@ -108,13 +108,13 @@ func (s *Service) SyncUsersChunked(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		chunk := &common.UsersChunk{}
+		chunk := &common.SubscriptionsChunk{}
 		if err = proto.Unmarshal(payload, chunk); err != nil {
 			http.Error(w, fmt.Sprintf("failed to decode chunk: %v", err), http.StatusBadRequest)
 			return
 		}
 
-		chunks[chunk.GetIndex()] = append(chunks[chunk.GetIndex()], chunk.GetUsers()...)
+		chunks[chunk.GetIndex()] = append(chunks[chunk.GetIndex()], chunk.GetSubscriptions()...)
 
 		if chunk.GetLast() {
 			sawLast = true

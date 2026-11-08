@@ -1,9 +1,9 @@
-﻿import { ColumnDef, RowSelectionState, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
+import { ColumnDef, RowSelectionState, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import useDirDetection from '@/hooks/use-dir-detection'
 import React, { useState, useMemo, memo, useCallback, useEffect } from 'react'
-import { ChevronDown, Edit2, Power, PowerOff, RefreshCw, Trash2, UserCheck, UserMinus, UserRound, UserRoundKey, UserX, MoreVertical, Users } from 'lucide-react'
+import { ChevronDown, Edit2, Power, PowerOff, RefreshCw, Trash2, UserRound, UserRoundKey, MoreVertical, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AdminDetails } from '@/service/api'
 import { useTranslation } from 'react-i18next'
@@ -21,9 +21,6 @@ interface DataTableProps<TData extends AdminDetails> {
   onToggleStatus?: (admin: AdminDetails) => void
   setStatusToggleDialogOpen: (isOpen: boolean) => void
   onResetUsage?: (admin: AdminDetails) => void
-  onDisableAllActiveUsers?: (admin: AdminDetails) => void
-  onActivateAllDisabledUsers?: (admin: AdminDetails) => void
-  onRemoveAllUsers?: (admin: AdminDetails) => void
   onSelectionChange?: (selectedUsernames: string[]) => void
   resetSelectionKey?: number
   enableSelection?: boolean
@@ -40,9 +37,6 @@ const ExpandedRowContent = memo(
     onDelete,
     onToggleStatus,
     onResetUsage,
-    onDisableAllActiveUsers,
-    onActivateAllDisabledUsers,
-    onRemoveAllUsers,
     currentAdminUsername,
   }: {
     row: AdminDetails
@@ -50,9 +44,6 @@ const ExpandedRowContent = memo(
     onDelete?: (admin: AdminDetails) => void
     onToggleStatus?: (admin: AdminDetails) => void
     onResetUsage?: (admin: AdminDetails) => void
-    onDisableAllActiveUsers?: (admin: AdminDetails) => void
-    onActivateAllDisabledUsers?: (admin: AdminDetails) => void
-    onRemoveAllUsers?: (admin: AdminDetails) => void
     currentAdminUsername?: string
   }) => {
     const { t } = useTranslation()
@@ -60,10 +51,7 @@ const ExpandedRowContent = memo(
     const isDisabled = getAdminStatus(row) === 'disabled'
     const nonDestructiveActionCount =
       (!isOwnerTarget && row.username !== currentAdminUsername && onToggleStatus ? 1 : 0) +
-      (onResetUsage ? 1 : 0) +
-      (!isOwnerTarget && onDisableAllActiveUsers ? 1 : 0) +
-      (!isOwnerTarget && onActivateAllDisabledUsers ? 1 : 0) +
-      (!isOwnerTarget && onRemoveAllUsers ? 1 : 0)
+      (onResetUsage ? 1 : 0)
     const canDeleteAdmin = !isOwnerTarget && row.username !== currentAdminUsername && !!onDelete
     const hasMoreActions = nonDestructiveActionCount > 0 || canDeleteAdmin
 
@@ -128,43 +116,6 @@ const ExpandedRowContent = memo(
                       {t('admins.reset')}
                     </DropdownMenuItem>
                   )}
-                  {!isOwnerTarget && onDisableAllActiveUsers && (
-                    <DropdownMenuItem
-                      onSelect={e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onDisableAllActiveUsers(row)
-                      }}
-                    >
-                      <UserMinus className="mr-2 h-4 w-4" />
-                      {t('admins.disableAllActiveUsers')}
-                    </DropdownMenuItem>
-                  )}
-                  {!isOwnerTarget && onActivateAllDisabledUsers && (
-                    <DropdownMenuItem
-                      onSelect={e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onActivateAllDisabledUsers(row)
-                      }}
-                    >
-                      <UserCheck className="mr-2 h-4 w-4" />
-                      {t('admins.activateAllDisabledUsers')}
-                    </DropdownMenuItem>
-                  )}
-                  {!isOwnerTarget && onRemoveAllUsers && (
-                    <DropdownMenuItem
-                      className="text-destructive"
-                      onSelect={e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onRemoveAllUsers(row)
-                      }}
-                    >
-                      <UserX className="mr-2 h-4 w-4" />
-                      {t('admins.removeAllUsers')}
-                    </DropdownMenuItem>
-                  )}
                   {canDeleteAdmin && (
                     <>
                       {nonDestructiveActionCount > 0 && <DropdownMenuSeparator />}
@@ -200,9 +151,6 @@ export function DataTable<TData extends AdminDetails>({
   onDelete,
   onToggleStatus,
   onResetUsage,
-  onDisableAllActiveUsers,
-  onActivateAllDisabledUsers,
-  onRemoveAllUsers,
   onSelectionChange,
   resetSelectionKey = 0,
   enableSelection = true,
@@ -464,9 +412,6 @@ export function DataTable<TData extends AdminDetails>({
                               onDelete={onDelete}
                               onToggleStatus={onToggleStatus}
                               onResetUsage={onResetUsage}
-                              onDisableAllActiveUsers={onDisableAllActiveUsers}
-                              onActivateAllDisabledUsers={onActivateAllDisabledUsers}
-                              onRemoveAllUsers={onRemoveAllUsers}
                               currentAdminUsername={currentAdminUsername}
                             />
                           </TableCell>

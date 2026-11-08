@@ -4,14 +4,14 @@ from collections.abc import Sequence
 from app.db import AsyncSession, GetDB
 from app.db.crud.admin import get_active_to_limited_admins, update_admin_status
 from app.db.crud.admin_role import get_role
-from app.db.crud.user import get_admin_users_for_node_sync, get_role_users_for_node_sync
-from app.db.models import Admin, AdminRole, AdminStatus, UserStatus
-from app.node.sync import remove_users as sync_remove_users, sync_users
+from app.db.crud.subscription import get_admin_subscriptions_for_node_sync, get_role_subscriptions_for_node_sync
+from app.db.models import Admin, AdminRole, AdminStatus, SubscriptionStatus
+from app.node.sync import remove_subscriptions as sync_remove_subscriptions, sync_subscriptions
 from app.utils.logger import get_logger
 
 logger = get_logger("admin-sync")
 
-# Users per ID-ordered page when a role policy change is applied to existing users.
+# Subscriptions per UUID-ordered page when a role policy change is applied to existing subscribers.
 ROLE_SYNC_BATCH_SIZE = 500
 
 _role_sync_locks: dict[int, asyncio.Lock] = {}
@@ -46,15 +46,15 @@ async def sync_admin_users_for_block_transition(
         return 0
 
     if is_blocked:
-        users = await get_admin_users_for_node_sync(
+        users = await get_admin_subscriptions_for_node_sync(
             db,
             admin.id,
-            statuses=[UserStatus.active, UserStatus.on_hold],
+            statuses=[SubscriptionStatus.active, SubscriptionStatus.on_hold],
         )
-        await sync_remove_users(users)
+        await sync_remove_subscriptions(users)
     else:
-        users = await get_admin_users_for_node_sync(db, admin.id)
-        await sync_users(users)
+        users = await get_admin_subscriptions_for_node_sync(db, admin.id)
+        await sync_subscriptions(users)
 
     return len(users)
 
@@ -75,13 +75,20 @@ async def sync_role_users_for_block_transition(
             (blocked_statuses if is_blocked else unblocked_statuses).append(status)
 
     synced_count = 0
-    for statuses_to_sync, sync in ((blocked_statuses, sync_remove_users), (unblocked_statuses, sync_users)):
+    for statuses_to_sync, sync in (
+        (blocked_statuses, sync_remove_subscriptions),
+        (unblocked_statuses, sync_subscriptions),
+    ):
         if statuses_to_sync:
-            after_user_id = 0
-            while users := await get_role_users_for_node_sync(
-                db, role.id, statuses_to_sync, after_user_id=after_user_id, limit=ROLE_SYNC_BATCH_SIZE
+            after_subscription_uuid = None
+            while users := await get_role_subscriptions_for_node_sync(
+                db,
+                role.id,
+                statuses_to_sync,
+                after_subscription_uuid=after_subscription_uuid,
+                limit=ROLE_SYNC_BATCH_SIZE,
             ):
-                after_user_id = users[-1].id
+                after_subscription_uuid = users[-1].uuid
                 await sync(users, await_dispatch=True)
                 synced_count += len(users)
                 del users

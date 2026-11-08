@@ -82,6 +82,11 @@ def test_websocket_only_binary_protobuf_frames_and_desired_state(runtime):
             ws.send_bytes(response.SerializeToString())
             accepted=control.decode_frame(ws.receive_bytes())
             assert accepted.kind=="ack" and accepted.status=="accepted"
+            # Wait for the server-side close before TestClient cancels its portal.
+            ws.close(code=1000)
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_bytes()
+            assert closed.value.code == 1000
     async def inspect():
         async with factory() as db:
             row=await db.execute(node_agent_xray_desired.select())

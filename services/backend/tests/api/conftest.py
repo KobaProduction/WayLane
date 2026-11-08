@@ -1,12 +1,17 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import aiocache
 import pytest
 from aiorwlock import RWLock
+from sqlalchemy import select
 
-from app.db.models import Settings
+from app.db.models import Admin, Settings
+from app.models.admin import hash_password
 
 from . import GetTestDB, TestSession, client
+from .helpers import auth_headers, create_core, create_group, delete_core, delete_group, get_inbounds
 
 
 # Disable caching for all tests
@@ -41,7 +46,6 @@ def mock_lock(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture(autouse=True)
 def mock_settings(monkeypatch: pytest.MonkeyPatch):
     settings = {
-        "telegram": {"enable": False, "token": "", "webhook_url": "", "webhook_secret": None, "proxy_url": None},
         "webhook": {
             "enable": False,
             "webhooks": [],
@@ -50,17 +54,6 @@ def mock_settings(monkeypatch: pytest.MonkeyPatch):
             "timeout": 180,
             "recurrent": 3,
             "proxy_url": None,
-        },
-        "notification_settings": {
-            "notify_telegram": False,
-            "notify_discord": False,
-            "telegram_api_token": "",
-            "telegram_admin_id": None,
-            "telegram_channel_id": 0,
-            "telegram_topic_id": 0,
-            "discord_webhook_url": "",
-            "proxy_url": None,
-            "max_retries": 3,
         },
         "notification_enable": {
             "admin": {
@@ -93,7 +86,7 @@ def mock_settings(monkeypatch: pytest.MonkeyPatch):
                 "connect": True,
                 "error": True,
             },
-            "user": {
+            "subscription": {
                 "create": True,
                 "modify": True,
                 "delete": True,
@@ -102,7 +95,7 @@ def mock_settings(monkeypatch: pytest.MonkeyPatch):
                 "data_reset_by_next": True,
                 "subscription_revoked": True,
             },
-            "user_template": {
+            "subscription_template": {
                 "create": True,
                 "modify": True,
                 "delete": True,
@@ -479,3 +472,110 @@ def disable_cache(monkeypatch: pytest.MonkeyPatch):
         return wrapper
 
     monkeypatch.setattr("app.settings.cached", dummy_cached)
+
+
+@pytest.fixture
+def core_entitlement_headers(access_token):
+    """Use the real restricted API key path, never a staff bearer token."""
+    username = f"core_owner_{uuid4().hex[:12]}"
+    password = f"CoreOwner9!{uuid4().hex[:18]}"
+
+    async def create_owner() -> None:
+        async with TestSession() as db:
+            db.add(Admin(username=username, hashed_password=await hash_password(password), role_id=1))
+            await db.commit()
+
+    async def delete_owner() -> None:
+        async with TestSession() as db:
+            owner = (await db.execute(select(Admin).where(Admin.username == username))).scalar_one_or_none()
+            if owner is not None:
+                await db.delete(owner)
+                await db.commit()
+
+    asyncio.run(create_owner())
+    try:
+        login = client.post(
+            "/api/admin/token",
+            data={"username": username, "password": password, "grant_type": "password"},
+        )
+        assert login.status_code == 200, login.text
+        key = client.post(
+            "/api/api_key",
+            headers=auth_headers(login.json()["access_token"]),
+            json={
+                "name": f"vpn-core-{uuid4().hex[:10]}",
+                "inherit_permissions": False,
+                "permissions": {
+                    "subscriptions": {"read": True, "update": True, "reset_usage": True, "set_entitlement": True}
+                },
+            },
+        )
+        assert key.status_code == 201, key.text
+        for permission_model in (
+            {"inherit_permissions": True},
+            {"inherit_permissions": False, "permissions": {"subscriptions": {"read": True, "update": True}}},
+        ):
+            denied_key = client.post(
+                "/api/api_key",
+                headers=auth_headers(login.json()["access_token"]),
+                json={"name": f"untrusted-{uuid4().hex[:12]}", **permission_model},
+            )
+            assert denied_key.status_code == 201, denied_key.text
+            denial = client.put(
+                f"/api/subscriptions/{uuid4()}/entitlement",
+                headers={"X-Api-Key": denied_key.json()["api_key"]},
+                json={"entitlement": "active", "revision": 1},
+            )
+            assert denial.status_code == 403, denial.text
+        yield {"X-Api-Key": key.json()["api_key"]}
+    finally:
+        asyncio.run(delete_owner())
+
+
+@pytest.fixture
+def active_subscription_factory(access_token, core_entitlement_headers):
+    """Real UUID subscription API and scoped Core entitlement, with isolated VPN group."""
+    core: dict | None = None
+    group: dict | None = None
+    created: list[str] = []
+
+    def create(
+        *,
+        creator_token: str | None = None,
+        device_limit: int | None = None,
+        group_ids: list[int] | None = None,
+    ):
+        nonlocal core, group
+        if group_ids is None:
+            if group is None:
+                core = create_core(access_token)
+                group = create_group(access_token, inbound_tags=[get_inbounds(access_token)[0]])
+            group_ids = [group["id"]]
+        sid = str(uuid4())
+        headers = auth_headers(creator_token or access_token)
+        body = {"uuid": sid, "group_ids": group_ids}
+        if device_limit is not None:
+            body["device_limit"] = device_limit
+        response = client.post("/api/subscriptions", headers=headers, json=body)
+        assert response.status_code == 201, response.text
+        created.append(sid)
+        active = client.put(
+            f"/api/subscriptions/{sid}/entitlement",
+            headers=core_entitlement_headers,
+            json={"entitlement": "active", "revision": 1},
+        )
+        assert active.status_code == 200, active.text
+        link = client.get(f"/api/subscriptions/{sid}/link", headers=headers)
+        assert link.status_code == 200, link.text
+        return {"uuid": sid, "url": link.json()["url"], "device_limit": response.json()["device_limit"]}
+
+    try:
+        yield create
+    finally:
+        for sid in reversed(created):
+            removal = client.delete(f"/api/subscriptions/{sid}", headers=auth_headers(access_token))
+            assert removal.status_code in (204, 404), removal.text
+        if group is not None:
+            delete_group(access_token, group["id"])
+        if core is not None:
+            delete_core(access_token, core["id"])

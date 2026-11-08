@@ -15,12 +15,11 @@ from tests.api.helpers import (
     create_core,
     create_group,
     create_hosts_for_inbounds,
-    create_user,
-    create_user_template,
+    create_subscription_template,
     delete_admin,
     delete_core,
     delete_group,
-    delete_user_template,
+    delete_subscription_template,
     unique_name,
 )
 
@@ -115,11 +114,6 @@ def delete_host_if_present(access_token: str, host_id: int) -> None:
     assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
 
 
-def delete_user_if_present(access_token: str, username: str) -> None:
-    response = client.delete(f"/api/user/{username}", headers=auth_headers(access_token))
-    assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
-
-
 def valid_group_name(prefix: str) -> str:
     return f"{prefix}{uuid4().hex[:8]}"
 
@@ -195,40 +189,44 @@ def test_bulk_disable_and_enable_hosts(access_token):
         delete_core(access_token, core["id"])
 
 
-def test_bulk_disable_and_enable_user_templates(access_token):
+def test_bulk_disable_and_enable_subscription_templates(access_token):
     core = create_core(access_token, name=unique_name("bulk_templates_core"))
     group = create_group(access_token, name=valid_group_name("bulktemplategroup"))
-    template = create_user_template(
+    template = create_subscription_template(
         access_token,
         name=unique_name("bulk_template"),
         group_ids=[group["id"]],
     )
     try:
         response = client.post(
-            "/api/user_templates/bulk/disable",
+            "/api/subscription_templates/bulk/disable",
             headers=auth_headers(access_token),
             json={"ids": [template["id"]]},
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["count"] == 1
 
-        template_response = client.get(f"/api/user_template/{template['id']}", headers=auth_headers(access_token))
+        template_response = client.get(
+            f"/api/subscription_template/{template['id']}", headers=auth_headers(access_token)
+        )
         assert template_response.status_code == status.HTTP_200_OK
         assert template_response.json()["is_disabled"] is True
 
         response = client.post(
-            "/api/user_templates/bulk/enable",
+            "/api/subscription_templates/bulk/enable",
             headers=auth_headers(access_token),
             json={"ids": [template["id"]]},
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["count"] == 1
 
-        template_response = client.get(f"/api/user_template/{template['id']}", headers=auth_headers(access_token))
+        template_response = client.get(
+            f"/api/subscription_template/{template['id']}", headers=auth_headers(access_token)
+        )
         assert template_response.status_code == status.HTTP_200_OK
         assert template_response.json()["is_disabled"] is False
     finally:
-        delete_user_template(access_token, template["id"])
+        delete_subscription_template(access_token, template["id"])
         delete_group(access_token, group["id"])
         delete_core(access_token, core["id"])
 
@@ -352,79 +350,4 @@ def test_bulk_disable_enable_and_reset_admins(access_token):
         assert response.json()["count"] == 1
         assert get_admin_details(access_token, admin["username"])["status"] == "active"
     finally:
-        delete_admin(access_token, admin["username"])
-
-
-def test_bulk_admin_user_actions(access_token):
-    admin = create_admin(access_token)
-    active_user = create_user(access_token, payload={"username": unique_name("bulk_admin_active")})
-    disabled_user = create_user(access_token, payload={"username": unique_name("bulk_admin_disabled")})
-
-    try:
-        for user in (active_user, disabled_user):
-            response = client.put(
-                f"/api/user/{user['username']}/set_owner",
-                headers=auth_headers(access_token),
-                params={"admin_username": admin["username"]},
-            )
-            assert response.status_code == status.HTTP_200_OK
-
-        response = client.put(
-            f"/api/user/{disabled_user['username']}",
-            headers=auth_headers(access_token),
-            json={"status": "disabled"},
-        )
-        assert response.status_code == status.HTTP_200_OK
-
-        response = client.post(
-            "/api/admins/bulk/users/disable",
-            headers=auth_headers(access_token),
-            json={"ids": [admin["id"]]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-
-        active_user_response = client.get(f"/api/user/{active_user['username']}", headers=auth_headers(access_token))
-        disabled_user_response = client.get(
-            f"/api/user/{disabled_user['username']}",
-            headers=auth_headers(access_token),
-        )
-        assert active_user_response.status_code == status.HTTP_200_OK
-        assert disabled_user_response.status_code == status.HTTP_200_OK
-        assert active_user_response.json()["status"] == "disabled"
-        assert disabled_user_response.json()["status"] == "disabled"
-
-        response = client.post(
-            "/api/admins/bulk/users/activate",
-            headers=auth_headers(access_token),
-            json={"ids": [admin["id"]]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-
-        active_user_response = client.get(f"/api/user/{active_user['username']}", headers=auth_headers(access_token))
-        disabled_user_response = client.get(
-            f"/api/user/{disabled_user['username']}",
-            headers=auth_headers(access_token),
-        )
-        assert active_user_response.status_code == status.HTTP_200_OK
-        assert disabled_user_response.status_code == status.HTTP_200_OK
-        assert active_user_response.json()["status"] == "active"
-        assert disabled_user_response.json()["status"] == "active"
-
-        response = client.request(
-            "DELETE",
-            "/api/admins/bulk/users",
-            headers=auth_headers(access_token),
-            json={"ids": [admin["id"]]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-
-        for username in (active_user["username"], disabled_user["username"]):
-            lookup = client.get(f"/api/user/{username}", headers=auth_headers(access_token))
-            assert lookup.status_code == status.HTTP_404_NOT_FOUND
-    finally:
-        delete_user_if_present(access_token, active_user["username"])
-        delete_user_if_present(access_token, disabled_user["username"])
         delete_admin(access_token, admin["username"])

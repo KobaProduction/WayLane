@@ -20,13 +20,13 @@ func wireguardKey(fill byte) string {
 	return base64.StdEncoding.EncodeToString([]byte(strings.Repeat(string([]byte{fill}), 32)))
 }
 
-func wireguardUser(email, publicKey, preSharedKey string, peerIPs ...string) *common.User {
+func wireguardUser(email, publicKey, preSharedKey string, peerIPs ...string) *common.Subscription {
 	if len(peerIPs) == 0 {
 		peerIPs = []string{"10.0.0.2/32"}
 	}
-	return &common.User{
-		Email:    email,
-		Inbounds: []string{"wg"},
+	return &common.Subscription{
+		SubscriptionUuid: email,
+		Inbounds:         []string{"wg"},
 		Proxies: &common.Proxy{Wireguard: &common.Wireguard{
 			PublicKey:    publicKey,
 			PreSharedKey: preSharedKey,
@@ -96,8 +96,8 @@ func TestSyncUserWireguardPeerLifecycle(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		from *common.User
-		to   *common.User
+		from *common.Subscription
+		to   *common.Subscription
 		want []string
 	}{
 		{"unchanged peer", wireguardUser("1.alice", keyA, pskA), wireguardUser("1.alice", keyA, pskA), nil},
@@ -112,12 +112,12 @@ func TestSyncUserWireguardPeerLifecycle(t *testing.T) {
 			x, service := newWireguardXray(t)
 			ctx := syncContext(t)
 
-			if err := x.SyncUser(ctx, tc.from); err != nil {
+			if err := x.SyncSubscription(ctx, tc.from); err != nil {
 				t.Fatal(err)
 			}
 			assertOrdered(t, service.takeOrdered(), "wg:add")
 
-			if err := x.SyncUser(ctx, tc.to); err != nil {
+			if err := x.SyncSubscription(ctx, tc.to); err != nil {
 				t.Fatal(err)
 			}
 			assertOrdered(t, service.takeOrdered(), tc.want...)
@@ -130,13 +130,13 @@ func TestSyncUserRemovesAWireguardPeerThatLeavesTheInbound(t *testing.T) {
 	ctx := syncContext(t)
 	user := wireguardUser("1.alice", wireguardKey(0x11), "")
 
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	service.takeOrdered()
 
 	user.Inbounds = nil
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	assertOrdered(t, service.takeOrdered(), "wg:remove")
@@ -147,8 +147,8 @@ func TestUpdateUsersWireguardPeerLifecycle(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		from *common.User
-		to   *common.User
+		from *common.Subscription
+		to   *common.Subscription
 		want []string
 	}{
 		{"unchanged peer", wireguardUser("1.alice", keyA, pskA), wireguardUser("1.alice", keyA, pskA), nil},
@@ -160,12 +160,12 @@ func TestUpdateUsersWireguardPeerLifecycle(t *testing.T) {
 			x, service := newWireguardXray(t)
 			ctx := syncContext(t)
 
-			if err := x.UpdateUsers(ctx, []*common.User{tc.from}); err != nil {
+			if err := x.UpdateUsers(ctx, []*common.Subscription{tc.from}); err != nil {
 				t.Fatal(err)
 			}
 			assertOrdered(t, service.takeOrdered(), "wg:add")
 
-			if err := x.UpdateUsers(ctx, []*common.User{tc.to}); err != nil {
+			if err := x.UpdateUsers(ctx, []*common.Subscription{tc.to}); err != nil {
 				t.Fatal(err)
 			}
 			assertOrdered(t, service.takeOrdered(), tc.want...)
@@ -179,7 +179,7 @@ func TestSyncUserTracksTheRotatedWireguardKey(t *testing.T) {
 	keyA, keyB := wireguardKey(0x11), wireguardKey(0x22)
 
 	for _, key := range []string{keyA, keyB, keyB} {
-		if err := x.SyncUser(ctx, wireguardUser("1.alice", key, "")); err != nil {
+		if err := x.SyncSubscription(ctx, wireguardUser("1.alice", key, "")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -192,20 +192,20 @@ func TestSyncUserRetriesWireguardRemovalBeforeReplacement(t *testing.T) {
 	oldUser := wireguardUser("1.alice", wireguardKey(0x11), "")
 	newUser := wireguardUser("1.alice", wireguardKey(0x22), "")
 
-	if err := x.SyncUser(ctx, oldUser); err != nil {
+	if err := x.SyncSubscription(ctx, oldUser); err != nil {
 		t.Fatal(err)
 	}
 	service.takeOrdered()
 	service.rejectNextRemove()
-	if err := x.SyncUser(ctx, newUser); err == nil {
+	if err := x.SyncSubscription(ctx, newUser); err == nil {
 		t.Fatal("expected removal failure")
 	}
 	assertOrdered(t, service.takeOrdered(), "wg:remove")
-	if got := x.config.InboundConfigs[0].clients[oldUser.Email].(*api.WireguardAccount).PublicKey; got != strings.Repeat("11", 32) {
+	if got := x.config.InboundConfigs[0].clients[oldUser.SubscriptionUuid].(*api.WireguardAccount).PublicKey; got != strings.Repeat("11", 32) {
 		t.Fatalf("cached key after failed removal = %s", got)
 	}
 
-	if err := x.SyncUser(ctx, newUser); err != nil {
+	if err := x.SyncSubscription(ctx, newUser); err != nil {
 		t.Fatal(err)
 	}
 	assertOrdered(t, service.takeOrdered(), "wg:remove", "wg:add")
@@ -217,20 +217,20 @@ func TestUpdateUsersRetriesWireguardRemovalBeforeReplacement(t *testing.T) {
 	oldUser := wireguardUser("1.alice", wireguardKey(0x11), "")
 	newUser := wireguardUser("1.alice", wireguardKey(0x22), "")
 
-	if err := x.UpdateUsers(ctx, []*common.User{oldUser}); err != nil {
+	if err := x.UpdateUsers(ctx, []*common.Subscription{oldUser}); err != nil {
 		t.Fatal(err)
 	}
 	service.takeOrdered()
 	service.rejectNextRemove()
-	if err := x.UpdateUsers(ctx, []*common.User{newUser}); err == nil {
+	if err := x.UpdateUsers(ctx, []*common.Subscription{newUser}); err == nil {
 		t.Fatal("expected removal failure")
 	}
 	assertOrdered(t, service.takeOrdered(), "wg:remove")
-	if got := x.config.InboundConfigs[0].clients[oldUser.Email].(*api.WireguardAccount).PublicKey; got != strings.Repeat("11", 32) {
+	if got := x.config.InboundConfigs[0].clients[oldUser.SubscriptionUuid].(*api.WireguardAccount).PublicKey; got != strings.Repeat("11", 32) {
 		t.Fatalf("cached key after failed removal = %s", got)
 	}
 
-	if err := x.UpdateUsers(ctx, []*common.User{newUser}); err != nil {
+	if err := x.UpdateUsers(ctx, []*common.Subscription{newUser}); err != nil {
 		t.Fatal(err)
 	}
 	assertOrdered(t, service.takeOrdered(), "wg:remove", "wg:add")
@@ -239,7 +239,7 @@ func TestUpdateUsersRetriesWireguardRemovalBeforeReplacement(t *testing.T) {
 func TestSyncUserRejectsInvalidWireguardSettingsWithoutRemovingPeer(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		invalid *common.User
+		invalid *common.Subscription
 	}{
 		{"invalid key", wireguardUser("1.alice", "invalid-key", "")},
 		{"malformed peer IP", wireguardUser("1.alice", wireguardKey(0x11), "", "not-a-cidr")},
@@ -248,16 +248,16 @@ func TestSyncUserRejectsInvalidWireguardSettingsWithoutRemovingPeer(t *testing.T
 			x, service := newWireguardXray(t)
 			ctx := syncContext(t)
 			user := wireguardUser("1.alice", wireguardKey(0x11), "")
-			if err := x.SyncUser(ctx, user); err != nil {
+			if err := x.SyncSubscription(ctx, user); err != nil {
 				t.Fatal(err)
 			}
 			service.takeOrdered()
 
-			if err := x.SyncUser(ctx, tc.invalid); err == nil {
+			if err := x.SyncSubscription(ctx, tc.invalid); err == nil {
 				t.Fatal("expected invalid WireGuard account error")
 			}
 			assertOrdered(t, service.takeOrdered())
-			if got := x.config.InboundConfigs[0].clients[user.Email].(*api.WireguardAccount).PublicKey; got != strings.Repeat("11", 32) {
+			if got := x.config.InboundConfigs[0].clients[user.SubscriptionUuid].(*api.WireguardAccount).PublicKey; got != strings.Repeat("11", 32) {
 				t.Fatalf("cached key after invalid update = %s", got)
 			}
 		})
@@ -269,17 +269,17 @@ func TestSyncUserRemovesWireguardPeerWithValidIPOutsideInbound(t *testing.T) {
 	x.config.InboundConfigs[0].Settings["address"] = []any{"10.0.0.1/24"}
 	ctx := syncContext(t)
 	user := wireguardUser("1.alice", wireguardKey(0x11), "", "10.0.0.2/32")
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	service.takeOrdered()
 
-	outside := wireguardUser(user.Email, wireguardKey(0x11), "", "10.1.0.2/32")
-	if err := x.SyncUser(ctx, outside); err != nil {
+	outside := wireguardUser(user.SubscriptionUuid, wireguardKey(0x11), "", "10.1.0.2/32")
+	if err := x.SyncSubscription(ctx, outside); err != nil {
 		t.Fatal(err)
 	}
 	assertOrdered(t, service.takeOrdered(), "wg:remove")
-	if _, ok := x.config.InboundConfigs[0].clients[user.Email]; ok {
+	if _, ok := x.config.InboundConfigs[0].clients[user.SubscriptionUuid]; ok {
 		t.Fatal("peer remained cached after leaving the inbound subnet")
 	}
 }
@@ -301,10 +301,10 @@ func newMixedWireguardXray(t *testing.T) (*Xray, *recordingInboundService) {
 	return x, service
 }
 
-func mixedUser(email string, wireguard *common.Wireguard, inbounds ...string) *common.User {
-	return &common.User{
-		Email:    email,
-		Inbounds: inbounds,
+func mixedUser(email string, wireguard *common.Wireguard, inbounds ...string) *common.Subscription {
+	return &common.Subscription{
+		SubscriptionUuid: email,
+		Inbounds:         inbounds,
 		Proxies: &common.Proxy{
 			Vless:     &common.Vless{Id: "0b6f2a4e-6a54-4a51-9a3a-6f1e2b1f7c11"},
 			Wireguard: wireguard,
@@ -359,7 +359,7 @@ func TestSyncUserAppliesAUserWithAnEmptyWireguardMessage(t *testing.T) {
 	x, service := newMixedWireguardXray(t)
 	ctx := syncContext(t)
 
-	if err := x.SyncUser(ctx, mixedUser("1.alice", &common.Wireguard{}, "vless", "wg")); err != nil {
+	if err := x.SyncSubscription(ctx, mixedUser("1.alice", &common.Wireguard{}, "vless", "wg")); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations("vless:remove", "vless:add", "wg:remove"))
@@ -376,14 +376,14 @@ func TestSyncUserRemovesAUserWithAnEmptyWireguardMessage(t *testing.T) {
 	ctx := syncContext(t)
 	valid := &common.Wireguard{PublicKey: wireguardKey(0x11), PeerIps: []string{"10.0.0.2/32"}}
 
-	if err := x.SyncUser(ctx, mixedUser("1.alice", valid, "vless", "wg")); err != nil {
+	if err := x.SyncSubscription(ctx, mixedUser("1.alice", valid, "vless", "wg")); err != nil {
 		t.Fatal(err)
 	}
 	service.take()
 
 	// A disabled or deleted user arrives with no inbounds and, from panels
 	// that dropped its keys, an empty WireGuard message.
-	if err := x.SyncUser(ctx, mixedUser("1.alice", &common.Wireguard{})); err != nil {
+	if err := x.SyncSubscription(ctx, mixedUser("1.alice", &common.Wireguard{})); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations("vless:remove", "wg:remove"))
@@ -399,7 +399,7 @@ func TestSyncUserKeepsTheWireguardPeerOfAUserWithValidKeys(t *testing.T) {
 	ctx := syncContext(t)
 	valid := &common.Wireguard{PublicKey: wireguardKey(0x11), PeerIps: []string{"10.0.0.2/32"}}
 
-	if err := x.SyncUser(ctx, mixedUser("1.alice", valid, "vless", "wg")); err != nil {
+	if err := x.SyncSubscription(ctx, mixedUser("1.alice", valid, "vless", "wg")); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations("vless:remove", "vless:add", "wg:add"))
@@ -414,13 +414,13 @@ func TestSyncUserAppliesOtherInboundsWhenWireguardSettingsAreInvalid(t *testing.
 	ctx := syncContext(t)
 	valid := &common.Wireguard{PublicKey: wireguardKey(0x11), PeerIps: []string{"10.0.0.2/32"}}
 
-	if err := x.SyncUser(ctx, mixedUser("1.alice", valid, "wg")); err != nil {
+	if err := x.SyncSubscription(ctx, mixedUser("1.alice", valid, "wg")); err != nil {
 		t.Fatal(err)
 	}
 	service.take()
 
 	invalid := &common.Wireguard{PublicKey: "invalid-key", PeerIps: []string{"10.0.0.2/32"}}
-	if err := x.SyncUser(ctx, mixedUser("1.alice", invalid, "vless", "wg")); err == nil {
+	if err := x.SyncSubscription(ctx, mixedUser("1.alice", invalid, "vless", "wg")); err == nil {
 		t.Fatal("expected invalid WireGuard account error")
 	}
 	assertOperations(t, service.take(), operations("vless:remove", "vless:add"))
@@ -430,7 +430,7 @@ func TestSyncUserAppliesOtherInboundsWhenWireguardSettingsAreInvalid(t *testing.
 	}
 
 	// Leaving every inbound removes the user, even with invalid WireGuard settings.
-	if err := x.SyncUser(ctx, mixedUser("1.alice", invalid)); err != nil {
+	if err := x.SyncSubscription(ctx, mixedUser("1.alice", invalid)); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations("vless:remove", "wg:remove"))

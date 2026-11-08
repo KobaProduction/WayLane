@@ -49,7 +49,7 @@ type namespaceFixture struct {
 	hostTransitIP string
 }
 
-func createTestWireGuardWithUsers(t *testing.T, configJSON string, users []*common.User) *WireGuard {
+func createTestWireGuardWithUsers(t *testing.T, configJSON string, users []*common.Subscription) *WireGuard {
 	t.Helper()
 
 	wgConfig, err := NewConfig(configJSON)
@@ -73,7 +73,7 @@ func createTestWireGuardWithUsers(t *testing.T, configJSON string, users []*comm
 
 func createTestWireGuard(t *testing.T, configJSON string) *WireGuard {
 	t.Helper()
-	return createTestWireGuardWithUsers(t, configJSON, []*common.User{})
+	return createTestWireGuardWithUsers(t, configJSON, []*common.Subscription{})
 }
 
 func mustHaveCommands(t *testing.T, names ...string) {
@@ -230,19 +230,19 @@ func mustGeneratePrivateKey(t *testing.T) string {
 	return privateKey
 }
 
-func buildWGUser(email, publicKey, peerIP, iface string, includeInterface bool) *common.User {
+func buildWGUser(email, publicKey, peerIP, iface string, includeInterface bool) *common.Subscription {
 	return buildWGUserWithPeerIPs(email, publicKey, []string{peerIP}, iface, includeInterface)
 }
 
-func buildWGUserWithPeerIPs(email, publicKey string, peerIPs []string, iface string, includeInterface bool) *common.User {
+func buildWGUserWithPeerIPs(email, publicKey string, peerIPs []string, iface string, includeInterface bool) *common.Subscription {
 	inbounds := []string{}
 	if includeInterface {
 		inbounds = []string{iface}
 	}
 
-	return &common.User{
-		Email:    email,
-		Inbounds: inbounds,
+	return &common.Subscription{
+		SubscriptionUuid: email,
+		Inbounds:         inbounds,
 		Proxies: &common.Proxy{
 			Wireguard: &common.Wireguard{
 				PublicKey: publicKey,
@@ -424,7 +424,7 @@ func userTrafficTotal(t *testing.T, wg *WireGuard, email string) int64 {
 	t.Helper()
 	response, err := wg.GetStats(context.Background(), &common.StatRequest{
 		Name:   email,
-		Type:   common.StatType_UserStat,
+		Type:   common.StatType_SubscriptionStat,
 		Reset_: false,
 	})
 	if err != nil {
@@ -440,7 +440,7 @@ func userTrafficTotal(t *testing.T, wg *WireGuard, email string) int64 {
 
 func userOnline(t *testing.T, wg *WireGuard, email string) int64 {
 	t.Helper()
-	online, err := wg.GetUserOnlineStats(context.Background(), email)
+	online, err := wg.GetSubscriptionOnlineStats(context.Background(), email)
 	if err != nil {
 		t.Fatalf("failed to get online stats for %s: %v", email, err)
 	}
@@ -509,7 +509,7 @@ func TestIntegrationE2EStartupUsers(t *testing.T) {
 		`{"interface_name":"%s","listen_port":%d,"private_key":"%s","address":["%s","%s"],"tag":"test-node"}`,
 		iface, wgPort, serverPrivateKey, configCIDRv4, configCIDRv6,
 	)
-	startupUsers := []*common.User{
+	startupUsers := []*common.Subscription{
 		buildWGUserWithPeerIPs(allowedUser, allowedPub, []string{allowedPeerIPv4, allowedPeerIPv6}, iface, true),
 		buildWGUser(deniedUser, deniedPub, "10.210.1.3/32", iface, false),
 	}
@@ -585,11 +585,11 @@ func TestIntegrationE2ESyncUser(t *testing.T) {
 	wg := createTestWireGuard(t, configJSON)
 	defer wg.Shutdown()
 
-	if err := wg.SyncUser(context.Background(), buildWGUser(allowedUser, allowedPub, "10.210.2.2/32", iface, true)); err != nil {
-		t.Fatalf("failed SyncUser for allowed user: %v", err)
+	if err := wg.SyncSubscription(context.Background(), buildWGUser(allowedUser, allowedPub, "10.210.2.2/32", iface, true)); err != nil {
+		t.Fatalf("failed SyncSubscription for allowed user: %v", err)
 	}
-	if err := wg.SyncUser(context.Background(), buildWGUser(deniedUser, deniedPub, "10.210.2.3/32", iface, false)); err != nil {
-		t.Fatalf("failed SyncUser for denied user: %v", err)
+	if err := wg.SyncSubscription(context.Background(), buildWGUser(deniedUser, deniedPub, "10.210.2.3/32", iface, false)); err != nil {
+		t.Fatalf("failed SyncSubscription for denied user: %v", err)
 	}
 
 	url, serverWGIP := startWGHTTPServer(t, wg)
@@ -633,12 +633,12 @@ func TestIntegrationE2ESyncUsers(t *testing.T) {
 	wg := createTestWireGuard(t, configJSON)
 	defer wg.Shutdown()
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		buildWGUser(allowedUser, allowedPub, "10.210.3.2/32", iface, true),
 		buildWGUser(deniedUser, deniedPub, "10.210.3.3/32", iface, false),
 	}
-	if err := wg.SyncUsers(context.Background(), users); err != nil {
-		t.Fatalf("failed SyncUsers: %v", err)
+	if err := wg.SyncSubscriptions(context.Background(), users); err != nil {
+		t.Fatalf("failed SyncSubscriptions: %v", err)
 	}
 
 	url, serverWGIP := startWGHTTPServer(t, wg)
@@ -682,17 +682,17 @@ func TestIntegrationE2EUpdateUsers(t *testing.T) {
 	wg := createTestWireGuard(t, configJSON)
 	defer wg.Shutdown()
 
-	seedUsers := []*common.User{
+	seedUsers := []*common.Subscription{
 		buildWGUser(allowedUser, allowedPub, "10.210.4.2/32", iface, true),
 		buildWGUser(deniedUser, deniedPub, "10.210.4.3/32", iface, true),
 	}
-	if err := wg.SyncUsers(context.Background(), seedUsers); err != nil {
-		t.Fatalf("failed initial SyncUsers seed: %v", err)
+	if err := wg.SyncSubscriptions(context.Background(), seedUsers); err != nil {
+		t.Fatalf("failed initial SyncSubscriptions seed: %v", err)
 	}
 
 	deniedOldIP := mustUserPeerIP(t, wg, deniedUser)
 
-	updateUsers := []*common.User{
+	updateUsers := []*common.Subscription{
 		buildWGUser(allowedUser, allowedPub, "10.210.4.2/32", iface, true),
 		buildWGUser(deniedUser, deniedPub, "10.210.4.3/32", iface, false),
 	}

@@ -13,15 +13,15 @@ from .node import (
     get_node_usage_query,
 )
 from .subscription import get_subscription_headers, get_subscription_usage_query
-from .user import (
-    get_expired_users_query,
-    get_user_list_query,
-    get_user_simple_list_query,
-    get_user_usage_query,
-    get_users_usage_breakdown_query,
-    get_users_usage_query,
+from .subscription_queries import (
+    get_expired_subscriptions_query,
+    get_subscription_list_query,
+    get_subscription_simple_list_query,
+    get_subscription_traffic_usage_query,
+    get_subscriptions_usage_breakdown_query,
+    get_subscriptions_usage_query,
 )
-from .user_template import get_user_template_list_query, get_user_template_simple_list_query
+from .subscription_template import get_subscription_template_list_query, get_subscription_template_simple_list_query
 
 __all__ = [
     # admin
@@ -39,7 +39,7 @@ __all__ = [
     "get_core_list_query",
     "get_core_simple_list_query",
     # user
-    "get_expired_users_query",
+    "get_expired_subscriptions_query",
     # group
     "get_group_list_query",
     "get_group_simple_list_query",
@@ -54,12 +54,12 @@ __all__ = [
     # subscription
     "get_subscription_headers",
     "get_subscription_usage_query",
-    "get_user_list_query",
-    "get_user_simple_list_query",
+    "get_subscription_list_query",
+    "get_subscription_simple_list_query",
     # user_template
-    "get_user_template_list_query",
-    "get_user_template_simple_list_query",
-    "get_user_usage_query",
-    "get_users_usage_breakdown_query",
-    "get_users_usage_query",
+    "get_subscription_template_list_query",
+    "get_subscription_template_simple_list_query",
+    "get_subscription_traffic_usage_query",
+    "get_subscriptions_usage_breakdown_query",
+    "get_subscriptions_usage_query",
 ]

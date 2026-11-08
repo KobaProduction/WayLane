@@ -122,8 +122,8 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Failed to read config file: %v", err)
 	}
 
-	user1 := &common.User{
-		Email: "test_user1@example.com",
+	user1 := &common.Subscription{
+		SubscriptionUuid: "test_user1@example.com",
 		Inbounds: []string{
 			"VMESS TCP NOTLS",
 			"VLESS TCP REALITY",
@@ -148,8 +148,8 @@ func TestMain(m *testing.M) {
 		},
 	}
 
-	user2 := &common.User{
-		Email: "test_user2@example.com",
+	user2 := &common.Subscription{
+		SubscriptionUuid: "test_user2@example.com",
 		Inbounds: []string{
 			"VMESS TCP NOTLS",
 			"VLESS TCP REALITY",
@@ -175,9 +175,9 @@ func TestMain(m *testing.M) {
 	}
 
 	backendStartReq := &common.Backend{
-		Type:   common.BackendType_XRAY,
-		Config: string(configFile),
-		Users:  []*common.User{user1, user2},
+		Type:          common.BackendType_XRAY,
+		Config:        string(configFile),
+		Subscriptions: []*common.Subscription{user1, user2},
 	}
 
 	var baseInfoResp common.BaseInfoResponse
@@ -236,7 +236,7 @@ func TestREST_GetInboundsStats(t *testing.T) {
 
 func TestREST_GetUsersStats(t *testing.T) {
 	var stats common.StatResponse
-	if err := sharedTestCtx.createAuthenticatedRequest("GET", "/stats", &common.StatRequest{Reset_: true, Type: common.StatType_UsersStat}, &stats); err != nil {
+	if err := sharedTestCtx.createAuthenticatedRequest("GET", "/stats", &common.StatRequest{Reset_: true, Type: common.StatType_SubscriptionsStat}, &stats); err != nil {
 		t.Fatalf("Failed to get users stats: %v", err)
 	}
 
@@ -255,8 +255,8 @@ func TestREST_GetBackendStats(t *testing.T) {
 }
 
 func TestREST_SyncUser(t *testing.T) {
-	user := &common.User{
-		Email: "test_user1@example.com",
+	user := &common.Subscription{
+		SubscriptionUuid: "test_user1@example.com",
 		Inbounds: []string{
 			"VMESS TCP NOTLS",
 			"VLESS TCP REALITY",
@@ -268,17 +268,17 @@ func TestREST_SyncUser(t *testing.T) {
 		},
 	}
 
-	if err := sharedTestCtx.createAuthenticatedRequest("PUT", "/user/sync", user, &common.Empty{}); err != nil {
+	if err := sharedTestCtx.createAuthenticatedRequest("PUT", "/subscription/sync", user, &common.Empty{}); err != nil {
 		t.Fatalf("Sync user request failed: %v", err)
 	}
 }
 
 func TestREST_SyncUsersChunked(t *testing.T) {
-	firstChunk := &common.UsersChunk{
+	firstChunk := &common.SubscriptionsChunk{
 		Index: 0,
-		Users: []*common.User{
+		Subscriptions: []*common.Subscription{
 			{
-				Email: "chunk_rest_user1@example.com",
+				SubscriptionUuid: "chunk_rest_user1@example.com",
 				Inbounds: []string{
 					"VMESS TCP NOTLS",
 					"TROJAN TCP NOTLS",
@@ -295,11 +295,11 @@ func TestREST_SyncUsersChunked(t *testing.T) {
 		},
 	}
 
-	secondChunk := &common.UsersChunk{
+	secondChunk := &common.SubscriptionsChunk{
 		Index: 1,
-		Users: []*common.User{
+		Subscriptions: []*common.Subscription{
 			{
-				Email: "chunk_rest_user2@example.com",
+				SubscriptionUuid: "chunk_rest_user2@example.com",
 				Inbounds: []string{
 					"Shadowsocks TCP",
 					"Shadowsocks UDP",
@@ -316,7 +316,7 @@ func TestREST_SyncUsersChunked(t *testing.T) {
 	}
 
 	var body bytes.Buffer
-	appendChunk := func(chunk *common.UsersChunk) {
+	appendChunk := func(chunk *common.SubscriptionsChunk) {
 		data, err := proto.Marshal(chunk)
 		if err != nil {
 			t.Fatalf("failed to marshal chunk: %v", err)
@@ -331,7 +331,7 @@ func TestREST_SyncUsersChunked(t *testing.T) {
 	appendChunk(firstChunk)
 	appendChunk(secondChunk)
 
-	req, err := http.NewRequest("PUT", sharedTestCtx.url+"/users/sync/chunked", bytes.NewReader(body.Bytes()))
+	req, err := http.NewRequest("PUT", sharedTestCtx.url+"/subscriptions/sync/chunked", bytes.NewReader(body.Bytes()))
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestREST_Routing(t *testing.T) {
 }
 
 func TestREST_StopBackend(t *testing.T) {
-	user := &common.User{}
+	user := &common.Subscription{}
 	if err := sharedTestCtx.createAuthenticatedRequest("PUT", "/stop", user, &common.Empty{}); err != nil {
 		t.Fatalf("Stop backend request failed: %v", err)
 	}

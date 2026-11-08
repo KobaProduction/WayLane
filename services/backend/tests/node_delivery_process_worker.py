@@ -15,21 +15,21 @@ from uuid import uuid4
 import certifi
 import nats
 from grpclib.client import Channel
+
 from waylane_node_bridge.common import service_grpc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from waylane_node_bridge.common.service_pb2 import User
-
 from app.node.bridge import QueuedGrpcNode, register_refresh_handler
-from app.node.nats_memory import NatsUserSyncStore
+from app.node.nats_memory import NatsSubscriptionSyncStore
+from waylane_node_bridge.common.service_pb2 import Subscription
 
 
 async def main():
     url, bucket, node_id, port, worker_id, mode, seconds = sys.argv[1:]
     nc = await nats.connect(url)
     kv = await nc.jetstream().key_value(bucket)
-    store = NatsUserSyncStore(kv)
+    store = NatsSubscriptionSyncStore(kv)
     register_refresh_handler(lambda _node, emails: current_state(kv, node_id, emails))
     node = QueuedGrpcNode(
         address="127.0.0.1",
@@ -73,7 +73,7 @@ async def current_state(kv, node_id, emails):
     """
     entry = await kv.get(f"testdb.{node_id}.state")
     database = json.loads(entry.value)
-    return [User(email=email, inbounds=database.get(email, [])) for email in emails]
+    return [Subscription(subscription_uuid=email, inbounds=database.get(email, [])) for email in emails]
 
 
 if __name__ == "__main__":

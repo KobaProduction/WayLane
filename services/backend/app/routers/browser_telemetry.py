@@ -3,6 +3,7 @@
 No raw URLs, stack traces, free-form text, tokens, cookies or IP metadata.
 The browser sends only fixed event-kind and coarse page group values.
 """
+
 import logging
 import threading
 import time
@@ -11,10 +12,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.routing import APIRoute
-from starlette.requests import Request
 from pydantic import BaseModel, ConfigDict
+from starlette.requests import Request
 
 from app.models.admin import AdminDetails
+
 from .authentication import get_current
 
 # Anonymous attempts have no authenticated identity. Emit only one fixed
@@ -50,7 +52,8 @@ class AuthenticatedTelemetryRoute(APIRoute):
 
 
 router = APIRouter(
-    prefix="/api/telemetry", tags=["Runtime telemetry"],
+    prefix="/api/telemetry",
+    tags=["Runtime telemetry"],
     route_class=AuthenticatedTelemetryRoute,
 )
 _events: OrderedDict[int, tuple[float, int]] = OrderedDict()

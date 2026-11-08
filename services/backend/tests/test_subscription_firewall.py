@@ -5,10 +5,10 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from urllib.parse import unquote
+
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -16,8 +16,8 @@ from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
-from app.db.crud.hwid import delete_user_hwid, register_user_hwid, reset_user_hwids
-from app.db.models import User
+from app.db.crud.hwid import delete_subscription_hwid, register_subscription_hwid, reset_subscription_hwids
+from app.db.models import Subscription
 from app.db.subscription_firewall import subscription_device_events, subscription_firewall_config
 from app.routers.subscription_firewall import FirewallEditor, MessageTemplate
 from app.subscription import device_webhook
@@ -48,7 +48,9 @@ def test_template_validation_and_url_protection(monkeypatch):
         MessageTemplate(title="ok", lines=[""])
     assert FirewallEditor(enabled=True, scenarios=SCENARIOS, webhook_url="https://example.com/hook")
     monkeypatch.setenv("WAYLANE_WEBHOOK_ALLOWED_INTERNAL_HOSTS", "172.18.0.1")
-    assert FirewallEditor(enabled=True, scenarios=SCENARIOS, device_check_url="http://172.18.0.1:8090/webhook/check_device")
+    assert FirewallEditor(
+        enabled=True, scenarios=SCENARIOS, device_check_url="http://172.18.0.1:8090/webhook/check_device"
+    )
 
 
 @pytest.mark.asyncio
@@ -60,18 +62,36 @@ async def test_fallback_only_when_enabled_and_hwid_present(tmp_path):
     try:
         async with factory() as db:
             error = HTTPException(403, "Device limit reached")
-            assert await response_for_failure(db, error, client_accept="text/plain", hwid="one", user_agent="Happ/1.0") is None
-            await db.execute(insert(subscription_firewall_config).values(
-                id=1, enabled=True, scenarios={"device_limit": {
-                    "title": "Device cap", "lines": ["Too many devices"]
-                }}, webhook_enabled=False))
+            assert (
+                await response_for_failure(db, error, client_accept="text/plain", hwid="one", user_agent="Happ/1.0")
+                is None
+            )
+            await db.execute(
+                insert(subscription_firewall_config).values(
+                    id=1,
+                    enabled=True,
+                    scenarios={"device_limit": {"title": "Device cap", "lines": ["Too many devices"]}},
+                    webhook_enabled=False,
+                )
+            )
             await db.commit()
-            assert await response_for_failure(db, error, client_accept="text/html", hwid="one", user_agent="Happ/1.0") is None
-            assert await response_for_failure(db, error, client_accept="text/plain", hwid=None, user_agent="Happ/1.0") is None
-            assert await response_for_failure(
-                db, error, client_accept="application/json", hwid="one", user_agent="Clash/1.0"
-            ) is None
-            response = await response_for_failure(db, error, client_accept="text/plain", hwid="one", user_agent="Happ/1.0")
+            assert (
+                await response_for_failure(db, error, client_accept="text/html", hwid="one", user_agent="Happ/1.0")
+                is None
+            )
+            assert (
+                await response_for_failure(db, error, client_accept="text/plain", hwid=None, user_agent="Happ/1.0")
+                is None
+            )
+            assert (
+                await response_for_failure(
+                    db, error, client_accept="application/json", hwid="one", user_agent="Clash/1.0"
+                )
+                is None
+            )
+            response = await response_for_failure(
+                db, error, client_accept="text/plain", hwid="one", user_agent="Happ/1.0"
+            )
             assert response.status_code == 200
             assert "Too%20many%20devices" in base64.b64decode(response.body).decode()
     finally:
@@ -88,25 +108,34 @@ async def test_device_mutations_emit_exactly_once_and_retain_retriable_events(tm
     monkeypatch.setattr(device_webhook, "dispatch_after_commit", triggered.append)
     try:
         async with factory() as db:
-            await db.execute(insert(subscription_firewall_config).values(
-                id=1, enabled=False, scenarios=SCENARIOS, webhook_enabled=True,
-                webhook_url="https://example.invalid/webhook",
-            ))
-            db.add(User(username="device-user"))
+            await db.execute(
+                insert(subscription_firewall_config).values(
+                    id=1,
+                    enabled=False,
+                    scenarios=SCENARIOS,
+                    webhook_enabled=True,
+                    webhook_url="https://example.invalid/webhook",
+                )
+            )
+            subscription_uuid = uuid4()
+            db.add(Subscription(uuid=subscription_uuid))
             await db.commit()
-            user_id = (await db.scalars(select(User.id).where(User.username == "device-user"))).one()
-            assert await register_user_hwid(db, user_id, "device-001", "Linux", "1", "Laptop")
-            assert await register_user_hwid(db, user_id, "device-001", "Linux", "1", "Laptop")
-            assert await register_user_hwid(db, user_id, "device-001", "Linux", "2", "Laptop")
-            assert await register_user_hwid(db, user_id, "device-002", "Linux", "1", "Tablet")
-            assert await delete_user_hwid(db, user_id, "device-001")
-            assert not await delete_user_hwid(db, user_id, "device-001")
-            assert await reset_user_hwids(db, user_id) == 1
-            assert await reset_user_hwids(db, user_id) == 0
-            rows = (await db.execute(
-                select(subscription_device_events.c.event_type, subscription_device_events.c.status)
-                .order_by(subscription_device_events.c.created_at, subscription_device_events.c.id)
-            )).all()
+            subscription_uuid = (await db.scalars(select(Subscription.uuid).where(Subscription.uuid == subscription_uuid))).one()
+            assert await register_subscription_hwid(db, subscription_uuid, "device-001", "Linux", "1", "Laptop")
+            assert await register_subscription_hwid(db, subscription_uuid, "device-001", "Linux", "1", "Laptop")
+            assert await register_subscription_hwid(db, subscription_uuid, "device-001", "Linux", "2", "Laptop")
+            assert await register_subscription_hwid(db, subscription_uuid, "device-002", "Linux", "1", "Tablet")
+            assert await delete_subscription_hwid(db, subscription_uuid, "device-001")
+            assert not await delete_subscription_hwid(db, subscription_uuid, "device-001")
+            assert await reset_subscription_hwids(db, subscription_uuid) == 1
+            assert await reset_subscription_hwids(db, subscription_uuid) == 0
+            rows = (
+                await db.execute(
+                    select(subscription_device_events.c.event_type, subscription_device_events.c.status).order_by(
+                        subscription_device_events.c.created_at, subscription_device_events.c.id
+                    )
+                )
+            ).all()
             events = sorted(x[0] for x in rows)
             assert events == ["device.added", "device.added", "device.removed", "device.reset", "device.updated"]
             assert len(triggered) == 5
@@ -137,9 +166,12 @@ async def test_signed_webhook_really_delivers_and_retries_to_local_receiver(tmp_
                 fields[name.lower()] = value
         length = int(fields["content-length"])
         body = await reader.readexactly(length)
-        expected = "sha256=" + hmac.new(
-            secret.encode(), fields["x-waylane-timestamp"].encode() + b"." + body, hashlib.sha256
-        ).hexdigest()
+        expected = (
+            "sha256="
+            + hmac.new(
+                secret.encode(), fields["x-waylane-timestamp"].encode() + b"." + body, hashlib.sha256
+            ).hexdigest()
+        )
         assert hmac.compare_digest(fields["x-waylane-signature"], expected)
         payload = json.loads(body)
         assert fields["x-waylane-event-id"] == payload["id"]
@@ -164,16 +196,22 @@ async def test_signed_webhook_really_delivers_and_retries_to_local_receiver(tmp_
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
         async with factory() as db:
-            await db.execute(insert(subscription_firewall_config).values(
-                id=1, enabled=True, scenarios=SCENARIOS,
-                webhook_url="http://127.0.0.1:" + str(port) + "/webhook",
-                webhook_enabled=True))
-            db.add(User(username="webhook-retry-test-user"))
+            await db.execute(
+                insert(subscription_firewall_config).values(
+                    id=1,
+                    enabled=True,
+                    scenarios=SCENARIOS,
+                    webhook_url="http://127.0.0.1:" + str(port) + "/webhook",
+                    webhook_enabled=True,
+                )
+            )
+            subscription_uuid = uuid4()
+            db.add(Subscription(uuid=subscription_uuid))
             await db.flush()
-            user_id = await db.scalar(select(User.id).where(User.username == "webhook-retry-test-user"))
-            assert user_id is not None
+            subscription_uuid = await db.scalar(select(Subscription.uuid).where(Subscription.uuid == subscription_uuid))
+            assert subscription_uuid is not None
             event_id = await device_webhook.enqueue_device_event(
-                db, "device.added", user_id, "device-003", {"device_os": "Android"}
+                db, "device.added", subscription_uuid, "device-003", {"device_os": "Android"}
             )
             await db.commit()
         assert not await device_webhook.deliver_device_event(event_id)
@@ -206,14 +244,19 @@ async def test_legacy_device_check_webhook_blocks_denied_but_handles_bot_error(t
 
     async def receiver(reader, writer):
         headers = (await reader.readuntil(b"\r\n\r\n")).decode()
-        length = next(int(line.split(":", 1)[1]) for line in headers.split("\r\n")
-                      if line.lower().startswith("content-length:"))
+        length = next(
+            int(line.split(":", 1)[1]) for line in headers.split("\r\n") if line.lower().startswith("content-length:")
+        )
         payload = json.loads(await reader.readexactly(length))
         received.append(payload)
         status = statuses.pop(0)
         body = json.dumps({"status": status}).encode()
-        writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
-                     + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+        writer.write(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+            + str(len(body)).encode()
+            + b"\r\nConnection: close\r\n\r\n"
+            + body
+        )
         await writer.drain()
         writer.close()
         await writer.wait_closed()
@@ -224,15 +267,24 @@ async def test_legacy_device_check_webhook_blocks_denied_but_handles_bot_error(t
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with factory() as db:
-            await db.execute(insert(subscription_firewall_config).values(
-                id=1, enabled=True, scenarios=SCENARIOS,
-                device_check_url="http://127.0.0.1:" + str(port) + "/webhook/check_device"))
-            await db.commit()
-            request = dict(
-                token="fake-test-token", ip="127.0.0.1", hwid="device-01",
-                user_agent="Happ/2.0", device_os="Android",
-                os_version="15", device_model="Test phone",
+            await db.execute(
+                insert(subscription_firewall_config).values(
+                    id=1,
+                    enabled=True,
+                    scenarios=SCENARIOS,
+                    device_check_url="http://127.0.0.1:" + str(port) + "/webhook/check_device",
+                )
             )
+            await db.commit()
+            request = {
+                "token": "fake-test-token",
+                "ip": "127.0.0.1",
+                "hwid": "device-01",
+                "user_agent": "Happ/2.0",
+                "device_os": "Android",
+                "os_version": "15",
+                "device_model": "Test phone",
+            }
             with pytest.raises(HTTPException) as denied:
                 await device_webhook.check_legacy_device_access(db, **request)
             assert denied.value.status_code == 403
@@ -253,8 +305,11 @@ async def test_legacy_device_check_webhook_blocks_denied_but_handles_bot_error(t
 @pytest.mark.asyncio
 async def test_admin_designer_persists_edits_and_previews_encoded_payload(tmp_path):
     from app.routers.subscription_firewall import (
-        get_firewall_editor, preview_message, save_firewall_editor,
+        get_firewall_editor,
+        preview_message,
+        save_firewall_editor,
     )
+
     engine = create_async_engine("sqlite+aiosqlite:///" + str(tmp_path / "designer.db"))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -262,7 +317,8 @@ async def test_admin_designer_persists_edits_and_previews_encoded_payload(tmp_pa
     try:
         async with factory() as db:
             config = FirewallEditor(
-                enabled=True, scenarios={
+                enabled=True,
+                scenarios={
                     **SCENARIOS,
                     "device_limit": {
                         "title": "Слишком много устройств",
@@ -275,9 +331,7 @@ async def test_admin_designer_persists_edits_and_previews_encoded_payload(tmp_pa
             assert result.enabled
             stored = await get_firewall_editor(db, None)
             assert stored.scenarios["device_limit"].title == "Слишком много устройств"
-            preview = await preview_message(
-                "device_limit", stored.scenarios["device_limit"], None
-            )
+            preview = await preview_message("device_limit", stored.scenarios["device_limit"], None)
             uri = base64.b64decode(preview["base64_payload"]).decode("utf-8")
             assert uri.startswith("ss://")
             assert unquote(uri.split("#", 1)[1]) == "Удалите неиспользуемое устройство"
@@ -315,14 +369,23 @@ async def test_concurrent_dispatchers_claim_only_one_webhook(tmp_path, monkeypat
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with factory() as db:
-            await db.execute(insert(subscription_firewall_config).values(
-                id=1, enabled=False, scenarios=SCENARIOS, webhook_enabled=True,
-                webhook_url="http://127.0.0.1:" + str(port) + "/event"))
-            db.add(User(username="concurrent-webhook-test-user"))
+            await db.execute(
+                insert(subscription_firewall_config).values(
+                    id=1,
+                    enabled=False,
+                    scenarios=SCENARIOS,
+                    webhook_enabled=True,
+                    webhook_url="http://127.0.0.1:" + str(port) + "/event",
+                )
+            )
+            subscription_uuid = uuid4()
+            db.add(Subscription(uuid=subscription_uuid))
             await db.flush()
-            user_id = await db.scalar(select(User.id).where(User.username == "concurrent-webhook-test-user"))
-            assert user_id is not None
-            event_id = await device_webhook.enqueue_device_event(db, "device.removed", user_id, "removed-hwid")
+            subscription_uuid = await db.scalar(
+                select(Subscription.uuid).where(Subscription.uuid == subscription_uuid)
+            )
+            assert subscription_uuid is not None
+            event_id = await device_webhook.enqueue_device_event(db, "device.removed", subscription_uuid, "removed-hwid")
             await db.commit()
         result = await asyncio.gather(
             device_webhook.deliver_device_event(event_id),

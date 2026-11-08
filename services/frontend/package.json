@@ -48,7 +48,6 @@
     "@stablelib/x25519": "^2.0.1",
     "@tanstack/react-query": "5.96.2",
     "@tanstack/react-table": "^8.21.3",
-    "@telegram-apps/sdk": "^3.11.8",
     "@vitejs/plugin-react": "^6.0.5",
     "@waylane/core-kit": "workspace:*",
     "@waylane/wireguard-config-kit": "workspace:*",

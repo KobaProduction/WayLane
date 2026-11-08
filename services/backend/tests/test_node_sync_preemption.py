@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.db.models import Node, NodeStatus
-from app.node import NodeManager, UserSyncPreemptedError
+from app.node import NodeManager, SubscriptionSyncPreemptedError
 from app.operation import OperatorType, node as node_operation_module
 from app.operation.node import NodeOperation
 
@@ -147,7 +147,7 @@ async def test_unchanged_reconnect_keeps_sync_but_connection_change_cancels_it(m
 
     if kind == "full":
         # Only the sync is cancelled; its caller gets a clear error instead.
-        with pytest.raises(UserSyncPreemptedError):
+        with pytest.raises(SubscriptionSyncPreemptedError):
             await asyncio.wait_for(sync, TIMEOUT)
         assert node.full_syncs == []
     else:
@@ -212,7 +212,7 @@ async def test_remove_node_preempts_full_sync_without_cancelling_caller(manager:
 
     await asyncio.wait_for(manager.remove_node(1, remote_stop=False), TIMEOUT)
 
-    with pytest.raises(UserSyncPreemptedError):
+    with pytest.raises(SubscriptionSyncPreemptedError):
         await asyncio.wait_for(sync, TIMEOUT)
     assert node.full_syncs == []
     assert manager._user_sync_tasks == {}
@@ -246,7 +246,7 @@ async def test_sync_node_users_maps_preemption_to_conflict(monkeypatch: pytest.M
     monkeypatch.setattr(
         node_operation_module.node_manager,
         "sync_full",
-        AsyncMock(side_effect=UserSyncPreemptedError("preempted")),
+        AsyncMock(side_effect=SubscriptionSyncPreemptedError("preempted")),
     )
     update_status = AsyncMock()
     monkeypatch.setattr(node_operation_module, "update_node_status", update_status)

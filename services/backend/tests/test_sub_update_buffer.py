@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, event, func, select
@@ -11,8 +12,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.db import base
-from app.db.crud.user import get_users_sub_update_list, user_sub_update
-from app.db.models import User, UserSubscriptionUpdate
+from app.db.crud.subscription import get_subscriptions_sub_update_list, subscription_update
+from app.db.models import Subscription, SubscriptionUpdate
 from app.subscription import sub_update_buffer
 
 
@@ -53,10 +54,10 @@ async def buffer_db(monkeypatch: pytest.MonkeyPatch):
     await sub_update_buffer.reset_user_sub_update_buffer()
 
     async with factory() as session:
-        session.add(User(username="buffered"))
+        subscription_uuid = uuid4()
+        session.add(Subscription(uuid=subscription_uuid))
         await session.commit()
-        user_id = (await session.execute(select(User.id).where(User.username == "buffered"))).scalar_one()
-        yield session, user_id
+        yield session, subscription_uuid
 
     await sub_update_buffer.reset_user_sub_update_buffer()
     await engine.dispose()
@@ -64,10 +65,10 @@ async def buffer_db(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_queue_does_not_write_until_flush(buffer_db):
-    session, user_id = buffer_db
-    await sub_update_buffer.queue_user_sub_update(user_id, "v2rayNG/1.0", ip="203.0.113.10", hwid="abc")
+    session, subscription_uuid = buffer_db
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "v2rayNG/1.0", ip="203.0.113.10", hwid="abc")
 
-    count = (await session.execute(select(func.count()).select_from(UserSubscriptionUpdate))).scalar()
+    count = (await session.execute(select(func.count()).select_from(SubscriptionUpdate))).scalar()
     assert count == 0
     assert sub_update_buffer.pending_count() == 1
     await session.commit()
@@ -76,7 +77,7 @@ async def test_queue_does_not_write_until_flush(buffer_db):
     assert written == 1
     assert sub_update_buffer.pending_count() == 0
 
-    rows = (await session.execute(select(UserSubscriptionUpdate))).scalars().all()
+    rows = (await session.execute(select(SubscriptionUpdate))).scalars().all()
     assert len(rows) == 1
     assert rows[0].user_agent == "v2rayNG/1.0"
     assert rows[0].ip == "203.0.113.10"
@@ -85,11 +86,11 @@ async def test_queue_does_not_write_until_flush(buffer_db):
 
 @pytest.mark.asyncio
 async def test_user_sub_update_truncates_and_list_flushes(buffer_db):
-    session, user_id = buffer_db
-    await user_sub_update(session, user_id, "A" * 1000, ip="1.2.3.4")
+    session, subscription_uuid = buffer_db
+    await subscription_update(session, subscription_uuid, "A" * 1000, ip="1.2.3.4")
     assert sub_update_buffer.pending_count() == 1
 
-    stored, count = await get_users_sub_update_list(session, user_id)
+    stored, count = await get_subscriptions_sub_update_list(session, subscription_uuid)
     assert count == 1
     assert stored[0].user_agent == "A" * 512
     assert sub_update_buffer.pending_count() == 0
@@ -97,8 +98,8 @@ async def test_user_sub_update_truncates_and_list_flushes(buffer_db):
 
 @pytest.mark.asyncio
 async def test_flush_failure_requeues(buffer_db, monkeypatch: pytest.MonkeyPatch):
-    _session, user_id = buffer_db
-    await sub_update_buffer.queue_user_sub_update(user_id, "clash")
+    _session, subscription_uuid = buffer_db
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "clash")
 
     class BoomGetDB:
         def __init__(self):
@@ -114,33 +115,33 @@ async def test_flush_failure_requeues(buffer_db, monkeypatch: pytest.MonkeyPatch
 @pytest.mark.parametrize("include_live_user", [False, True])
 @pytest.mark.parametrize("batch_size", [1, 100])
 async def test_flush_discards_deleted_users(buffer_db, monkeypatch, include_live_user, batch_size):
-    session, user_id = buffer_db
-    deleted_user = User(username="deleted_before_flush")
+    session, subscription_uuid = buffer_db
+    deleted_user = Subscription(uuid=uuid4())
     session.add(deleted_user)
     await session.commit()
-    await sub_update_buffer.queue_user_sub_update(deleted_user.id, "deleted-client")
+    await sub_update_buffer.queue_user_sub_update(deleted_user.uuid, "deleted-client")
     if include_live_user:
-        await sub_update_buffer.queue_user_sub_update(user_id, "live-client")
+        await sub_update_buffer.queue_user_sub_update(subscription_uuid, "live-client")
 
-    await session.execute(delete(User).where(User.id == deleted_user.id))
+    await session.execute(delete(Subscription).where(Subscription.uuid == deleted_user.uuid))
     await session.commit()
     monkeypatch.setattr(sub_update_buffer, "FLUSH_BATCH_SIZE", batch_size)
 
     assert await sub_update_buffer.flush_user_sub_updates() == int(include_live_user)
     assert sub_update_buffer.pending_count() == 0
-    rows = (await session.execute(select(UserSubscriptionUpdate))).scalars().all()
-    assert [(row.user_id, row.user_agent) for row in rows] == ([(user_id, "live-client")] if include_live_user else [])
+    rows = (await session.execute(select(SubscriptionUpdate))).scalars().all()
+    assert [(row.subscription_uuid, row.user_agent) for row in rows] == ([(subscription_uuid, "live-client")] if include_live_user else [])
     await session.commit()
 
     monkeypatch.setattr(sub_update_buffer, "FLUSH_BATCH_SIZE", 100)
-    await sub_update_buffer.queue_user_sub_update(user_id, "next-client")
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "next-client")
     assert await sub_update_buffer.flush_user_sub_updates() == 1
     assert sub_update_buffer.pending_count() == 0
 
 
 @pytest.mark.asyncio
 async def test_second_flush_waits_until_in_flight_drain_commits(buffer_db, monkeypatch):
-    session, user_id = buffer_db
+    session, subscription_uuid = buffer_db
     inner_cls = sub_update_buffer.GetDB
     first_entered = asyncio.Event()
     release = asyncio.Event()
@@ -161,10 +162,10 @@ async def test_second_flush_waits_until_in_flight_drain_commits(buffer_db, monke
             return await self._inner.__aexit__(exc_type, exc_value, traceback)
 
     monkeypatch.setattr(sub_update_buffer, "GetDB", WrappedGetDB)
-    await sub_update_buffer.queue_user_sub_update(user_id, "first-client")
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "first-client")
     first_flush = asyncio.create_task(sub_update_buffer.flush_user_sub_updates())
     await first_entered.wait()
-    await sub_update_buffer.queue_user_sub_update(user_id, "second-client")
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "second-client")
     second_flush = asyncio.create_task(sub_update_buffer.flush_user_sub_updates())
     await asyncio.sleep(0.05)
     assert not second_flush.done()
@@ -173,14 +174,14 @@ async def test_second_flush_waits_until_in_flight_drain_commits(buffer_db, monke
     assert written == 2
     assert second_flush.done()
     assert sub_update_buffer.pending_count() == 0
-    rows = (await session.execute(select(UserSubscriptionUpdate))).scalars().all()
+    rows = (await session.execute(select(SubscriptionUpdate))).scalars().all()
     assert sorted(row.user_agent for row in rows) == ["first-client", "second-client"]
     await session.commit()
 
 
 @pytest.mark.asyncio
 async def test_queue_spawns_flush_only_when_crossing_batch_size(buffer_db, monkeypatch):
-    _session, user_id = buffer_db
+    _session, subscription_uuid = buffer_db
     created: list[str | None] = []
     real_create_task = asyncio.create_task
 
@@ -192,11 +193,11 @@ async def test_queue_spawns_flush_only_when_crossing_batch_size(buffer_db, monke
     monkeypatch.setattr(sub_update_buffer.asyncio, "create_task", tracking_create_task)
     monkeypatch.setattr(sub_update_buffer, "FLUSH_BATCH_SIZE", 2)
 
-    await sub_update_buffer.queue_user_sub_update(user_id, "one")
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "one")
     assert created == []
-    await sub_update_buffer.queue_user_sub_update(user_id, "two")
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "two")
     assert created == ["sub_update_flush"]
-    await sub_update_buffer.queue_user_sub_update(user_id, "three")
+    await sub_update_buffer.queue_user_sub_update(subscription_uuid, "three")
     assert created == ["sub_update_flush"]
     await sub_update_buffer.reset_user_sub_update_buffer()
     assert sub_update_buffer.pending_count() == 0

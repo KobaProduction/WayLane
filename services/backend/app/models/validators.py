@@ -2,11 +2,10 @@ import re
 from datetime import UTC, datetime, datetime as dt, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
-from urllib.parse import urlparse
 
 from pydantic import BeforeValidator
 
-from app.db.models import UserStatus, UserStatusCreate
+from app.db.models import SubscriptionStatus, SubscriptionStatusCreate
 from app.utils.helpers import fix_datetime_timezone
 
 MAX_ON_HOLD_EXPIRE_DURATION_SECONDS = 2_147_483_647
@@ -173,22 +172,22 @@ class PasswordValidator:
         return value
 
 
-class UserValidator:
+class SubscriptionValidator:
     @staticmethod
     def validate_status(
-        status: UserStatus | UserStatusCreate | None,
-        allowed_statuses: set[UserStatus | UserStatusCreate],
+        status: SubscriptionStatus | SubscriptionStatusCreate | None,
+        allowed_statuses: set[SubscriptionStatus | SubscriptionStatusCreate],
         values,
     ):
-        UserValidator.allow_status(status, allowed_statuses)
+        SubscriptionValidator.allow_status(status, allowed_statuses)
 
         on_hold_expire = values.data.get("on_hold_expire_duration") or values.data.get("expire_duration")
         expire = values.data.get("expire")
         if status is not None and status == "on_hold":
             if on_hold_expire == 0 or on_hold_expire is None:
-                raise ValueError("User cannot be on hold without a valid on_hold_expire_duration.")
+                raise ValueError("Subscription cannot be on hold without a valid on_hold_expire_duration.")
             if expire:
-                raise ValueError("User cannot be on hold with specified expire.")
+                raise ValueError("Subscription cannot be on hold with specified expire.")
         return status
 
     @staticmethod
@@ -223,8 +222,8 @@ class UserValidator:
 
     @staticmethod
     def allow_status(
-        status: UserStatus | UserStatusCreate | None,
-        allowed_statuses: set[UserStatus | UserStatusCreate],
+        status: SubscriptionStatus | SubscriptionStatusCreate | None,
+        allowed_statuses: set[SubscriptionStatus | SubscriptionStatusCreate],
     ):
         if status is None:
             return
@@ -258,17 +257,6 @@ class ProxyValidator:
             raise ValueError(
                 "proxy_url must be a valid proxy address (e.g., http://host:port, socks5://user:pass@host:port)"
             )
-        return value
-
-
-class DiscordValidator:
-    @staticmethod
-    def validate_webhook(value: str | None):
-        if value:
-            parsed = urlparse(value)
-            # validate scheme and hostname
-            if parsed.scheme != "https" or parsed.hostname not in {"discord.com"}:
-                raise ValueError("Discord webhook must use https scheme and point to 'discord.com'")
         return value
 
 

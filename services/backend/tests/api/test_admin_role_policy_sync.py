@@ -1,15 +1,16 @@
 """Role disconnect-policy edits and the node reconciliation they trigger."""
 
 import asyncio
+from uuid import UUID, uuid4
 
 from fastapi import status
 from sqlalchemy import update
 
-from app.db.models import Admin, AdminRole, AdminStatus, User, UserStatus
+from app.db.models import Admin, AdminRole, AdminStatus, Subscription, SubscriptionStatus
 from app.node import node_manager
 from app.operation import admin_role as admin_role_operation, admin_sync
 from tests.api import GetTestDB, TestSession, client
-from tests.api.helpers import auth_headers, create_user, strong_password, unique_name
+from tests.api.helpers import auth_headers, strong_password, unique_name
 
 UNREACHABLE_NODE_ID = 987654
 
@@ -66,7 +67,9 @@ def _create_role(access_token: str, payload: dict) -> int:
     return response.json()["id"]
 
 
-def _create_disabled_admin_with_users(access_token: str, role_id: int, statuses: list[UserStatus]) -> list[int]:
+def _create_disabled_admin_with_users(
+    access_token: str, role_id: int, statuses: list[SubscriptionStatus]
+) -> list[UUID]:
     response = client.post(
         "/api/admin",
         headers=auth_headers(access_token),
@@ -74,19 +77,27 @@ def _create_disabled_admin_with_users(access_token: str, role_id: int, statuses:
     )
     assert response.status_code == status.HTTP_201_CREATED, response.text
     admin_id = response.json()["id"]
-    user_ids = [create_user(access_token)["id"] for _ in statuses]
+    subscription_uuids = [uuid4() for _ in statuses]
 
     async def assign():
         async with TestSession() as session:
-            for user_id, user_status in zip(user_ids, statuses, strict=True):
-                await session.execute(
-                    update(User).where(User.id == user_id).values(admin_id=admin_id, status=user_status)
-                )
+            session.add_all(
+                [
+                    Subscription(
+                        uuid=subscription_uuid,
+                        admin_id=admin_id,
+                        status=subscription_status,
+                        entitlement="active",
+                        proxy_settings={},
+                    )
+                    for subscription_uuid, subscription_status in zip(subscription_uuids, statuses, strict=True)
+                ]
+            )
             await session.execute(update(Admin).where(Admin.id == admin_id).values(status=AdminStatus.disabled))
             await session.commit()
 
     asyncio.run(assign())
-    return user_ids
+    return subscription_uuids
 
 
 def _set_disabled_policy(role_id: int, blocks: bool) -> None:
@@ -110,25 +121,25 @@ def _record_schedules(monkeypatch) -> list[tuple[int, list[AdminStatus]]]:
     return calls
 
 
-def _record_dispatches(monkeypatch) -> dict[str, list[list[int]]]:
+def _record_dispatches(monkeypatch) -> dict[str, list[list[UUID]]]:
     batches = {"remove": [], "sync": []}
 
     def recorder(kind):
         async def dispatch(users, *, await_dispatch=False):
             assert await_dispatch is True
-            batches[kind].append([user.id for user in users])
+            batches[kind].append([user.uuid for user in users])
 
         return dispatch
 
-    monkeypatch.setattr(admin_sync, "sync_remove_users", recorder("remove"))
-    monkeypatch.setattr(admin_sync, "sync_users", recorder("sync"))
+    monkeypatch.setattr(admin_sync, "sync_remove_subscriptions", recorder("remove"))
+    monkeypatch.setattr(admin_sync, "sync_subscriptions", recorder("sync"))
     return batches
 
 
 def test_role_save_without_policy_change_does_not_dispatch(access_token, monkeypatch):
     payload = _role_payload(blocks=True)
     role_id = _create_role(access_token, payload)
-    _create_disabled_admin_with_users(access_token, role_id, [UserStatus.active])
+    _create_disabled_admin_with_users(access_token, role_id, [SubscriptionStatus.active])
     calls = _record_schedules(monkeypatch)
 
     node = UnreachableNode()
@@ -166,12 +177,12 @@ def test_role_policy_change_schedules_only_the_changed_status(access_token, monk
 
 def test_role_policy_sync_follows_current_policy_in_bounded_batches(access_token, monkeypatch):
     role_id = _create_role(access_token, _role_payload(blocks=True))
-    user_ids = _create_disabled_admin_with_users(
+    subscription_uuids = _create_disabled_admin_with_users(
         access_token,
         role_id,
-        [UserStatus.active, UserStatus.on_hold, UserStatus.active, UserStatus.expired],
+        [SubscriptionStatus.active, SubscriptionStatus.on_hold, SubscriptionStatus.active, SubscriptionStatus.expired],
     )
-    connectable = sorted(user_ids[:3])
+    connectable = sorted(subscription_uuids[:3])
     monkeypatch.setattr(admin_sync, "GetDB", GetTestDB)
     monkeypatch.setattr(admin_sync, "_role_sync_locks", {})
     monkeypatch.setattr(admin_sync, "ROLE_SYNC_BATCH_SIZE", 2)
@@ -195,7 +206,7 @@ def test_role_policy_sync_follows_current_policy_in_bounded_batches(access_token
 
 def test_role_policy_sync_tolerates_an_unreachable_node(access_token, monkeypatch):
     role_id = _create_role(access_token, _role_payload(blocks=True))
-    _create_disabled_admin_with_users(access_token, role_id, [UserStatus.active])
+    _create_disabled_admin_with_users(access_token, role_id, [SubscriptionStatus.active])
     monkeypatch.setattr(admin_sync, "GetDB", GetTestDB)
     monkeypatch.setattr(admin_sync, "_role_sync_locks", {})
 

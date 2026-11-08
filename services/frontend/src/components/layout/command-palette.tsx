@@ -45,12 +45,12 @@ const wgSections: { id: WgCoreSection; labelKey: string; defaultLabel: string }[
 ]
 
 const createRoutes: Record<CommandCreateTarget, string> = {
-  user: '/users',
+  subscription: '/subscriptions',
   group: '/groups',
   host: '/hosts',
   node: '/nodes',
   admin: '/admins',
-  template: '/templates/user',
+  template: '/templates/subscriptions',
   core: '/nodes/cores/new',
 }
 
@@ -85,21 +85,21 @@ export function CommandPalette() {
   const navItems = useMemo(() => {
     const items: { title: string; url: string; icon: typeof UsersIcon }[] = []
     if (hasPermission(admin, 'system', 'read')) items.push({ title: 'dashboard', url: '/', icon: LayoutDashboardIcon })
-    if (hasPermission(admin, 'users', 'read')) items.push({ title: 'users', url: '/users', icon: UsersIcon })
+    if (hasPermission(admin, 'subscriptions', 'read')) items.push({ title: 'subscriptions', url: '/subscriptions', icon: UsersIcon })
     if (hasPermission(admin, 'nodes', 'stats')) items.push({ title: 'statistics', url: '/statistics', icon: PieChart })
     if (canReadResourcePage(admin, 'hosts')) items.push({ title: 'hosts', url: '/hosts', icon: ListTodo })
     if (canReadResourcePage(admin, 'groups')) items.push({ title: 'groups', url: '/groups', icon: Group })
     if (canReadResourcePage(admin, 'admins')) items.push({ title: 'admins.title', url: '/admins', icon: UserCog })
     if (canReadResourcePage(admin, 'nodes')) items.push({ title: 'nodes.title', url: '/nodes', icon: Share2Icon })
     if (canReadResourcePage(admin, 'cores')) items.push({ title: 'settings.cores.title', url: '/nodes/cores', icon: Cpu })
-    if (canReadResourcePage(admin, 'templates')) items.push({ title: 'templates.userTemplates', url: '/templates/user', icon: FileUser })
+    if (canReadResourcePage(admin, 'templates')) items.push({ title: 'templates.subscriptionTemplates', url: '/templates/subscriptions', icon: FileUser })
     if (isOwner(admin) || hasPermission(admin, 'system', 'update')) items.push({ title: 'settings.title', url: '/settings', icon: Settings })
     return items
   }, [admin])
 
   const createItems = useMemo(() => {
     const items: { target: CommandCreateTarget; title: string; icon: typeof Plus }[] = []
-    if (hasPermission(admin, 'users', 'create')) items.push({ target: 'user', title: 'createUser', icon: UsersIcon })
+    if (hasPermission(admin, 'subscriptions', 'create')) items.push({ target: 'subscription', title: 'createSubscription', icon: UsersIcon })
     if (hasPermission(admin, 'groups', 'create')) items.push({ target: 'group', title: 'createGroup', icon: Group })
     if (hasPermission(admin, 'hosts', 'create')) items.push({ target: 'host', title: 'hostsDialog.addHost', icon: ListTodo })
     if (hasPermission(admin, 'nodes', 'create')) items.push({ target: 'node', title: 'nodes.addNode', icon: Share2Icon })

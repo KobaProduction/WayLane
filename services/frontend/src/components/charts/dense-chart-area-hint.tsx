@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { useChartViewType } from '@/hooks/use-chart-view-type'
 import { cn } from '@/lib/utils'
 import { CHART_AREA_SUGGESTION_POINT_LIMIT } from '@/utils/chart-performance'
-import { setChartViewTypePreference } from '@/utils/userPreferenceStorage'
+import { setChartViewTypePreference } from '@/utils/dashboardPreferenceStorage'
 
 const DISMISS_STORAGE_KEY = 'pg-dense-chart-area-hint-dismissed'
 

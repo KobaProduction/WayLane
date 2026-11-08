@@ -4,7 +4,7 @@ import { ThemeToggle } from '@/components/common/theme-toggle'
 import { SourceLink } from '@/components/layout/source-link'
 import { NavMain } from '@/components/layout/nav-main'
 import { NavSecondary } from '@/components/layout/nav-secondary'
-import { NavUser } from '@/components/layout/nav-user'
+import { NavAdmin } from '@/components/layout/nav-admin'
 import { SidebarTriggerWithBadge } from '@/components/layout/sidebar-trigger-with-badge'
 import { VersionBadge } from '@/components/layout/version-badge'
 import { Button } from '@/components/ui/button'
@@ -16,12 +16,9 @@ import useDirDetection from '@/hooks/use-dir-detection'
 import { useSystemVersion } from '@/hooks/use-system-version'
 import { useVersionCheck } from '@/hooks/use-version-check'
 import { cn } from '@/lib/utils'
-import { canReadResourcePage, hasPermission, hasScopeAll, isOwner } from '@/utils/rbac'
+import { canReadResourcePage, hasPermission, isOwner } from '@/utils/rbac'
 import {
-  ArrowUpDown,
-  Bell,
   BookOpen,
-  Calendar,
   ChevronsLeft,
   ChevronsRight,
   Cpu,
@@ -32,7 +29,6 @@ import {
   GitFork,
   Group,
   Key,
-  Layers,
   LayoutDashboardIcon,
   LayoutTemplate,
   ListTodo,
@@ -42,13 +38,11 @@ import {
   Palette,
   PieChart,
   RssIcon,
-  Send,
   Settings,
   Settings2,
   Share2Icon,
   UserCog,
   UserKey,
-  UserPlus,
   UsersIcon,
   Webhook,
 } from 'lucide-react'
@@ -71,8 +65,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const canReadTemplates = canReadResourcePage(admin, 'templates')
   const canReadClientTemplates = canReadResourcePage(admin, 'client_templates')
   const canReadNodeLogs = hasPermission(admin, 'nodes', 'logs')
-  const canBulkCreateFromTemplate = hasPermission(admin, 'users', 'create') && canReadTemplates
-  const canBulkUpdateUsers = hasScopeAll(admin, 'users', 'update')
   const nodeNavItems = [
     ...(canReadNodes
       ? [
@@ -117,8 +109,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     ...(canReadTemplates
       ? [
           {
-            title: 'templates.userTemplates',
-            url: '/templates/user',
+            title: 'templates.subscriptionTemplates',
+            url: '/templates/subscriptions',
             icon: FileUser,
           },
         ]
@@ -203,11 +195,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             },
           ]
         : []),
-      ...(hasPermission(admin, 'users', 'read')
+      ...(hasPermission(admin, 'subscriptions', 'read')
         ? [
             {
-              title: 'users',
-              url: '/users',
+              title: 'subscriptions',
+              url: '/subscriptions',
               icon: UsersIcon,
             },
           ]
@@ -284,50 +276,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             },
           ]
         : []),
-      ...(canBulkCreateFromTemplate || canBulkUpdateUsers
-        ? [
-            {
-              title: 'bulk.title',
-              url: '/bulk',
-              icon: Layers,
-              items: [
-                ...(canBulkCreateFromTemplate
-                  ? [
-                      {
-                        title: 'bulk.createUsers',
-                        url: '/bulk',
-                        icon: UserPlus,
-                      },
-                    ]
-                  : []),
-                ...(canBulkUpdateUsers
-                  ? [
-                      {
-                        title: 'bulk.groups',
-                        url: '/bulk/groups',
-                        icon: Group,
-                      },
-                      {
-                        title: 'bulk.expireDate',
-                        url: '/bulk/expire',
-                        icon: Calendar,
-                      },
-                      {
-                        title: 'bulk.dataLimit',
-                        url: '/bulk/data',
-                        icon: ArrowUpDown,
-                      },
-                      {
-                        title: 'bulk.proxySettings',
-                        url: '/bulk/proxy',
-                        icon: Lock,
-                      },
-                    ]
-                  : []),
-              ],
-            },
-          ]
-        : []),
       {
         title: 'settings.title',
         url: '/settings',
@@ -345,11 +293,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           ...(hasPermission(admin, 'settings', 'read') && hasPermission(admin, 'settings', 'update')
             ? [
                 {
-                  title: 'settings.notifications.title',
-                  url: '/settings/notifications',
-                  icon: Bell,
-                },
-                {
                   title: 'settings.subscriptions.title',
                   url: '/settings/subscriptions',
                   icon: ListTodo,
@@ -358,11 +301,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   title: 'settings.hwid.title',
                   url: '/settings/hwid',
                   icon: Fingerprint,
-                },
-                {
-                  title: 'settings.telegram.title',
-                  url: '/settings/telegram',
-                  icon: Send,
                 },
                 {
                   title: 'settings.webhook.title',
@@ -569,7 +507,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </div>
         </SidebarContent>
         <SidebarFooter>
-          <NavUser admin={admin} username={data?.user} />
+          <NavAdmin admin={admin} username={data?.user} />
         </SidebarFooter>
       </Sidebar>
     </>

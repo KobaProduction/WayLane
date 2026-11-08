@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import pytest
 
-from app.telegram.session import NativeTLSAiohttpSession
 from app.utils.http_client import create_outbound_http_session
 from app.utils.ssl_context import create_outbound_ssl_context
 
@@ -48,13 +47,3 @@ async def test_outbound_http_session_scopes_native_context_to_client():
         assert ssl.SSLContext.__module__ == "ssl"
     finally:
         await session.close()
-
-
-@pytest.mark.parametrize("proxy", [None, "socks5://127.0.0.1:1080"])
-def test_telegram_session_scopes_native_context_to_client(proxy):
-    """Attach native TLS to Telegram connectors with and without a proxy."""
-    session = NativeTLSAiohttpSession(proxy=proxy)
-
-    context = session._connector_init["ssl"]
-    assert type(context) is ssl.SSLContext
-    assert ssl.SSLContext.__module__ == "ssl"

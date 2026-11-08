@@ -16,7 +16,7 @@ import { CustomVariablesPopover, VariablesList, VariablesPopover } from '@/compo
 import useDirDetection from '@/hooks/use-dir-detection'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
-import { ClientTemplateType, UserStatus, getGetHostsQueryKey, getHosts, useGetClientTemplatesSimple } from '@/service/api'
+import { ClientTemplateType, SubscriptionStatus, getGetHostsQueryKey, getHosts, useGetClientTemplatesSimple } from '@/service/api'
 import { queryClient } from '@/utils/query-client'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Cable, ChevronsLeftRightEllipsis, Copy, Pencil, GlobeLock, Info, Loader2, Lock, Network, Plus, Route, Trash2, X, ListTodo } from 'lucide-react'
@@ -110,11 +110,11 @@ interface HostModalProps {
 
 // Update status options constant
 const statusOptions = [
-  { value: UserStatus.active, label: 'hostsDialog.status.active' },
-  { value: UserStatus.disabled, label: 'hostsDialog.status.disabled' },
-  { value: UserStatus.limited, label: 'hostsDialog.status.limited' },
-  { value: UserStatus.expired, label: 'hostsDialog.status.expired' },
-  { value: UserStatus.on_hold, label: 'hostsDialog.status.onHold' },
+  { value: SubscriptionStatus.active, label: 'hostsDialog.status.active' },
+  { value: SubscriptionStatus.disabled, label: 'hostsDialog.status.disabled' },
+  { value: SubscriptionStatus.limited, label: 'hostsDialog.status.limited' },
+  { value: SubscriptionStatus.expired, label: 'hostsDialog.status.expired' },
+  { value: SubscriptionStatus.on_hold, label: 'hostsDialog.status.onHold' },
 ] as const
 
 const XRAY_TEMPLATE_INBOUND_DEFAULT_VALUE = '__xray_template_inbound_default__'
@@ -1069,7 +1069,7 @@ const HostModal: React.FC<HostModalProps> = ({ isDialogOpen, onOpenChange, onSub
                       </div>
                       <Select
                         value=""
-                        onValueChange={(value: UserStatus) => {
+                        onValueChange={(value: SubscriptionStatus) => {
                           if (!value) return
                           const currentValue = field.value || []
                           if (!currentValue.includes(value)) {

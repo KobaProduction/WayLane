@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, status
 from app.db import AsyncSession, get_db
 from app.models.admin import AdminDetails
 from app.models.group import (
-    BulkGroup,
     BulkGroupsActionResponse,
     BulkGroupSelection,
     GroupCreate,
@@ -197,56 +196,6 @@ async def remove_group(
     """
     await group_operator.remove_group(db, group_id, admin)
     return {}
-
-
-@router.post(
-    "s/bulk/add",
-    summary="Bulk add groups to users",
-    response_description="Success confirmation",
-)
-async def bulk_add_groups_to_users(
-    bulk_group: BulkGroup,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("groups", "update")),
-):
-    """
-    Bulk assign groups to multiple users, users under specific admins, or all users.
-
-    - **group_ids**: List of group IDs to add (required)
-    - **users**: Optional list of user IDs to assign the groups to
-    - **admins**: Optional list of admin IDs — their users will be targeted
-
-    Notes:
-    - If neither 'users' nor 'admins' are provided, groups will be added to *all users*
-    - Existing user-group associations will be ignored (no duplication)
-    - Returns list of affected users (those who received new group associations)
-    """
-    return await group_operator.bulk_add_groups(db, bulk_group, admin)
-
-
-@router.post(
-    "s/bulk/remove",
-    summary="Bulk remove groups from users",
-    response_description="Success confirmation",
-)
-async def bulk_remove_users_from_groups(
-    bulk_group: BulkGroup,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("groups", "update")),
-):
-    """
-    Bulk remove groups from multiple users, users under specific admins, or all users.
-
-    - **group_ids**: List of group IDs to remove (required)
-    - **users**: Optional list of user IDs to remove the groups from
-    - **admins**: Optional list of admin IDs — their users will be targeted
-
-    Notes:
-    - If neither 'users' nor 'admins' are provided, groups will be removed from *all users*
-    - Only existing user-group associations will be removed
-    - Returns list of affected users (those who had groups removed)
-    """
-    return await group_operator.bulk_remove_groups(db, bulk_group, admin)
 
 
 @router.post(

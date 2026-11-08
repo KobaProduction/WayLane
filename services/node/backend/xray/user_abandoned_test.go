@@ -15,8 +15,8 @@ func TestSyncCallsAbandonedWhileQueuedReturnTheContextError(t *testing.T) {
 
 	x.syncMu.Lock()
 	errs := make(chan error, 4)
-	go func() { errs <- x.SyncUser(ctx, &common.User{}) }()
-	go func() { errs <- x.SyncUsers(ctx, nil) }()
+	go func() { errs <- x.SyncSubscription(ctx, &common.Subscription{}) }()
+	go func() { errs <- x.SyncSubscriptions(ctx, nil) }()
 	go func() { errs <- x.UpdateUsers(ctx, nil) }()
 	go func() { errs <- x.UpdateUsersAndRestart(ctx, nil) }()
 	time.Sleep(100 * time.Millisecond)

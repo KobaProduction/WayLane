@@ -21,10 +21,8 @@ from tests.api.helpers import (
     auth_headers,
     create_core,
     create_group,
-    create_user,
     delete_core,
     delete_group,
-    delete_user,
     unique_name,
 )
 
@@ -54,12 +52,12 @@ def _core_config(xdrive_tag: str, tcp_tag: str) -> dict:
 
 
 @pytest.fixture
-def xdrive_user(access_token):
+def xdrive_user(access_token, active_subscription_factory):
     headers = auth_headers(access_token)
     xdrive_tag, tcp_tag = unique_name("xdrive_in"), unique_name("tcp_in")
     core = create_core(access_token, config=_core_config(xdrive_tag, tcp_tag))
     group = create_group(access_token, inbound_tags=[xdrive_tag, tcp_tag])
-    user = create_user(access_token, group_ids=[group["id"]])
+    user = active_subscription_factory(group_ids=[group["id"]])
     remarks = {"xdrive": unique_name("xdhost"), "tcp": unique_name("tcphost")}
     host_ids = []
     for kind, tag in (("xdrive", xdrive_tag), ("tcp", tcp_tag)):
@@ -75,14 +73,14 @@ def xdrive_user(access_token):
     finally:
         for host_id in host_ids:
             client.delete(f"/api/host/{host_id}", headers=headers)
-        delete_user(access_token, user["username"])
+        client.delete(f"/api/subscriptions/{user['uuid']}", headers=auth_headers(access_token))
         delete_group(access_token, group["id"])
         delete_core(access_token, core["id"])
 
 
 def test_xray_subscription_carries_xdrive_settings(xdrive_user):
     user, _ = xdrive_user
-    response = client.get(f"{user['subscription_url']}/xray")
+    response = client.get(f"{user['url']}/xray")
     assert response.status_code == 200, response.text
 
     streams = [
@@ -101,7 +99,7 @@ def test_xray_subscription_carries_xdrive_settings(xdrive_user):
 @pytest.mark.parametrize("client_type", ["links", "links_base64", "sing_box", "clash_meta"])
 def test_formats_without_xdrive_skip_only_the_xdrive_host(xdrive_user, client_type):
     user, remarks = xdrive_user
-    response = client.get(f"{user['subscription_url']}/{client_type}")
+    response = client.get(f"{user['url']}/{client_type}")
     assert response.status_code == 200, response.text
 
     body = response.text
@@ -115,7 +113,7 @@ def test_formats_without_xdrive_skip_only_the_xdrive_host(xdrive_user, client_ty
 def test_formats_without_vless_still_render(xdrive_user, client_type):
     # Neither format carries VLESS, so only the request succeeding is checked.
     user, remarks = xdrive_user
-    response = client.get(f"{user['subscription_url']}/{client_type}")
+    response = client.get(f"{user['url']}/{client_type}")
     assert response.status_code == 200, response.text
     assert remarks["xdrive"] not in response.text
 

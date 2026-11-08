@@ -4,10 +4,9 @@ import time
 from collections import defaultdict
 from datetime import UTC, datetime as dt, timedelta as td
 from operator import attrgetter
+from uuid import UUID
 
-from waylane_node_bridge import NodeAPIError, WayLaneNode
-from waylane_node_bridge.common.service_pb2 import StatType
-from sqlalchemy import BigInteger, DateTime, and_, bindparam, case, func, insert, or_, select, union_all, update
+from sqlalchemy import BigInteger, DateTime, Uuid, and_, bindparam, case, func, insert, or_, select, union_all, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import ARRAY, insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -17,11 +16,13 @@ from sqlalchemy.sql.expression import Insert
 from app import on_shutdown, scheduler
 from app.db import GetDB
 from app.db.base import engine
-from app.db.models import Admin, Node, NodeUsage, NodeUserUsage, System, User
+from app.db.models import Admin, Node, NodeSubscriptionUsage, NodeUsage, Subscription, System
 from app.node import node_manager
 from app.operation.admin_sync import enforce_admin_limits_now
 from app.utils.logger import get_logger
 from config import job_settings, runtime_settings, usage_settings
+from waylane_node_bridge import NodeAPIError, WayLaneNode
+from waylane_node_bridge.common.service_pb2 import StatType
 
 logger = get_logger("record-usages")
 
@@ -39,7 +40,7 @@ USER_TRAFFIC_UPDATE_BATCH_SIZE_BY_DIALECT = {
     "sqlite": 400,
 }
 USER_ADMIN_LOOKUP_BATCH_SIZE = 1_000
-_pending_user_usage_history: defaultdict[tuple[dt, int, int], int] = defaultdict(int)
+_pending_user_usage_history: defaultdict[tuple[dt, UUID, int], int] = defaultdict(int)
 _user_usage_history_lock = asyncio.Lock()
 _user_usage_history_last_flush: float | None = None
 # Failed flushes keep at most this many older 10-minute buckets (one hour) next to the current one
@@ -80,7 +81,7 @@ _dialect_cache: list[str] = []
 
 def build_node_user_usage_upsert(dialect: str, upsert_params: list[dict]):
     """
-    Build UPSERT statement for NodeUserUsage based on database dialect.
+    Build UPSERT statement for NodeSubscriptionUsage based on database dialect.
 
     Args:
         dialect: Database dialect name ('postgresql', 'mysql', or 'sqlite')
@@ -92,7 +93,7 @@ def build_node_user_usage_upsert(dialect: str, upsert_params: list[dict]):
     if dialect == "postgresql":
         source = (
             func.unnest(
-                bindparam("uids", type_=ARRAY(BigInteger())),
+                bindparam("uids", type_=ARRAY(Uuid(as_uuid=True))),
                 bindparam("node_ids", type_=ARRAY(BigInteger())),
                 bindparam("created_ats", type_=ARRAY(DateTime(timezone=True))),
                 bindparam("traffic_values", type_=ARRAY(BigInteger())),
@@ -108,17 +109,19 @@ def build_node_user_usage_upsert(dialect: str, upsert_params: list[dict]):
                 source.c.node_id,
                 func.sum(source.c.value).label("used_traffic"),
             )
-            .select_from(source.join(User, User.id == source.c.uid).join(Node, Node.id == source.c.node_id))
+            .select_from(
+                source.join(Subscription, Subscription.uuid == source.c.uid).join(Node, Node.id == source.c.node_id)
+            )
             .group_by(source.c.created_at, source.c.uid, source.c.node_id)
         )
 
-        stmt = pg_insert(NodeUserUsage).from_select(
-            ["created_at", "user_id", "node_id", "used_traffic"],
+        stmt = pg_insert(NodeSubscriptionUsage).from_select(
+            ["created_at", "subscription_uuid", "node_id", "used_traffic"],
             select_stmt,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=["created_at", "user_id", "node_id"],
-            set_={"used_traffic": NodeUserUsage.used_traffic + stmt.excluded.used_traffic},
+            index_elements=["created_at", "subscription_uuid", "node_id"],
+            set_={"used_traffic": NodeSubscriptionUsage.used_traffic + stmt.excluded.used_traffic},
         )
         return [
             (
@@ -138,16 +141,18 @@ def build_node_user_usage_upsert(dialect: str, upsert_params: list[dict]):
         # error of a user or node deleted since the stats were read into a warning and skips
         # that row, as the users and nodes join does on the other dialects.
         stmt = (
-            mysql_insert(NodeUserUsage)
+            mysql_insert(NodeSubscriptionUsage)
             .values(
                 created_at=bindparam("created_at"),
-                user_id=bindparam("uid"),
+                subscription_uuid=bindparam("uid", type_=Uuid(as_uuid=True)),
                 node_id=bindparam("node_id"),
                 used_traffic=bindparam("value"),
             )
             .prefix_with("IGNORE")
         )
-        stmt = stmt.on_duplicate_key_update(used_traffic=NodeUserUsage.used_traffic + stmt.inserted.used_traffic)
+        stmt = stmt.on_duplicate_key_update(
+            used_traffic=NodeSubscriptionUsage.used_traffic + stmt.inserted.used_traffic
+        )
         return [(stmt, upsert_params)]
 
     select_parts = []
@@ -159,7 +164,7 @@ def build_node_user_usage_upsert(dialect: str, upsert_params: list[dict]):
         value_key = f"value_{index}"
         select_parts.append(
             select(
-                bindparam(uid_key).label("uid"),
+                bindparam(uid_key, type_=Uuid(as_uuid=True)).label("uid"),
                 bindparam(node_id_key).label("node_id"),
                 bindparam(created_at_key).label("created_at"),
                 bindparam(value_key).label("value"),
@@ -178,17 +183,17 @@ def build_node_user_usage_upsert(dialect: str, upsert_params: list[dict]):
             source.c.node_id,
             func.sum(source.c.value).label("used_traffic"),
         )
-        .select_from(source.join(User, User.id == source.c.uid).join(Node, Node.id == source.c.node_id))
+        .select_from(source.join(Subscription, Subscription.uuid == source.c.uid).join(Node, Node.id == source.c.node_id))
         .group_by(source.c.created_at, source.c.uid, source.c.node_id)
     )
 
-    stmt = sqlite_insert(NodeUserUsage).from_select(
-        ["created_at", "user_id", "node_id", "used_traffic"],
+    stmt = sqlite_insert(NodeSubscriptionUsage).from_select(
+        ["created_at", "subscription_uuid", "node_id", "used_traffic"],
         select_stmt,
     )
     stmt = stmt.on_conflict_do_update(
-        index_elements=["created_at", "user_id", "node_id"],
-        set_={"used_traffic": NodeUserUsage.used_traffic + stmt.excluded.used_traffic},
+        index_elements=["created_at", "subscription_uuid", "node_id"],
+        set_={"used_traffic": NodeSubscriptionUsage.used_traffic + stmt.excluded.used_traffic},
     )
     return [(stmt, stmt_params)]
 
@@ -206,9 +211,9 @@ def build_user_traffic_update(dialect: str, usage_params: list[dict]):
         # asyncmy runs an executemany UPDATE as one round trip per row, so add the
         # deltas of the whole batch in one statement with a CASE on the primary key
         stmt = (
-            update(User)
-            .where(User.id.in_(list(aggregated_usage)))
-            .values(used_traffic=User.used_traffic + case(aggregated_usage, value=User.id))
+            update(Subscription)
+            .where(Subscription.uuid.in_(list(aggregated_usage)))
+            .values(used_traffic=Subscription.used_traffic + case(aggregated_usage, value=Subscription.uuid))
             .execution_options(synchronize_session=False)
         )
         return stmt, None
@@ -216,16 +221,16 @@ def build_user_traffic_update(dialect: str, usage_params: list[dict]):
     if dialect == "postgresql":
         source = (
             func.unnest(
-                bindparam("uids", type_=ARRAY(BigInteger())),
+                bindparam("uids", type_=ARRAY(Uuid(as_uuid=True))),
                 bindparam("traffic_values", type_=ARRAY(BigInteger())),
             )
             .table_valued("uid", "value")
             .render_derived(name="usage_source")
         )
         stmt = (
-            update(User)
-            .where(User.id == source.c.uid)
-            .values(used_traffic=User.used_traffic + source.c.value)
+            update(Subscription)
+            .where(Subscription.uuid == source.c.uid)
+            .values(used_traffic=Subscription.used_traffic + source.c.value)
             .execution_options(synchronize_session=False)
         )
         return (
@@ -237,46 +242,46 @@ def build_user_traffic_update(dialect: str, usage_params: list[dict]):
         )
 
     stmt = (
-        update(User)
-        .where(User.id == bindparam("uid"))
-        .values(used_traffic=User.used_traffic + bindparam("value"))
+        update(Subscription)
+        .where(Subscription.uuid == bindparam("uid", type_=Uuid(as_uuid=True)))
+        .values(used_traffic=Subscription.used_traffic + bindparam("value"))
         .execution_options(synchronize_session=False)
     )
     return stmt, usage_params
 
 
-def build_online_at_updates(dialect: str, user_ids: list[int], now: dt):
+def build_online_at_updates(dialect: str, subscription_uuids: list[UUID], now: dt):
     """Build throttled online timestamp updates without per-user statements."""
-    if not user_ids:
+    if not subscription_uuids:
         return []
 
     cutoff = now - ONLINE_AT_WRITE_INTERVAL
-    stale_online_at = or_(User.online_at.is_(None), User.online_at <= cutoff)
+    stale_online_at = or_(Subscription.online_at.is_(None), Subscription.online_at <= cutoff)
 
     if dialect == "postgresql":
         source = (
-            func.unnest(bindparam("online_user_ids", type_=ARRAY(BigInteger())))
+            func.unnest(bindparam("online_subscription_uuids", type_=ARRAY(Uuid(as_uuid=True))))
             .table_valued("uid")
             .render_derived(name="online_users")
         )
         stmt = (
-            update(User)
-            .where(User.id == source.c.uid, stale_online_at)
+            update(Subscription)
+            .where(Subscription.uuid == source.c.uid, stale_online_at)
             .values(online_at=now)
             .execution_options(synchronize_session=False)
         )
-        return [(stmt, {"online_user_ids": user_ids})]
+        return [(stmt, {"online_subscription_uuids": subscription_uuids})]
 
-    batch_size = NODE_USER_USAGE_BATCH_SIZE_BY_DIALECT.get(dialect, len(user_ids))
+    batch_size = NODE_USER_USAGE_BATCH_SIZE_BY_DIALECT.get(dialect, len(subscription_uuids))
     return [
         (
-            update(User)
-            .where(User.id.in_(batch), stale_online_at)
+            update(Subscription)
+            .where(Subscription.uuid.in_(batch), stale_online_at)
             .values(online_at=now)
             .execution_options(synchronize_session=False),
             None,
         )
-        for batch in _chunked(user_ids, batch_size)
+        for batch in _chunked(subscription_uuids, batch_size)
     ]
 
 
@@ -285,7 +290,7 @@ async def update_users_traffic(usage_params: list[dict]) -> None:
         return
 
     dialect = await get_dialect()
-    ordered_params = sorted(usage_params, key=lambda item: int(item["uid"]))
+    ordered_params = sorted(usage_params, key=lambda item: UUID(str(item["uid"])))
     async with JOB_SEM:
         if dialect == "postgresql":
             await safe_execute(*build_user_traffic_update(dialect, ordered_params))
@@ -296,15 +301,15 @@ async def update_users_traffic(usage_params: list[dict]) -> None:
             await safe_execute(*build_user_traffic_update(dialect, batch))
 
 
-async def touch_users_online_at(user_ids: list[int], now: dt | None = None) -> None:
-    if not user_ids:
+async def touch_users_online_at(subscription_uuids: list[UUID], now: dt | None = None) -> None:
+    if not subscription_uuids:
         return
 
     now = now or dt.now(UTC)
     dialect = await get_dialect()
-    user_ids = sorted(set(user_ids))
+    subscription_uuids = sorted(set(subscription_uuids))
     async with JOB_SEM:
-        for stmt, params in build_online_at_updates(dialect, user_ids, now):
+        for stmt, params in build_online_at_updates(dialect, subscription_uuids, now):
             await safe_execute(stmt, params)
 
 
@@ -495,7 +500,7 @@ def _prepare_node_user_usage_params(
     created_at: dt,
 ) -> list[dict]:
     """Normalize and aggregate nonzero node-user history deltas."""
-    aggregated_params: defaultdict[tuple[int, int], int] = defaultdict(int)
+    aggregated_params: defaultdict[tuple[UUID, int], int] = defaultdict(int)
     for node_id, params in all_node_params.items():
         if not params:
             continue
@@ -503,7 +508,7 @@ def _prepare_node_user_usage_params(
         for p in params:
             value = int(p["value"] * coeff)
             if value:
-                aggregated_params[(int(p["uid"]), node_id)] += value
+                aggregated_params[(UUID(str(p["uid"])), node_id)] += value
 
     return [
         {
@@ -745,8 +750,11 @@ def _process_users_stats_response(stats_response):
     invalid_uids = []
     for uid, value in params.items():
         try:
-            validated_params.append({"uid": int(uid), "value": value})
-        except (ValueError, TypeError):
+            subscription_uuid = UUID(str(uid))
+            if subscription_uuid.version != 4 or str(subscription_uuid) != str(uid):
+                raise ValueError("Invalid subscription UUIDv4")
+            validated_params.append({"uid": subscription_uuid, "value": value})
+        except ValueError, TypeError:
             invalid_uids.append(uid)
 
     return validated_params, invalid_uids
@@ -868,14 +876,14 @@ async def calculate_admin_usage(users_usage: list) -> tuple[dict, set[int]]:
     if not users_usage:
         return {}, set()
 
-    # Get unique user IDs from users_usage
-    uids = {int(user_usage["uid"]) for user_usage in users_usage}
+    # Collect canonical subscription UUIDs from usage records
+    uids = {UUID(str(user_usage["uid"])) for user_usage in users_usage}
 
     async with GetDB() as db:
         # Query only relevant users' admin IDs
         user_admin_pairs = []
         for uid_batch in _chunked(list(uids), USER_ADMIN_LOOKUP_BATCH_SIZE):
-            stmt = select(User.id, User.admin_id).where(User.id.in_(uid_batch))
+            stmt = select(Subscription.uuid, Subscription.admin_id).where(Subscription.uuid.in_(uid_batch))
             result = await db.execute(stmt)
             user_admin_pairs.extend(result.fetchall())
 
@@ -883,7 +891,7 @@ async def calculate_admin_usage(users_usage: list) -> tuple[dict, set[int]]:
 
     admin_usage = defaultdict(int)
     for user_usage in users_usage:
-        admin_id = user_admin_map.get(int(user_usage["uid"]))
+        admin_id = user_admin_map.get(UUID(str(user_usage["uid"])))
         if admin_id:
             admin_usage[admin_id] += user_usage["value"]
 
@@ -901,7 +909,7 @@ async def calculate_users_usage(api_params: dict, usage_coefficient: dict) -> li
             continue
         coeff = usage_coefficient.get(node_id, 1)
         for param in params:
-            users_usage[int(param["uid"])] += int(param["value"] * coeff)
+            users_usage[UUID(str(param["uid"]))] += int(param["value"] * coeff)
 
     return [{"uid": uid, "value": value} for uid, value in users_usage.items()]
 
@@ -950,21 +958,21 @@ async def _record_user_usages_impl():
             logger.debug("No user usage to record")
             return
 
-        admin_usage, valid_user_ids = await calculate_admin_usage(users_usage)
-        if not valid_user_ids:
+        admin_usage, valid_subscription_uuids = await calculate_admin_usage(users_usage)
+        if not valid_subscription_uuids:
             logger.warning("Skipping user usage recording; no matching users found for received stats")
             return
 
         # Filter valid users - only include users with actual non-zero traffic
         valid_users_usage = [
-            usage for usage in users_usage if int(usage["uid"]) in valid_user_ids and usage["value"] > 0
+            usage for usage in users_usage if UUID(str(usage["uid"])) in valid_subscription_uuids and usage["value"] > 0
         ]
 
-        # Update User table with concurrency control
+        # Update Subscription table with concurrency control
         if valid_users_usage:
             await update_users_traffic(valid_users_usage)
             try:
-                await touch_users_online_at([int(usage["uid"]) for usage in valid_users_usage])
+                await touch_users_online_at([UUID(str(usage["uid"])) for usage in valid_users_usage])
             except Exception:
                 # Traffic totals are authoritative. A delayed online timestamp is
                 # preferable to aborting the rest of the usage accounting cycle.
@@ -994,7 +1002,7 @@ async def _record_user_usages_impl():
         # Filter params to only valid users
         filtered_node_params = {}
         for node_id, params in api_params.items():
-            filtered_params = [param for param in params if int(param["uid"]) in valid_user_ids]
+            filtered_params = [param for param in params if UUID(str(param["uid"])) in valid_subscription_uuids]
             if filtered_params:
                 filtered_node_params[node_id] = filtered_params
 
@@ -1005,14 +1013,14 @@ async def _record_user_usages_impl():
 
         job_duration = time.time() - job_start_time
         logger.debug(
-            f"User usage recording completed in {job_duration:.2f}s: "
+            f"Subscription usage recording completed in {job_duration:.2f}s: "
             f"{len(valid_users_usage)} users, {len(admin_usage)} admins, "
             f"{len(filtered_node_params)} nodes"
         )
 
     except Exception:
         job_duration = time.time() - job_start_time
-        logger.exception(f"User usage recording failed after {job_duration:.2f}s")
+        logger.exception(f"Subscription usage recording failed after {job_duration:.2f}s")
         raise
 
 
@@ -1021,14 +1029,14 @@ async def record_user_usages():
 
     ``get_stats(..., reset=True)`` zeros node counters, so a 120s cancel after
     that drop can lose traffic. If this job is skipped, lengthen
-    JOB_RECORD_USER_USAGES_INTERVAL or cut node RPC latency — extra Uvicorn
+    JOB_RECORD_SUBSCRIPTION_USAGES_INTERVAL or cut node RPC latency — extra Uvicorn
     workers will not help.
     """
     global _user_usage_running
     if _user_usage_running:
         logger.warning(
             "record_user_usages skipped; previous run still in progress. %s",
-            _usage_job_hint("JOB_RECORD_USER_USAGES_INTERVAL", job_settings.record_user_usages_interval),
+            _usage_job_hint("JOB_RECORD_SUBSCRIPTION_USAGES_INTERVAL", job_settings.record_subscription_usages_interval),
         )
         return
 
@@ -1037,8 +1045,8 @@ async def record_user_usages():
         await _await_usage_job(
             "record_user_usages",
             _record_user_usages_impl,
-            job_settings.record_user_usages_interval,
-            "JOB_RECORD_USER_USAGES_INTERVAL",
+            job_settings.record_subscription_usages_interval,
+            "JOB_RECORD_SUBSCRIPTION_USAGES_INTERVAL",
         )
     finally:
         _user_usage_running = False
@@ -1159,7 +1167,7 @@ if runtime_settings.role.runs_node:
     scheduler.add_job(
         record_user_usages,
         "interval",
-        seconds=job_settings.record_user_usages_interval,
+        seconds=job_settings.record_subscription_usages_interval,
         start_date=dt.now(UTC) + td(seconds=30),
         coalesce=True,
         max_instances=1,

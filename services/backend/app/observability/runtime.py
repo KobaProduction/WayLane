@@ -58,9 +58,12 @@ class _MetadataOnlyOTLPHandler(logging.Handler):
         if record.name == "waylane.telemetry":
             for key in ("event_kind", "route_group", "response_status"):
                 value = getattr(record, key, None)
-                if isinstance(value, str) and re.fullmatch(r"[a-zA-Z0-9_.-]{1,80}", value):
-                    setattr(safe, key, value)
-                elif key == "response_status" and isinstance(value, int):
+                if (
+                    isinstance(value, str)
+                    and re.fullmatch(r"[a-zA-Z0-9_.-]{1,80}", value)
+                    or key == "response_status"
+                    and isinstance(value, int)
+                ):
                     setattr(safe, key, value)
         self._downstream.emit(safe)
 
@@ -81,9 +84,14 @@ def _validate_exporter_destination(endpoint: str, token: str) -> None:
         if not private_host:
             try:
                 ip = ipaddress.ip_address(host)
-                private_host = any(ip in ipaddress.ip_network(cidr) for cidr in (
-                    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-                ))
+                private_host = any(
+                    ip in ipaddress.ip_network(cidr)
+                    for cidr in (
+                        "10.0.0.0/8",
+                        "172.16.0.0/12",
+                        "192.168.0.0/16",
+                    )
+                )
             except ValueError:
                 private_host = False
         if os.getenv("WAYLANE_OTLP_LOCAL_TEST") == "1" and host in {"127.0.0.1", "localhost"}:
@@ -111,33 +119,39 @@ def configure_direct_otlp():
 
         # Lazy imports keep the normal local development runtime simple.
         from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-        res = Resource.create({
-            "service.name": "waylane-backend",
-            "service.namespace": _resource_value("OTEL_SERVICE_NAMESPACE", "waylane"),
-            "deployment.environment.name": _resource_value(
-                "OTEL_DEPLOYMENT_ENVIRONMENT_NAME", "development"
-            ),
-        })
+        res = Resource.create(
+            {
+                "service.name": "waylane-backend",
+                "service.namespace": _resource_value("OTEL_SERVICE_NAMESPACE", "waylane"),
+                "deployment.environment.name": _resource_value("OTEL_DEPLOYMENT_ENVIRONMENT_NAME", "development"),
+            }
+        )
         base = endpoint.rstrip("/")
         headers = {"Authorization": "Bearer " + token} if token else {}
         traces = TracerProvider(resource=res)
-        traces.add_span_processor(BatchSpanProcessor(
-            OTLPSpanExporter(endpoint=base + "/v1/traces", headers=headers, timeout=4),
-            max_queue_size=512, max_export_batch_size=64,
-        ))
+        traces.add_span_processor(
+            BatchSpanProcessor(
+                OTLPSpanExporter(endpoint=base + "/v1/traces", headers=headers, timeout=4),
+                max_queue_size=512,
+                max_export_batch_size=64,
+            )
+        )
         logs = LoggerProvider(resource=res)
-        logs.add_log_record_processor(BatchLogRecordProcessor(
-            OTLPLogExporter(endpoint=base + "/v1/logs", headers=headers, timeout=4),
-            max_queue_size=512, max_export_batch_size=64,
-        ))
+        logs.add_log_record_processor(
+            BatchLogRecordProcessor(
+                OTLPLogExporter(endpoint=base + "/v1/logs", headers=headers, timeout=4),
+                max_queue_size=512,
+                max_export_batch_size=64,
+            )
+        )
         trace.set_tracer_provider(traces)
         sanitized = _MetadataOnlyOTLPHandler(LoggingHandler(logger_provider=logs))
         # FastAPI/Uvicorn process loggers are not necessarily root-propagating.

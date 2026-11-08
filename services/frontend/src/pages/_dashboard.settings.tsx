@@ -3,7 +3,7 @@ import { useAdmin } from '@/hooks/use-admin'
 import { cn } from '@/lib/utils'
 import { getGetGeneralSettingsQueryKey, getGetSettingsQueryKey, useGetSettings, useModifySettings } from '@/service/api'
 import { useQueryClient } from '@tanstack/react-query'
-import { Bell, Database, Fingerprint, ListTodo, LucideIcon, Palette, Send, Settings as SettingsIcon, Webhook } from 'lucide-react'
+import { Database, Fingerprint, ListTodo, LucideIcon, Palette, Settings as SettingsIcon, Webhook } from 'lucide-react'
 import { createContext, useCallback, useContext, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation, useNavigate } from 'react-router'
@@ -38,10 +38,8 @@ export const useSettingsContext = () => {
 
 const allTabs: Tab[] = [
   { id: 'general', label: 'settings.general.title', icon: SettingsIcon, url: '/settings/general' },
-  { id: 'notifications', label: 'settings.notifications.title', icon: Bell, url: '/settings/notifications' },
   { id: 'subscriptions', label: 'settings.subscriptions.title', icon: ListTodo, url: '/settings/subscriptions' },
   { id: 'hwid', label: 'settings.hwid.title', icon: Fingerprint, url: '/settings/hwid' },
-  { id: 'telegram', label: 'settings.telegram.title', icon: Send, url: '/settings/telegram' },
   { id: 'webhook', label: 'settings.webhook.title', icon: Webhook, url: '/settings/webhook' },
   { id: 'cleanup', label: 'settings.cleanup.title', icon: Database, url: '/settings/cleanup' },
   { id: 'theme', label: 'theme.title', icon: Palette, url: '/settings/theme' },
@@ -150,20 +148,6 @@ export default function Settings() {
 
       // Only include data relevant to the active tab
       switch (activeTab) {
-        case 'notifications':
-          if (data.data) {
-            // If data is already wrapped, use it as is
-            filteredData = data
-          } else {
-            // Wrap notification data in the expected format
-            filteredData = {
-              data: {
-                notification_enable: data.notification_enable,
-                notification_settings: data.notification_settings,
-              },
-            }
-          }
-          break
         case 'subscriptions':
           if (data.subscription) {
             // Wrap subscription data in the expected format
@@ -179,10 +163,6 @@ export default function Settings() {
           break
         case 'hwid':
           filteredData = data.hwid ? { data: { hwid: data.hwid } } : data
-          break
-        case 'telegram':
-          // Add telegram specific filtering if needed
-          filteredData = { data: data }
           break
         case 'webhook':
           // Add webhook specific filtering if needed

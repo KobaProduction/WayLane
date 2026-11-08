@@ -28,6 +28,11 @@ def test_preview_revision_requires_matching_schema_and_only_changes_stamp(
         engine = create_async_engine(database_url)
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            if should_succeed:
+                # This one-off reconciliation applies only to genuinely old
+                # preview schemas that still had the physical `users` table.
+                # The current UUID-only product schema cannot satisfy it.
+                await connection.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY)"))
             await connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
             await connection.execute(
                 text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),

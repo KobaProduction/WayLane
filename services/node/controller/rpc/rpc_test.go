@@ -167,7 +167,7 @@ func TestGRPC_GetUsersStats(t *testing.T) {
 	ctx, cancel := context.WithTimeout(sharedTestCtx.ctxWithSession, 5*time.Second)
 	defer cancel()
 
-	stats, err := sharedTestCtx.client.GetStats(ctx, &common.StatRequest{Reset_: true, Type: common.StatType_UsersStat})
+	stats, err := sharedTestCtx.client.GetStats(ctx, &common.StatRequest{Reset_: true, Type: common.StatType_SubscriptionsStat})
 	if err != nil {
 		t.Fatalf("Failed to get users stats: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestGRPC_GetUserOnlineStats_NotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(sharedTestCtx.ctxWithSession, 5*time.Second)
 	defer cancel()
 
-	_, err := sharedTestCtx.client.GetUserOnlineStats(ctx, &common.StatRequest{Name: "does-not-exist@example.com"})
+	_, err := sharedTestCtx.client.GetSubscriptionOnlineStats(ctx, &common.StatRequest{Name: "does-not-exist@example.com"})
 	st, _ := status.FromError(err)
 	if st.Code() != codes.NotFound {
 		t.Fatalf("Expected NotFound error, got: %v", err)
@@ -192,7 +192,7 @@ func TestGRPC_GetUserOnlineIpListStats_NotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(sharedTestCtx.ctxWithSession, 5*time.Second)
 	defer cancel()
 
-	_, err := sharedTestCtx.client.GetUserOnlineIpListStats(ctx, &common.StatRequest{Name: "does-not-exist@example.com"})
+	_, err := sharedTestCtx.client.GetSubscriptionOnlineIpListStats(ctx, &common.StatRequest{Name: "does-not-exist@example.com"})
 	st, _ := status.FromError(err)
 	if st.Code() != codes.NotFound {
 		t.Fatalf("Expected NotFound error, got: %v", err)
@@ -203,10 +203,10 @@ func TestGRPC_SyncUsers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(sharedTestCtx.ctxWithSession, 10*time.Second)
 	defer cancel()
 
-	syncUser, _ := sharedTestCtx.client.SyncUser(ctx)
+	syncUser, _ := sharedTestCtx.client.SyncSubscription(ctx)
 
-	user1 := &common.User{
-		Email: "test_user1@example.com",
+	user1 := &common.Subscription{
+		SubscriptionUuid: "test_user1@example.com",
 		Inbounds: []string{
 			"VMESS TCP NOTLS",
 			"VLESS TCP REALITY",
@@ -235,8 +235,8 @@ func TestGRPC_SyncUsers(t *testing.T) {
 		t.Fatalf("Failed to sync user1: %v", err)
 	}
 
-	user2 := &common.User{
-		Email: "test_user2@example.com",
+	user2 := &common.Subscription{
+		SubscriptionUuid: "test_user2@example.com",
 		Inbounds: []string{
 			"VMESS TCP NOTLS",
 			"VLESS TCP REALITY",
@@ -270,16 +270,16 @@ func TestGRPC_SyncUsersChunked(t *testing.T) {
 	ctx, cancel := context.WithTimeout(sharedTestCtx.ctxWithSession, 10*time.Second)
 	defer cancel()
 
-	stream, err := sharedTestCtx.client.SyncUsersChunked(ctx)
+	stream, err := sharedTestCtx.client.SyncSubscriptionsChunked(ctx)
 	if err != nil {
 		t.Fatalf("Failed to open chunked sync stream: %v", err)
 	}
 
-	firstChunk := &common.UsersChunk{
+	firstChunk := &common.SubscriptionsChunk{
 		Index: 0,
-		Users: []*common.User{
+		Subscriptions: []*common.Subscription{
 			{
-				Email: "chunk_user1@example.com",
+				SubscriptionUuid: "chunk_user1@example.com",
 				Inbounds: []string{
 					"VMESS TCP NOTLS",
 					"VLESS TCP REALITY",
@@ -296,11 +296,11 @@ func TestGRPC_SyncUsersChunked(t *testing.T) {
 		},
 	}
 
-	secondChunk := &common.UsersChunk{
+	secondChunk := &common.SubscriptionsChunk{
 		Index: 1,
-		Users: []*common.User{
+		Subscriptions: []*common.Subscription{
 			{
-				Email: "chunk_user2@example.com",
+				SubscriptionUuid: "chunk_user2@example.com",
 				Inbounds: []string{
 					"Shadowsocks TCP",
 					"Shadowsocks UDP",
@@ -333,7 +333,7 @@ func TestGRPC_GetSpecificUserStats(t *testing.T) {
 	ctx, cancel := context.WithTimeout(sharedTestCtx.ctxWithSession, 5*time.Second)
 	defer cancel()
 
-	stats, err := sharedTestCtx.client.GetStats(ctx, &common.StatRequest{Name: "test_user2@example.com", Reset_: true, Type: common.StatType_UsersStat})
+	stats, err := sharedTestCtx.client.GetStats(ctx, &common.StatRequest{Name: "test_user2@example.com", Reset_: true, Type: common.StatType_SubscriptionsStat})
 	if err != nil {
 		t.Fatalf("Failed to get user stats: %v", err)
 	}

@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
-from app.db.models import ProxyHostALPN, ProxyHostFingerprint, ProxyHostSecurity, UserStatus
+from app.db.models import ProxyHostALPN, ProxyHostFingerprint, ProxyHostSecurity, SubscriptionStatus
 from app.utils.helpers import MAX_FORMAT_SPEC_NUMBER, has_markup_unsafe_chars, has_oversized_format_spec
 
 from .validators import ListValidator, StringArrayValidator
@@ -752,7 +752,7 @@ def validate_format_variables(value: str, allow_quoting: bool = True) -> str:
     """Reject a value that the subscription cannot render with ``str.format_map``.
 
     Unbalanced braces and positional fields (``{}``, ``{0}``) always fail; attribute and index
-    fields (``{USERNAME.x}``, ``{USERNAME[9]}``) fail or not depending on the user, so only plain
+    fields (``{SUBSCRIPTION_UUID.x}``, ``{SUBSCRIPTION_UUID[9]}``) fail or not depending on the user, so only plain
     variable names (with an optional format spec) are allowed. ``{{`` and ``}}`` stay literal braces.
     Widths and precisions above ``MAX_FORMAT_SPEC_NUMBER`` are rejected before anything is formatted.
     ``allow_quoting=False`` also rejects the ``!r`` and ``!a`` conversions, which wrap the value in quotes.
@@ -765,7 +765,7 @@ def validate_format_variables(value: str, allow_quoting: bool = True) -> str:
     try:
         fields = [(field, conversion) for _, field, _, conversion in Formatter().parse(value) if field is not None]
         value.format_map(FormatVariables())
-    except (ValueError, AttributeError, IndexError, TypeError):
+    except ValueError, AttributeError, IndexError, TypeError:
         raise ValueError(f'Invalid formatting variables in "{value}"')
     if any("." in field or "[" in field for field, _ in fields):
         raise ValueError(f'Invalid formatting variables in "{value}"')
@@ -839,7 +839,7 @@ class BaseHost(BaseModel):
     use_sni_as_host: bool = Field(default=False)
     vless_route: str | None = Field(default=None, pattern=r"^$|^[0-9a-fA-F]{4}$")
     priority: int
-    status: set[UserStatus] | None = Field(default_factory=set)
+    status: set[SubscriptionStatus] | None = Field(default_factory=set)
     ech: ECHSettings | None = Field(default=None)
     pinned_peer_cert_sha256: str | None = Field(default=None)
     verify_peer_cert_by_name: set[str] | None = Field(default_factory=set)

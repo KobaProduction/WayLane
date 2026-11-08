@@ -41,14 +41,14 @@ func (va *VmessAccount) Message() (*serial.TypedMessage, error) {
 	return ToTypedMessage(&vmess.Account{Id: va.ID.String()})
 }
 
-func NewVmessAccount(user *common.User) (*VmessAccount, error) {
+func NewVmessAccount(user *common.Subscription) (*VmessAccount, error) {
 	id, err := uuid.Parse(user.GetProxies().GetVmess().GetId())
 	if err != nil {
 		return nil, err
 	}
 	return &VmessAccount{
 		BaseAccount: BaseAccount{
-			Email: user.GetEmail(),
+			Email: user.GetSubscriptionUuid(),
 			Level: 0,
 		},
 		ID: id,
@@ -65,14 +65,14 @@ func (va *VlessAccount) Message() (*serial.TypedMessage, error) {
 	return ToTypedMessage(&vless.Account{Id: va.ID.String(), Flow: va.Flow, Reverse: nil})
 }
 
-func NewVlessAccount(user *common.User) (*VlessAccount, error) {
+func NewVlessAccount(user *common.Subscription) (*VlessAccount, error) {
 	id, err := uuid.Parse(user.GetProxies().GetVless().GetId())
 	if err != nil {
 		return nil, err
 	}
 	return &VlessAccount{
 		BaseAccount: BaseAccount{
-			Email: user.GetEmail(),
+			Email: user.GetSubscriptionUuid(),
 			Level: 0,
 		},
 		ID:   id,
@@ -89,10 +89,10 @@ func (ta *TrojanAccount) Message() (*serial.TypedMessage, error) {
 	return ToTypedMessage(&trojan.Account{Password: ta.Password})
 }
 
-func NewTrojanAccount(user *common.User) *TrojanAccount {
+func NewTrojanAccount(user *common.Subscription) *TrojanAccount {
 	return &TrojanAccount{
 		BaseAccount: BaseAccount{
-			Email: user.GetEmail(),
+			Email: user.GetSubscriptionUuid(),
 			Level: 0,
 		},
 		Password: user.GetProxies().GetTrojan().GetPassword(),
@@ -138,10 +138,10 @@ func (sa *ShadowsocksAccount) Message() (*serial.TypedMessage, error) {
 	return ToTypedMessage(&shadowsocks_2022.Account{Key: sa.Password})
 }
 
-func NewShadowsocksAccount(user *common.User) *ShadowsocksAccount {
+func NewShadowsocksAccount(user *common.Subscription) *ShadowsocksAccount {
 	return &ShadowsocksAccount{
 		BaseAccount: BaseAccount{
-			Email: user.GetEmail(),
+			Email: user.GetSubscriptionUuid(),
 			Level: 0,
 		},
 		Password: user.GetProxies().GetShadowsocks().GetPassword(),
@@ -161,7 +161,7 @@ func (sa *ShadowsocksTcpAccount) Message() (*serial.TypedMessage, error) {
 	return ToTypedMessage(&shadowsocks.Account{Password: sa.Password, CipherType: shadowsocks.CipherType(CipherType_value[sa.Method])})
 }
 
-func NewShadowsocksTcpAccount(user *common.User) *ShadowsocksTcpAccount {
+func NewShadowsocksTcpAccount(user *common.Subscription) *ShadowsocksTcpAccount {
 	method := user.GetProxies().GetShadowsocks().GetMethod()
 	if _, ok := CipherType_value[method]; !ok {
 		method = CipherType_name[9]
@@ -170,7 +170,7 @@ func NewShadowsocksTcpAccount(user *common.User) *ShadowsocksTcpAccount {
 	return &ShadowsocksTcpAccount{
 		ShadowsocksAccount: ShadowsocksAccount{
 			BaseAccount: BaseAccount{
-				Email: user.GetEmail(),
+				Email: user.GetSubscriptionUuid(),
 				Level: 0,
 			},
 			Password: user.GetProxies().GetShadowsocks().GetPassword(),
@@ -188,10 +188,10 @@ func (ha *HysteriaAccount) Message() (*serial.TypedMessage, error) {
 	return ToTypedMessage(&hysteria.Account{Auth: ha.Auth})
 }
 
-func NewHysteriaAccount(user *common.User) *HysteriaAccount {
+func NewHysteriaAccount(user *common.Subscription) *HysteriaAccount {
 	return &HysteriaAccount{
 		BaseAccount: BaseAccount{
-			Email: user.GetEmail(),
+			Email: user.GetSubscriptionUuid(),
 			Level: 0,
 		},
 		Auth: user.GetProxies().GetHysteria().GetAuth(),

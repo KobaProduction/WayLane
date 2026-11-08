@@ -13,24 +13,24 @@ import { formatBytes } from '@/utils/formatByte'
 import type { NodeRealtimeStats } from '@/service/api'
 
 type Node = { id: number; name: string; status: string; core_id: number | null }
-type User = { id: number; name: string; status: string }
-type Catalog = { nodes: Node[]; users: User[]; catalog_truncated: boolean }
-type MatrixRow = { user_id: number; username: string; status: string; node_id: number; node_name: string; total_bytes: number; last_recorded_at: string | null }
+type SubscriptionItem = { uuid: string; status: string; online_at: string | null }
+type Catalog = { nodes: Node[]; subscriptions: SubscriptionItem[]; catalog_truncated: boolean }
+type MatrixRow = { subscription_uuid: string; status: string; node_id: number; node_name: string; total_bytes: number; last_recorded_at: string | null }
 type Matrix = { rows: MatrixRow[]; truncated: boolean; direction_available: boolean }
 type TrafficSeries = {
-  series: { id: number; name: string; total_bytes: number }[]
-  rows: { period_start: string; series_id: number; total_bytes: number }[]
+  series: { id: string | number; name: string; total_bytes: number }[]
+  rows: { period_start: string; series_id: string | number; total_bytes: number }[]
   truncated: boolean
 }
-type HistoryRow = { period_start: string; node_id: number; node_name: string; total_bytes: number; upload: number | null; download: number | null }
+type HistoryRow = { period_start: string; node_id: string | number; node_name: string; total_bytes: number; upload: number | null; download: number | null }
 type History = { rows: HistoryRow[]; truncated: boolean; direction_available: boolean; source: string }
 type DeviceEntry = { name: string; count: number }
 type Devices = {
   systems: DeviceEntry[]; versions: DeviceEntry[]; models: DeviceEntry[]; user_agents: DeviceEntry[]
-  recent: { username: string; system: string | null; version: string | null; model: string | null; last_used_at: string | null }[]
+  recent: { subscription_uuid: string; system: string | null; version: string | null; model: string | null; last_used_at: string | null }[]
 }
 type Rates = Record<string, NodeRealtimeStats | null>
-type Settings = { excludedNodes: number[]; excludedUsers: number[]; colors: Record<string, string> }
+type Settings = { excludedNodes: number[]; excludedSubscriptions: string[]; colors: Record<string, string> }
 type Direction = 'total' | 'upload' | 'download'
 const base = '/api/business-analytics'
 const palette = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#be185d', '#ca8a04', '#64748b', '#0d9488']
@@ -41,8 +41,8 @@ const asDate = (d: Date) => d.toISOString().slice(0, 10)
 function loadSettings(): Settings {
   try {
     const x = JSON.parse(localStorage.getItem('waylane:analytics-view') || '{}') as Partial<Settings>
-    return { excludedNodes: x.excludedNodes || [], excludedUsers: x.excludedUsers || [], colors: x.colors || {} }
-  } catch { return { excludedNodes: [], excludedUsers: [], colors: {} } }
+    return { excludedNodes: x.excludedNodes || [], excludedSubscriptions: x.excludedSubscriptions || [], colors: x.colors || {} }
+  } catch { return { excludedNodes: [], excludedSubscriptions: [], colors: {} } }
 }
 function Group({ title, rows }: { title: string; rows: DeviceEntry[] }) {
   return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="space-y-2">
@@ -51,11 +51,11 @@ function Group({ title, rows }: { title: string; rows: DeviceEntry[] }) {
   </CardContent></Card>
 }
 function HistoryChart({ rows, nodes, direction, colorOf }: {
-  rows: HistoryRow[]; nodes: Node[]; direction: Direction; colorOf: (id: number) => string
+  rows: HistoryRow[]; nodes: { id: number | string; name: string }[]; direction: Direction; colorOf: (id: number | string) => string
 }) {
   const chart = useMemo(() => {
     const dates = new Map<string, Record<string, string | number>>()
-    const ids = new Set<number>()
+    const ids = new Set<number | string>()
     for (const r of rows) {
       ids.add(r.node_id)
       const p = dates.get(r.period_start) || { date: r.period_start }
@@ -85,15 +85,15 @@ export default function Statistics() {
   const [from, setFrom] = useState(asDate(new Date(Date.now() - 30 * 86400000)))
   const [to, setTo] = useState(asDate(new Date()))
   const [period, setPeriod] = useState<'hour' | 'day'>('day')
-  const [userId, setUserId] = useState('')
+  const [subscriptionUuid, setSubscriptionUuid] = useState('')
   const [nodeId, setNodeId] = useState('')
   const [status, setStatus] = useState('')
-  const [orientation, setOrientation] = useState<'node' | 'user'>('node')
+  const [orientation, setOrientation] = useState<'node' | 'subscription'>('node')
   const [metric, setMetric] = useState<Direction>('total')
   const [chosenNodes, setChosenNodes] = useState<number[]>([])
   const [showExcluded, setShowExcluded] = useState(false)
   const [settings, setSettings] = useState(loadSettings)
-  const [catalog, setCatalog] = useState<Catalog>({ nodes: [], users: [], catalog_truncated: false })
+  const [catalog, setCatalog] = useState<Catalog>({ nodes: [], subscriptions: [], catalog_truncated: false })
   const [matrix, setMatrix] = useState<Matrix>({ rows: [], truncated: false, direction_available: false })
   const [trafficSeries, setTrafficSeries] = useState<TrafficSeries>({ series: [], rows: [], truncated: false })
   const [history, setHistory] = useState<History>({ rows: [], truncated: false, direction_available: true, source: 'node_usages' })
@@ -102,8 +102,11 @@ export default function Statistics() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const excludedNodes = showExcluded ? [] : settings.excludedNodes
-  const excludedUsers = showExcluded ? [] : settings.excludedUsers
-  const colorOf = useCallback((id: number) => settings.colors[id] || palette[id % palette.length], [settings.colors])
+  const excludedSubscriptions = showExcluded ? [] : settings.excludedSubscriptions
+  const colorOf = useCallback((id: number | string) => {
+    const seed = typeof id === 'number' ? id : Array.from(id).reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0)
+    return settings.colors[String(id)] || palette[seed % palette.length]
+  }, [settings.colors])
 
   useEffect(() => { localStorage.setItem('waylane:analytics-view', JSON.stringify(settings)) }, [settings])
   useEffect(() => {
@@ -121,7 +124,7 @@ export default function Statistics() {
     return q
   }, [span, from, to])
   const excludedNodeKey = excludedNodes.join(',')
-  const excludedUserKey = excludedUsers.join(',')
+  const excludedSubscriptionKey = excludedSubscriptions.join(',')
   const chosenNodeKey = chosenNodes.join(',')
 
   const refresh = useCallback(async () => {
@@ -129,16 +132,16 @@ export default function Statistics() {
     setLoading(true); setError('')
     try {
       if (tab === 'devices') setDevices(await $fetch<Devices>(base + '/devices?' + query))
-      else if (tab === 'users') {
+      else if (tab === 'subscriptions') {
         const q = new URLSearchParams(query)
         if (span === 'all') q.set('all_time', 'true')
         if (nodeId) q.set('node_id', nodeId)
-        if (userId) q.set('user_id', userId)
+        if (subscriptionUuid) q.set('subscription_uuid', subscriptionUuid)
         if (status) q.set('status', status)
         if (excludedNodeKey) q.set('exclude_node_ids', excludedNodeKey)
-        if (excludedUserKey) q.set('exclude_user_ids', excludedUserKey)
+        if (excludedSubscriptionKey) q.set('exclude_subscription_uuids', excludedSubscriptionKey)
         setMatrix(await $fetch<Matrix>(base + '/matrix?' + q))
-        if (nodeId || userId) {
+        if (nodeId || subscriptionUuid) {
           const seriesQuery = new URLSearchParams(q)
           seriesQuery.delete('all_time')
           if (span === 'all') {
@@ -157,12 +160,12 @@ export default function Statistics() {
         q.set('period', period)
         if (chosenNodeKey) q.set('node_ids', chosenNodeKey)
         if (excludedNodeKey) q.set('exclude_node_ids', excludedNodeKey)
-        if (excludedUserKey) q.set('exclude_user_ids', excludedUserKey)
+        if (excludedSubscriptionKey) q.set('exclude_subscription_uuids', excludedSubscriptionKey)
         setHistory(await $fetch<History>(base + '/nodes?' + q))
       }
     } catch (e) { setError(errText(e)) }
     finally { setLoading(false) }
-  }, [canRead, tab, query, span, nodeId, userId, status, period, chosenNodeKey, excludedNodeKey, excludedUserKey])
+  }, [canRead, tab, query, span, nodeId, subscriptionUuid, status, period, chosenNodeKey, excludedNodeKey, excludedSubscriptionKey])
   useEffect(() => { void refresh() }, [refresh])
 
   const refreshRates = useCallback(async () => {
@@ -195,9 +198,9 @@ export default function Statistics() {
   const groups = useMemo(() => {
     const grouped = new Map<string, { name: string; total: number; details: { name: string; total: number }[] }>()
     for (const r of matrix.rows) {
-      const parent = orientation === 'node' ? String(r.node_id) : String(r.user_id)
-      const parentName = orientation === 'node' ? r.node_name : r.username
-      const childName = orientation === 'node' ? r.username : r.node_name
+      const parent = orientation === 'node' ? String(r.node_id) : r.subscription_uuid
+      const parentName = orientation === 'node' ? r.node_name : r.subscription_uuid
+      const childName = orientation === 'node' ? r.subscription_uuid : r.node_name
       const group = grouped.get(parent) || { name: parentName, total: 0, details: [] }
       group.total += r.total_bytes
       group.details.push({ name: childName, total: r.total_bytes })
@@ -205,10 +208,13 @@ export default function Statistics() {
     }
     return Array.from(grouped.values()).sort((a, b) => b.total - a.total)
   }, [matrix.rows, orientation])
-  function toggleExclusion(kind: 'excludedNodes' | 'excludedUsers', id: number, include: boolean) {
-    setSettings(p => ({ ...p, [kind]: include ? p[kind].filter(x => x !== id) : [...p[kind], id] }))
+  function toggleNodeExclusion(id: number, include: boolean) {
+    setSettings(p => ({ ...p, excludedNodes: include ? p.excludedNodes.filter(value => value !== id) : [...p.excludedNodes, id] }))
   }
-  if (!canRead) return <p className="p-6 text-sm">Общая статистика всех пользователей доступна владельцу панели.</p>
+  function toggleSubscriptionExclusion(id: string, include: boolean) {
+    setSettings(p => ({ ...p, excludedSubscriptions: include ? p.excludedSubscriptions.filter(value => value !== id) : [...p.excludedSubscriptions, id] }))
+  }
+  if (!canRead) return <p className="p-6 text-sm">Общая статистика всех подписок доступна владельцу панели.</p>
   return <div className="w-full space-y-4 pb-6">
     <PageHeader title="statistics" description="monitorServers" /><Separator />
     <div className="space-y-4 px-3 sm:px-4">
@@ -216,7 +222,7 @@ export default function Statistics() {
         <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="overview">Общая</TabsTrigger>
           <TabsTrigger value="nodes">Ноды и скорости</TabsTrigger>
-          <TabsTrigger value="users">Трафик пользователей</TabsTrigger>
+          <TabsTrigger value="subscriptions">Трафик подписок</TabsTrigger>
           <TabsTrigger value="devices">Устройства</TabsTrigger>
           <TabsTrigger value="filters">Фильтры и цвета</TabsTrigger>
         </TabsList>
@@ -238,7 +244,7 @@ export default function Statistics() {
             </select>
           </label>}
           <label className="flex items-center gap-2 pb-2 text-sm">
-            <Checkbox checked={showExcluded} onCheckedChange={x => setShowExcluded(x === true)} />Учитывать служебные ноды и пользователей
+            <Checkbox checked={showExcluded} onCheckedChange={x => setShowExcluded(x === true)} />Учитывать служебные ноды и подписок
           </label>
           <Button variant="outline" onClick={() => void refresh()} disabled={loading}>{loading ? 'Загрузка…' : 'Обновить'}</Button>
         </CardContent></Card>
@@ -295,16 +301,16 @@ export default function Statistics() {
             </div>
             <HistoryChart rows={history.rows} nodes={catalog.nodes} direction={history.direction_available ? metric : 'total'} colorOf={colorOf} />
             {!history.direction_available && <p className="text-sm text-muted-foreground">
-              При исключении мостовых пользователей показывается только суммарный трафик, без разделения по направлениям.
+              При исключении мостовых подписок показывается только суммарный трафик, без разделения по направлениям.
             </p>}
           </CardContent></Card>
         </TabsContent>
-        <TabsContent value="users" className="mt-4 space-y-4">
-          <Card><CardHeader><CardTitle>Нода ↔ Пользователь: суммарный трафик</CardTitle></CardHeader><CardContent className="space-y-4">
+        <TabsContent value="subscriptions" className="mt-4 space-y-4">
+          <Card><CardHeader><CardTitle>Нода ↔ Подписка: суммарный трафик</CardTitle></CardHeader><CardContent className="space-y-4">
             <div className="flex flex-wrap gap-3 text-sm">
               <label>Просмотр
                 <select className="ml-2 rounded border bg-background p-2" value={orientation} onChange={e => setOrientation(e.target.value as typeof orientation)}>
-                  <option value="node">Нода → пользователи</option><option value="user">Пользователь → ноды</option>
+                  <option value="node">Нода → подписки</option><option value="subscription">Подписка → ноды</option>
                 </select>
               </label>
               <label>Нода
@@ -312,9 +318,9 @@ export default function Statistics() {
                   <option value="">Все</option>{catalog.nodes.map(n => <option value={n.id} key={n.id}>{n.name}</option>)}
                 </select>
               </label>
-              <label>Пользователь
-                <select className="ml-2 max-w-52 rounded border bg-background p-2" value={userId} onChange={e => setUserId(e.target.value)}>
-                  <option value="">Все</option>{catalog.users.map(u => <option value={u.id} key={u.id}>{u.name}</option>)}
+              <label>Подписка
+                <select className="ml-2 max-w-52 rounded border bg-background p-2" value={subscriptionUuid} onChange={e => setSubscriptionUuid(e.target.value)}>
+                  <option value="">Все</option>{catalog.subscriptions.map(u => <option value={u.uuid} key={u.uuid}>{u.uuid}</option>)}
                 </select>
               </label>
               <label>Статус
@@ -324,10 +330,10 @@ export default function Statistics() {
               </label>
             </div>
             <p className="text-sm">Трафик выбранных связей: <strong>{fmt(matrix.rows.reduce((sum, x) => sum + x.total_bytes, 0))}</strong></p>
-            <p className="text-xs text-muted-foreground">Из существующей истории можно получить только сумму для пары пользователь–нода. Upload/download пользователя не сохраняются отдельно.</p>
-            {(nodeId || userId) && <div className="rounded border p-3">
+            <p className="text-xs text-muted-foreground">Из существующей истории можно получить только сумму для пары подписка–нода. Upload/download подписки не сохраняются отдельно.</p>
+            {(nodeId || subscriptionUuid) && <div className="rounded border p-3">
               <h4 className="mb-2 font-medium">
-                {userId ? 'История пользователя по нодам' : 'История ноды по пользователям'}
+                {subscriptionUuid ? 'История подписки по нодам' : 'История ноды по подпискам'}
               </h4>
               {trafficSeries.truncated && <p className="text-xs text-amber-600">Временные данные ограничены; уточните период.</p>}
               <HistoryChart direction="total" colorOf={colorOf}
@@ -362,7 +368,7 @@ export default function Statistics() {
           </div>
           <Card><CardHeader><CardTitle>Последние обновления устройств</CardTitle></CardHeader><CardContent className="max-h-80 overflow-auto">
             {devices?.recent.map((r, i) => <p className="flex flex-wrap justify-between gap-3 border-b py-2 text-sm" key={i}>
-              <span>{r.username} · {[r.system, r.version, r.model].filter(Boolean).join(' / ')}</span>
+              <span>{r.subscription_uuid} · {[r.system, r.version, r.model].filter(Boolean).join(' / ')}</span>
               <span>{r.last_used_at ? new Date(r.last_used_at).toLocaleString() : 'Нет данных'}</span>
             </p>)}
             <p className="mt-2 text-xs text-muted-foreground">HWID — текущее состояние; User-Agent — обновления подписки, не VPN-сессии.</p>
@@ -373,17 +379,17 @@ export default function Statistics() {
             {catalog.nodes.map(n => <div className="flex items-center justify-between gap-2 border-b py-2" key={n.id}>
               <span className="text-sm">{n.name}</span><div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm"><Checkbox checked={!settings.excludedNodes.includes(n.id)}
-                  onCheckedChange={x => toggleExclusion('excludedNodes', n.id, x === true)} />Учитывать</label>
+                  onCheckedChange={x => toggleNodeExclusion(n.id, x === true)} />Учитывать</label>
                 <input aria-label={'Цвет ' + n.name} type="color" value={colorOf(n.id)}
                   onChange={e => setSettings(old => ({ ...old, colors: { ...old.colors, [n.id]: e.target.value } }))} />
               </div>
             </div>)}
           </CardContent></Card>
-          <Card><CardHeader><CardTitle>Мостовые пользователи</CardTitle></CardHeader><CardContent className="max-h-80 space-y-2 overflow-auto">
-            {catalog.users.map(u => <div className="flex justify-between gap-3 border-b py-2" key={u.id}>
-              <span className="text-sm">{u.name}</span><label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={!settings.excludedUsers.includes(u.id)}
-                  onCheckedChange={x => toggleExclusion('excludedUsers', u.id, x === true)} />Учитывать
+          <Card><CardHeader><CardTitle>Мостовые подписки</CardTitle></CardHeader><CardContent className="max-h-80 space-y-2 overflow-auto">
+            {catalog.subscriptions.map(u => <div className="flex justify-between gap-3 border-b py-2" key={u.uuid}>
+              <span className="text-sm">{u.uuid}</span><label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={!settings.excludedSubscriptions.includes(u.uuid)}
+                  onCheckedChange={x => toggleSubscriptionExclusion(u.uuid, x === true)} />Учитывать
               </label>
             </div>)}
           </CardContent></Card>

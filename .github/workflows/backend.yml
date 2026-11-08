@@ -46,6 +46,7 @@ jobs:
           tests/test_access_log_redaction.py
           tests/test_amneziawg_core.py
           tests/test_node_registry.py
+          tests/test_controlpb_import.py
           tests/test_node_binary_control.py
           tests/test_node_resource_routing.py
           tests/test_pgbouncer_bootstrap.py

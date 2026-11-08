@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { useChartViewType } from '@/hooks/use-chart-view-type'
 import useDirDetection from '@/hooks/use-dir-detection'
-import { Period, useGetUsersUsage, UserUsageStat } from '@/service/api'
+import { Period, useGetSubscriptionUsageMetrics, SubscriptionUsageStat } from '@/service/api'
 import {
   CHART_PERIOD_OVERRIDE_AUTO,
   type ChartPeriodOverride,
@@ -51,7 +51,7 @@ const PERIOD_KEYS = [
 ]
 
 const transformUsageData = (
-  apiData: { stats: UserUsageStat[] },
+  apiData: { stats: SubscriptionUsageStat[] },
   period: Period,
   locale: string = 'en',
   rangeHint?: { hours?: number; days?: number; months?: number; allTime?: boolean },
@@ -60,7 +60,7 @@ const transformUsageData = (
     return []
   }
 
-  return apiData.stats.map((stat: UserUsageStat) => {
+  return apiData.stats.map((stat: SubscriptionUsageStat) => {
     const displayLabel = formatPeriodLabelForPeriod(stat.period_start, period, locale, rangeHint)
 
     return {
@@ -169,16 +169,16 @@ const DataUsageChart = ({ adminUsername }: { adminUsername?: string }) => {
     [activePeriod, adminUsername, queryRange.startDate, queryRange.endDate],
   )
 
-  const { data, isLoading } = useGetUsersUsage(usersUsageParams, {
+  const { data, isLoading } = useGetSubscriptionUsageMetrics(usersUsageParams, {
     query: {
       refetchInterval: 1000 * 60 * 5,
     },
   })
 
-  let statsArr: UserUsageStat[] = []
+  let statsArr: SubscriptionUsageStat[] = []
   if (data?.stats) {
     if (typeof data.stats === 'object' && !Array.isArray(data.stats)) {
-      const statsObj = data.stats as { [key: string]: UserUsageStat[] }
+      const statsObj = data.stats as { [key: string]: SubscriptionUsageStat[] }
       statsArr = statsObj['-1'] || statsObj[Object.keys(statsObj)[0]] || []
     } else if (Array.isArray(data.stats)) {
       statsArr = data.stats
@@ -379,12 +379,12 @@ const DataUsageChart = ({ adminUsername }: { adminUsername?: string }) => {
       <CardFooter className="mt-0 flex-col items-start gap-2 pt-2 text-sm sm:pt-4">
         {chartData.length > 0 && trend !== null && trend > 0 && (
           <div className="flex gap-2 leading-none font-medium text-green-600 dark:text-green-400">
-            {t('usersTable.trendingUp', { defaultValue: 'Trending up by' })} {trend.toFixed(1)}% <TrendingUp className="h-4 w-4" />
+            {t('subscriptionsTable.trendingUp', { defaultValue: 'Trending up by' })} {trend.toFixed(1)}% <TrendingUp className="h-4 w-4" />
           </div>
         )}
         {chartData.length > 0 && trend !== null && trend < 0 && (
           <div className="flex gap-2 leading-none font-medium text-red-600 dark:text-red-400">
-            {t('usersTable.trendingDown', { defaultValue: 'Trending down by' })} {Math.abs(trend).toFixed(1)}% <TrendingDown className="h-4 w-4" />
+            {t('subscriptionsTable.trendingDown', { defaultValue: 'Trending down by' })} {Math.abs(trend).toFixed(1)}% <TrendingDown className="h-4 w-4" />
           </div>
         )}
         {chartData.length > 0 && (

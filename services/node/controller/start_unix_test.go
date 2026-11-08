@@ -39,8 +39,8 @@ func xrayStartRequest(t *testing.T) *common.Backend {
 		Type:      common.BackendType_XRAY,
 		Config:    string(raw),
 		KeepAlive: 60,
-		Users: []*common.User{{
-			Email:    "1",
+		Subscriptions: []*common.Subscription{{
+			SubscriptionUuid:    "1",
 			Inbounds: []string{"vless"},
 			Proxies:  &common.Proxy{Vless: &common.Vless{Id: uuid.NewString()}},
 		}},

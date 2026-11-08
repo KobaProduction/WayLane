@@ -19,12 +19,6 @@ const AdminsPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.admin
 const AdminRolesPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.admin-roles'))
 const ApiKeysPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.api-keys'))
 const TlsPresetsPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.tls-presets'))
-const BulkPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.bulk'))
-const BulkCreatePage = lazyWithChunkRecovery(() => import('../pages/_dashboard.bulk.create'))
-const BulkDataPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.bulk.data'))
-const BulkExpirePage = lazyWithChunkRecovery(() => import('../pages/_dashboard.bulk.expire'))
-const BulkGroupsPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.bulk.groups'))
-const BulkProxyPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.bulk.proxy'))
 const Groups = lazyWithChunkRecovery(() => import('../pages/_dashboard.groups'))
 const Hosts = lazyWithChunkRecovery(() => import('../pages/_dashboard.hosts'))
 const Nodes = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes'))
@@ -35,15 +29,13 @@ const Settings = lazyWithChunkRecovery(() => import('../pages/_dashboard.setting
 const CleanupSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.cleanup'))
 const GeneralSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.general'))
 const HwidSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.hwid'))
-const NotificationSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.notifications'))
 const SubscriptionSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.subscriptions'))
-const TelegramSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.telegram'))
 const WebhookSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.webhook'))
 const Statistics = lazyWithChunkRecovery(() => import('../pages/_dashboard.statistics'))
 const TemplatesLayout = lazyWithChunkRecovery(() => import('../pages/_dashboard.templates'))
-const UserTemplates = lazyWithChunkRecovery(() => import('../pages/_dashboard.templates.user'))
+const SubscriptionTemplates = lazyWithChunkRecovery(() => import('../pages/_dashboard.templates.subscriptions'))
 const ClientTemplates = lazyWithChunkRecovery(() => import('../pages/_dashboard.templates.client'))
-const Users = lazyWithChunkRecovery(() => import('../pages/_dashboard.users'))
+const Subscriptions = lazyWithChunkRecovery(() => import('../pages/_dashboard.subscriptions'))
 const Login = lazyWithChunkRecovery(() => import('../pages/login'))
 
 // Component to handle default settings routing based on user permissions
@@ -58,7 +50,7 @@ function SettingsIndex() {
 
 function TemplatesIndex() {
   const { admin } = useAdmin()
-  const defaultPath = hasPermission(admin, 'templates', 'read') ? '/templates/user' : hasPermission(admin, 'client_templates', 'read') ? '/templates/client' : '/settings/theme'
+  const defaultPath = hasPermission(admin, 'templates', 'read') ? '/templates/subscriptions' : hasPermission(admin, 'client_templates', 'read') ? '/templates/client' : '/settings/theme'
 
   return <Navigate to={defaultPath} replace />
 }
@@ -75,18 +67,6 @@ const fetchAdminLoader = async (): Promise<any> => {
     throw error
   }
 }
-
-// Telegram Mini Apps append launch params after `#` (e.g. "#tgWebAppData=...&tgWebAppVersion=..."),
-// which collides with createHashRouter reading window.location.hash as the route path and
-// produces a "No route matches" 404 before React ever mounts. Reset it to a real route first.
-// @telegram-apps/sdk's retrieveRawInitData() still recovers the original data afterward via the
-// Navigation Timing API, which isn't affected by history.replaceState.
-;(function sanitizeTelegramLaunchHash() {
-  const { hash } = window.location
-  if (hash && !hash.startsWith('#/') && hash.includes('tgWebApp')) {
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/`)
-  }
-})()
 
 // Wrap all route elements in <Suspense fallback={<LoadingSpinner />}>
 export const router = createHashRouter([
@@ -114,10 +94,10 @@ export const router = createHashRouter([
         ),
       },
       {
-        path: '/users',
+        path: '/subscriptions',
         element: (
           <Suspense fallback={<LoadingSpinner />}>
-            <Users />
+            <Subscriptions />
           </Suspense>
         ),
       },
@@ -218,10 +198,10 @@ export const router = createHashRouter([
             element: <TemplatesIndex />,
           },
           {
-            path: '/templates/user',
+            path: '/templates/subscriptions',
             element: (
               <Suspense fallback={<LoadingSpinner />}>
-                <UserTemplates />
+                <SubscriptionTemplates />
               </Suspense>
             ),
           },
@@ -289,14 +269,6 @@ export const router = createHashRouter([
             ),
           },
           {
-            path: '/settings/notifications',
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <NotificationSettings />
-              </Suspense>
-            ),
-          },
-          {
             path: '/settings/subscriptions',
             element: (
               <Suspense fallback={<LoadingSpinner />}>
@@ -309,14 +281,6 @@ export const router = createHashRouter([
             element: (
               <Suspense fallback={<LoadingSpinner />}>
                 <HwidSettings />
-              </Suspense>
-            ),
-          },
-          {
-            path: '/settings/telegram',
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <TelegramSettings />
               </Suspense>
             ),
           },
@@ -341,65 +305,6 @@ export const router = createHashRouter([
             element: (
               <Suspense fallback={<LoadingSpinner />}>
                 <ThemePage />
-              </Suspense>
-            ),
-          },
-        ],
-      },
-      {
-        path: '/bulk',
-        element: (
-          <Suspense fallback={<TabbedRouteSuspenseFallback />}>
-            <BulkPage />
-          </Suspense>
-        ),
-        children: [
-          {
-            path: '/bulk',
-            index: true,
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <BulkCreatePage />
-              </Suspense>
-            ),
-          },
-          {
-            path: '/bulk/groups',
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <BulkGroupsPage />
-              </Suspense>
-            ),
-          },
-          {
-            path: '/bulk/create',
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <BulkCreatePage />
-              </Suspense>
-            ),
-          },
-          {
-            path: '/bulk/proxy',
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <BulkProxyPage />
-              </Suspense>
-            ),
-          },
-          {
-            path: '/bulk/expire',
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <BulkExpirePage />
-              </Suspense>
-            ),
-          },
-          {
-            path: '/bulk/data',
-            element: (
-              <Suspense fallback={<LoadingSpinner />}>
-                <BulkDataPage />
               </Suspense>
             ),
           },

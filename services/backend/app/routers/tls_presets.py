@@ -16,8 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.db.models import CoreConfig, Node
-from app.db.tls import tls_bindings, tls_presets, agent_tls_bindings
-from .node_xray_resources import queue_xray_refresh
+from app.db.tls import agent_tls_bindings, tls_bindings, tls_presets
 from app.models.admin import AdminDetails
 from app.operation import OperatorType
 from app.operation.node import NodeOperation
@@ -33,6 +32,7 @@ from app.operation.tls_presets import (
 )
 
 from .authentication import require_permission
+from .node_xray_resources import queue_xray_refresh
 
 router = APIRouter(tags=["TLS Presets"], prefix="/api/tls-presets")
 
@@ -53,14 +53,25 @@ class TLSBindingInput(BaseModel):
     inbound_tag: str = Field(min_length=1, max_length=256)
 
 
-
 class PresetRename(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
 def _summary(row) -> dict:
     d = dict(row)
-    return {k: d[k] for k in ("id", "name", "certificate_pem", "fingerprint_sha256", "subject", "not_after", "revision", "updated_at")}
+    return {
+        k: d[k]
+        for k in (
+            "id",
+            "name",
+            "certificate_pem",
+            "fingerprint_sha256",
+            "subject",
+            "not_after",
+            "revision",
+            "updated_at",
+        )
+    }
 
 
 async def _preset(db: AsyncSession, preset_id: str):
@@ -115,8 +126,10 @@ async def create_tls_preset(
 ):
     info, cipher = _validated_pair(body.certificate, body.private_key)
     entry = {
-        "id": str(uuid.uuid4()), "name": body.name.strip(),
-        "certificate_pem": body.certificate, "encrypted_private_key": cipher,
+        "id": str(uuid.uuid4()),
+        "name": body.name.strip(),
+        "certificate_pem": body.certificate,
+        "encrypted_private_key": cipher,
         **info,
     }
     try:
@@ -155,9 +168,11 @@ async def rename_tls_preset(
 ):
     await _preset(db, preset_id)
     try:
-        await db.execute(update(tls_presets).where(tls_presets.c.id == preset_id).values(
-            name=body.name.strip(), updated_at=datetime.now(UTC)
-        ))
+        await db.execute(
+            update(tls_presets)
+            .where(tls_presets.c.id == preset_id)
+            .values(name=body.name.strip(), updated_at=datetime.now(UTC))
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -174,8 +189,9 @@ async def remove_tls_preset(
     await _preset(db, preset_id)
     if await list_bindings(db, preset_id):
         raise HTTPException(409, "Unbind nodes before deleting this TLS preset")
-    if await db.scalar(select(agent_tls_bindings.c.node_uuid).where(
-        agent_tls_bindings.c.preset_id == preset_id).limit(1)):
+    if await db.scalar(
+        select(agent_tls_bindings.c.node_uuid).where(agent_tls_bindings.c.preset_id == preset_id).limit(1)
+    ):
         raise HTTPException(409, "Unbind autonomous Agents before deleting this TLS preset")
     await db.execute(delete(tls_presets).where(tls_presets.c.id == preset_id))
     await db.commit()
@@ -207,8 +223,11 @@ async def add_tls_binding(
     if not core or body.inbound_tag not in tls_inbounds(core.config):
         raise HTTPException(422, "Selected node has no matching TLS inbound")
     binding = {
-        "id": str(uuid.uuid4()), "preset_id": preset_id,
-        "node_id": node.id, "core_id": core_id, "inbound_tag": body.inbound_tag,
+        "id": str(uuid.uuid4()),
+        "preset_id": preset_id,
+        "node_id": node.id,
+        "core_id": core_id,
+        "inbound_tag": body.inbound_tag,
     }
     try:
         await db.execute(insert(tls_bindings).values(**binding))
@@ -228,9 +247,15 @@ async def check_tls_binding(
 ):
     """Verify the certificate actually served by the selected TLS inbound."""
     preset = await _preset(db, preset_id)
-    binding = (await db.execute(select(tls_bindings).where(
-        tls_bindings.c.id == binding_id, tls_bindings.c.preset_id == preset_id
-    ))).mappings().first()
+    binding = (
+        (
+            await db.execute(
+                select(tls_bindings).where(tls_bindings.c.id == binding_id, tls_bindings.c.preset_id == preset_id)
+            )
+        )
+        .mappings()
+        .first()
+    )
     if not binding:
         raise HTTPException(404, "TLS binding not found")
     node = await db.get(Node, binding["node_id"])
@@ -270,8 +295,13 @@ async def check_tls_binding(
             "fingerprint_match": matches,
             "presented_fingerprint_sha256": fingerprint,
         }
-    except (OSError, TimeoutError, ssl.SSLError, AttributeError):
-        return {"node_id": node.id, "inbound_tag": binding["inbound_tag"], "reachable": False, "fingerprint_match": False}
+    except OSError, TimeoutError, ssl.SSLError, AttributeError:
+        return {
+            "node_id": node.id,
+            "inbound_tag": binding["inbound_tag"],
+            "reachable": False,
+            "fingerprint_match": False,
+        }
     finally:
         if writer:
             writer.close()
@@ -289,9 +319,15 @@ async def delete_tls_binding(
     _: AdminDetails = Depends(require_permission("cores", "update")),
 ):
     await _preset(db, preset_id)
-    row = (await db.execute(select(tls_bindings).where(
-        tls_bindings.c.id == binding_id, tls_bindings.c.preset_id == preset_id
-    ))).mappings().first()
+    row = (
+        (
+            await db.execute(
+                select(tls_bindings).where(tls_bindings.c.id == binding_id, tls_bindings.c.preset_id == preset_id)
+            )
+        )
+        .mappings()
+        .first()
+    )
     if not row:
         raise HTTPException(404, "Binding not found")
     await db.execute(delete(tls_bindings).where(tls_bindings.c.id == binding_id))
@@ -313,7 +349,9 @@ async def _rotate(db: AsyncSession, preset_id: str, body: CertificateRotation) -
     row = await _preset(db, preset_id)
     info, cipher = _validated_pair(body.certificate, body.private_key)
     await db.execute(
-        update(tls_presets).where(tls_presets.c.id == preset_id).values(
+        update(tls_presets)
+        .where(tls_presets.c.id == preset_id)
+        .values(
             certificate_pem=body.certificate,
             encrypted_private_key=cipher,
             revision=row["revision"] + 1,
@@ -323,15 +361,24 @@ async def _rotate(db: AsyncSession, preset_id: str, body: CertificateRotation) -
     )
     # Existing webhook/manual preset rotation also schedules all bound
     # autonomous Agents. The private keys remain only in the encrypted vault.
-    agents = (await db.execute(select(agent_tls_bindings.c.node_uuid).where(
-        agent_tls_bindings.c.preset_id == preset_id).distinct())).scalars().all()
+    agents = (
+        (
+            await db.execute(
+                select(agent_tls_bindings.c.node_uuid).where(agent_tls_bindings.c.preset_id == preset_id).distinct()
+            )
+        )
+        .scalars()
+        .all()
+    )
     for node_uuid in agents:
         await queue_xray_refresh(db, node_uuid)
     await db.commit()
     bindings = await list_bindings(db, preset_id)
-    return {"revision": row["revision"] + 1,
-            "agent_count": len(agents),
-            "nodes": await _apply(db, [b["node_id"] for b in bindings])}
+    return {
+        "revision": row["revision"] + 1,
+        "agent_count": len(agents),
+        "nodes": await _apply(db, [b["node_id"] for b in bindings]),
+    }
 
 
 @router.put("/{preset_id}")
@@ -352,7 +399,9 @@ async def rotate_webhook_token(
 ):
     await _preset(db, preset_id)
     token = generate_service_token()
-    await db.execute(update(tls_presets).where(tls_presets.c.id == preset_id).values(webhook_token_hash=token_digest(token)))
+    await db.execute(
+        update(tls_presets).where(tls_presets.c.id == preset_id).values(webhook_token_hash=token_digest(token))
+    )
     await db.commit()
     return {"token": token, "webhook_path": f"/api/tls-presets/{preset_id}/webhook"}
 

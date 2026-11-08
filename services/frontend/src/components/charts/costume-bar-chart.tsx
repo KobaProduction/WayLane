@@ -6,7 +6,7 @@ import { type ChartConfig, ChartContainer, ChartTooltip } from '@/components/ui/
 import { useTranslation } from 'react-i18next'
 import useDirDetection from '@/hooks/use-dir-detection'
 import { useChartViewType } from '@/hooks/use-chart-view-type'
-import { Period, type NodeUsageStat, type UserUsageStat, useGetAdminUsageById, useGetAdminUsageByUsername, useGetUsage } from '@/service/api'
+import { Period, type NodeUsageStat, type SubscriptionUsageStat, useGetAdminUsageById, useGetAdminUsageByUsername, useGetUsage } from '@/service/api'
 import { formatBytes } from '@/utils/formatByte'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from './empty-state'
@@ -49,16 +49,16 @@ interface CostumeBarChartProps {
   nodeId?: number
 }
 
-const isNodeUsageStat = (point: NodeUsageStat | UserUsageStat): point is NodeUsageStat => 'uplink' in point && 'downlink' in point
+const isNodeUsageStat = (point: NodeUsageStat | SubscriptionUsageStat): point is NodeUsageStat => 'uplink' in point && 'downlink' in point
 
-const getTrafficBytes = (point: NodeUsageStat | UserUsageStat) => {
+const getTrafficBytes = (point: NodeUsageStat | SubscriptionUsageStat) => {
   if ('total_traffic' in point) {
     return Number(point.total_traffic || 0)
   }
   return Number(point.uplink || 0) + Number(point.downlink || 0)
 }
 
-const getDirectionalTraffic = (point: NodeUsageStat | UserUsageStat) => {
+const getDirectionalTraffic = (point: NodeUsageStat | SubscriptionUsageStat) => {
   if (isNodeUsageStat(point) && !('total_traffic' in point)) {
     return {
       uplink: Number(point.uplink || 0),
@@ -196,7 +196,7 @@ export function CostumeBarChart({ nodeId }: CostumeBarChartProps) {
   const isLoading = shouldUseNodeUsage ? isLoadingNodeUsage : selectedAdminId != null ? isLoadingAdminUsageById : isLoadingAdminUsageByUsername
   const error = shouldUseNodeUsage ? nodeUsageError : selectedAdminId != null ? adminUsageByIdError : adminUsageByUsernameError
 
-  const statsArr = useMemo(() => pickStatsArray<NodeUsageStat | UserUsageStat>(usageData?.stats, nodeId !== undefined ? [String(nodeId), '-1'] : ['-1']), [usageData?.stats, nodeId])
+  const statsArr = useMemo(() => pickStatsArray<NodeUsageStat | SubscriptionUsageStat>(usageData?.stats, nodeId !== undefined ? [String(nodeId), '-1'] : ['-1']), [usageData?.stats, nodeId])
 
   const labelRangeHint = useMemo(
     () => ({

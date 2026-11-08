@@ -7,7 +7,7 @@ import (
 	"github.com/KobaProduction/waylane/services/node/common"
 )
 
-func (wg *WireGuard) syncUsersFull(users []*common.User) error {
+func (wg *WireGuard) syncUsersFull(users []*common.Subscription) error {
 	normalizedUsers := normalizeUsers(users)
 	existingByKey := wg.buildExistingPeersByKeySnapshot()
 

@@ -13,23 +13,27 @@ from sqlalchemy import select
 
 from app.db.crud.admin import get_admin_usages
 from app.db.crud.node import get_nodes_usage
-from app.db.crud.user import get_all_users_usages, get_user_count_metric_stats, get_user_usages
+from app.db.crud.subscription import (
+    get_all_subscriptions_usages,
+    get_subscription_count_metric_stats,
+    get_subscription_usages,
+)
 from app.db.models import (
     Admin,
     CoreConfig,
     Node,
+    NodeSubscriptionUsage,
     NodeUsage,
-    NodeUserUsage,
-    User,
-    UserStatus,
+    Subscription,
+    SubscriptionStatus,
 )
 from app.models.proxy import ProxyTable
 from app.models.stats import (
     NodeUsageStatsList,
     Period,
-    UserCountMetric,
-    UserCountMetricStatsList,
-    UserUsageStatsList,
+    SubscriptionCountMetric,
+    SubscriptionCountMetricStatsList,
+    SubscriptionUsageStatsList,
 )
 from tests.api import TestSession
 
@@ -50,7 +54,7 @@ async def setup_test_data(session, test_suffix=""):
     session.add(admin)
     await session.flush()
 
-    user = User(username=f"user_{unique_id}", admin_id=admin.id, proxy_settings=ProxyTable().dict(no_obj=True))
+    user = Subscription(uuid=uuid4(), admin_id=admin.id, proxy_settings=ProxyTable().dict(no_obj=True))
     session.add(user)
     await session.flush()
 
@@ -70,7 +74,7 @@ async def setup_test_data(session, test_suffix=""):
     await session.refresh(user)
     await session.refresh(node)
 
-    return admin.id, user.id, node.id
+    return admin.id, user.uuid, node.id
 
 
 class TestGetNodesUsageTimezone:
@@ -439,7 +443,7 @@ class TestGetUserUsagesTimezone:
         Verifies correct filtering for user usage statistics.
         """
         async with TestSession() as session:
-            _admin_id, user_id, node_id = await setup_test_data(session)
+            _admin_id, subscription_uuid, node_id = await setup_test_data(session)
 
             # Inject 8 data points: 2 before, 5 in range, 1 after
             timestamps_utc = [
@@ -454,9 +458,9 @@ class TestGetUserUsagesTimezone:
             ]
 
             for ts in timestamps_utc:
-                record = NodeUserUsage(
+                record = NodeSubscriptionUsage(
                     created_at=ts,
-                    user_id=user_id,
+                    subscription_uuid=subscription_uuid,
                     node_id=node_id,
                     used_traffic=5000000,
                 )
@@ -467,15 +471,15 @@ class TestGetUserUsagesTimezone:
             start = datetime(2026, 7, 10, 0, 0, 0, tzinfo=tehran_tz)
             end = datetime(2026, 7, 10, 3, 0, 0, tzinfo=tehran_tz)
 
-            result = await get_user_usages(
+            result = await get_subscription_usages(
                 session,
-                user_id=user_id,
+                subscription_uuid=subscription_uuid,
                 start=start,
                 end=end,
                 period=Period.hour,
             )
 
-            assert isinstance(result, UserUsageStatsList)
+            assert isinstance(result, SubscriptionUsageStatsList)
             assert result.stats is not None
             assert -1 in result.stats
             stats = result.stats[-1]
@@ -513,7 +517,7 @@ class TestGetUserUsagesTimezone:
         Strict test: Multiple periods with proper data distribution.
         """
         async with TestSession() as session:
-            _admin_id, user_id, node_id = await setup_test_data(session)
+            _admin_id, subscription_uuid, node_id = await setup_test_data(session)
 
             # Create data spanning 3 months
             start_utc = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
@@ -522,9 +526,9 @@ class TestGetUserUsagesTimezone:
             # Add records at various points
             current = start_utc
             while current < end_utc:
-                record = NodeUserUsage(
+                record = NodeSubscriptionUsage(
                     created_at=current,
-                    user_id=user_id,
+                    subscription_uuid=subscription_uuid,
                     node_id=node_id,
                     used_traffic=5000000,
                 )
@@ -532,9 +536,9 @@ class TestGetUserUsagesTimezone:
                 current += timedelta(days=5)
             await session.commit()
 
-            result = await get_user_usages(
+            result = await get_subscription_usages(
                 session,
-                user_id=user_id,
+                subscription_uuid=subscription_uuid,
                 start=start_utc,
                 end=end_utc,
                 period=period,
@@ -575,7 +579,7 @@ class TestGetAllUsersUsagesTimezone:
         Strict test: Validate timezone filtering for all users aggregation.
         """
         async with TestSession() as session:
-            admin_id, user_id, node_id = await setup_test_data(session)
+            admin_id, subscription_uuid, node_id = await setup_test_data(session)
 
             # Inject data with mixture of before and in-range records
             before_timestamps = [
@@ -591,9 +595,9 @@ class TestGetAllUsersUsagesTimezone:
 
             all_timestamps = before_timestamps + in_range_timestamps
             for ts in all_timestamps:
-                record = NodeUserUsage(
+                record = NodeSubscriptionUsage(
                     created_at=ts,
-                    user_id=user_id,
+                    subscription_uuid=subscription_uuid,
                     node_id=node_id,
                     used_traffic=5000000,
                 )
@@ -604,7 +608,7 @@ class TestGetAllUsersUsagesTimezone:
             start = datetime(2026, 9, 10, 0, 0, 0, tzinfo=tehran_tz)
             end = datetime(2026, 9, 10, 3, 0, 0, tzinfo=tehran_tz)
 
-            result = await get_all_users_usages(
+            result = await get_all_subscriptions_usages(
                 session,
                 admins=[(await session.execute(select(Admin.username).where(Admin.id == admin_id))).scalar_one()],
                 start=start,
@@ -670,8 +674,10 @@ class TestGetAllUsersUsagesTimezone:
                 (second_user_id, core_node_id, 30),
                 (second_user_id, other_node_id, 4),
             ]
-            for user_id, node_id, used_traffic in records:
-                session.add(NodeUserUsage(created_at=ts, user_id=user_id, node_id=node_id, used_traffic=used_traffic))
+            for subscription_uuid, node_id, used_traffic in records:
+                session.add(
+                    NodeSubscriptionUsage(created_at=ts, subscription_uuid=subscription_uuid, node_id=node_id, used_traffic=used_traffic)
+                )
             await session.commit()
 
             admin_usernames = list(
@@ -683,7 +689,7 @@ class TestGetAllUsersUsagesTimezone:
             start = datetime(2026, 9, 10, 0, 0, 0, tzinfo=tehran_tz)
             end = datetime(2026, 9, 10, 3, 0, 0, tzinfo=tehran_tz)
 
-            result = await get_all_users_usages(
+            result = await get_all_subscriptions_usages(
                 session,
                 admins=admin_usernames,
                 start=start,
@@ -696,7 +702,7 @@ class TestGetAllUsersUsagesTimezone:
             assert sum(stat.total_traffic for stat in result.stats[first_admin_id]) == 1200
             assert sum(stat.total_traffic for stat in result.stats[second_admin_id]) == 34
 
-            core_result = await get_all_users_usages(
+            core_result = await get_all_subscriptions_usages(
                 session,
                 admins=admin_usernames,
                 start=start,
@@ -719,14 +725,11 @@ class TestGetAdminUsagesTimezone:
         Strict test: Admin-level aggregation with multiple users and data rows.
         """
         async with TestSession() as session:
-            admin_id, user_id, node_id = await setup_test_data(session)
+            admin_id, subscription_uuid, node_id = await setup_test_data(session)
 
-            # Create second user under same admin with unique username
-            from uuid import uuid4
-
-            unique_id = str(uuid4())[:8]
-            user2 = User(
-                username=f"user2_{unique_id}", admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True)
+            # A second UUID subscription belongs to the same administrator.
+            user2 = Subscription(
+                uuid=uuid4(), admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True)
             )
             session.add(user2)
             await session.flush()
@@ -745,18 +748,18 @@ class TestGetAdminUsagesTimezone:
 
             for ts in timestamps_utc:
                 # User 1
-                record1 = NodeUserUsage(
+                record1 = NodeSubscriptionUsage(
                     created_at=ts,
-                    user_id=user_id,
+                    subscription_uuid=subscription_uuid,
                     node_id=node_id,
                     used_traffic=5000000,
                 )
                 session.add(record1)
 
                 # User 2
-                record2 = NodeUserUsage(
+                record2 = NodeSubscriptionUsage(
                     created_at=ts,
-                    user_id=user2.id,
+                    subscription_uuid=user2.uuid,
                     node_id=node_id,
                     used_traffic=3000000,
                 )
@@ -813,7 +816,7 @@ class TestGetAdminUsagesTimezone:
         Strict test: Multiple periods with admin-level aggregation.
         """
         async with TestSession() as session:
-            admin_id, user_id, node_id = await setup_test_data(session)
+            admin_id, subscription_uuid, node_id = await setup_test_data(session)
 
             start_utc = datetime(2026, 11, 1, 0, 0, 0, tzinfo=UTC)
             end_utc = datetime(2026, 11, 15, 0, 0, 0, tzinfo=UTC)
@@ -821,9 +824,9 @@ class TestGetAdminUsagesTimezone:
             # Create records spanning the range
             current = start_utc
             while current < end_utc:
-                record = NodeUserUsage(
+                record = NodeSubscriptionUsage(
                     created_at=current,
-                    user_id=user_id,
+                    subscription_uuid=subscription_uuid,
                     node_id=node_id,
                     used_traffic=5000000,
                 )
@@ -873,16 +876,16 @@ class TestGetUserCountMetricStats:
             admin_id, active_user_id, node_id = await setup_test_data(session)
             admin_username = (await session.execute(select(Admin.username).where(Admin.id == admin_id))).scalar_one()
 
-            expired_user = User(
-                username=f"expired_count_{uuid4().hex[:8]}",
+            expired_user = Subscription(
+                uuid=uuid4(),
                 admin_id=admin_id,
-                status=UserStatus.expired,
+                status=SubscriptionStatus.expired,
                 proxy_settings=ProxyTable().dict(no_obj=True),
             )
-            limited_user = User(
-                username=f"limited_count_{uuid4().hex[:8]}",
+            limited_user = Subscription(
+                uuid=uuid4(),
                 admin_id=admin_id,
-                status=UserStatus.limited,
+                status=SubscriptionStatus.limited,
                 proxy_settings=ProxyTable().dict(no_obj=True),
             )
             session.add_all([expired_user, limited_user])
@@ -895,48 +898,48 @@ class TestGetUserCountMetricStats:
                 (active_user_id, datetime(2026, 12, 9, 23, 50, 0, tzinfo=tehran_tz)),
                 (active_user_id, datetime(2026, 12, 10, 0, 10, 0, tzinfo=tehran_tz)),
                 (active_user_id, datetime(2026, 12, 10, 0, 20, 0, tzinfo=tehran_tz)),
-                (expired_user.id, datetime(2026, 12, 10, 0, 30, 0, tzinfo=tehran_tz)),
-                (limited_user.id, datetime(2026, 12, 10, 1, 5, 0, tzinfo=tehran_tz)),
+                (expired_user.uuid, datetime(2026, 12, 10, 0, 30, 0, tzinfo=tehran_tz)),
+                (limited_user.uuid, datetime(2026, 12, 10, 1, 5, 0, tzinfo=tehran_tz)),
                 (active_user_id, datetime(2026, 12, 10, 1, 10, 0, tzinfo=tehran_tz)),
                 (active_user_id, datetime(2026, 12, 10, 3, 0, 0, tzinfo=tehran_tz)),
             ]
-            for idx, (user_id, local_ts) in enumerate(rows):
+            for idx, (subscription_uuid, local_ts) in enumerate(rows):
                 session.add(
-                    NodeUserUsage(
+                    NodeSubscriptionUsage(
                         created_at=local_ts.astimezone(UTC),
-                        user_id=user_id,
+                        subscription_uuid=subscription_uuid,
                         node_id=node_id,
                         used_traffic=idx + 1,
                     )
                 )
             await session.commit()
 
-            online = await get_user_count_metric_stats(
+            online = await get_subscription_count_metric_stats(
                 session,
                 admins=[admin_username],
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.online,
+                metric=SubscriptionCountMetric.online,
             )
-            expired = await get_user_count_metric_stats(
+            expired = await get_subscription_count_metric_stats(
                 session,
                 admins=[admin_username],
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.expired,
+                metric=SubscriptionCountMetric.expired,
             )
-            limited = await get_user_count_metric_stats(
+            limited = await get_subscription_count_metric_stats(
                 session,
                 admins=[admin_username],
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.limited,
+                metric=SubscriptionCountMetric.limited,
             )
 
-            assert isinstance(online, UserCountMetricStatsList)
+            assert isinstance(online, SubscriptionCountMetricStatsList)
             stats = online.stats[-1]
             assert [stat.period_start for stat in stats] == [
                 datetime(2026, 12, 10, 0, 0, 0, tzinfo=tehran_tz),
@@ -951,16 +954,16 @@ class TestGetUserCountMetricStats:
         async with TestSession() as session:
             admin_id, active_user_id, node_id = await setup_test_data(session)
 
-            expired_user = User(
-                username=f"expired_metric_{uuid4().hex[:8]}",
+            expired_user = Subscription(
+                uuid=uuid4(),
                 admin_id=admin_id,
-                status=UserStatus.expired,
+                status=SubscriptionStatus.expired,
                 proxy_settings=ProxyTable().dict(no_obj=True),
             )
-            limited_user = User(
-                username=f"limited_metric_{uuid4().hex[:8]}",
+            limited_user = Subscription(
+                uuid=uuid4(),
                 admin_id=admin_id,
-                status=UserStatus.limited,
+                status=SubscriptionStatus.limited,
                 proxy_settings=ProxyTable().dict(no_obj=True),
             )
             session.add_all([expired_user, limited_user])
@@ -971,57 +974,57 @@ class TestGetUserCountMetricStats:
             rows = [
                 (active_user_id, start + timedelta(minutes=5)),
                 (active_user_id, start + timedelta(minutes=15)),
-                (expired_user.id, start + timedelta(minutes=25)),
-                (limited_user.id, start + timedelta(minutes=35)),
+                (expired_user.uuid, start + timedelta(minutes=25)),
+                (limited_user.uuid, start + timedelta(minutes=35)),
             ]
-            for idx, (user_id, created_at) in enumerate(rows):
+            for idx, (subscription_uuid, created_at) in enumerate(rows):
                 session.add(
-                    NodeUserUsage(
+                    NodeSubscriptionUsage(
                         created_at=created_at,
-                        user_id=user_id,
+                        subscription_uuid=subscription_uuid,
                         node_id=node_id,
                         used_traffic=idx + 1,
                     )
                 )
             await session.commit()
 
-            online = await get_user_count_metric_stats(
+            online = await get_subscription_count_metric_stats(
                 session,
                 admins=None,
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.online,
+                metric=SubscriptionCountMetric.online,
             )
-            expired = await get_user_count_metric_stats(
+            expired = await get_subscription_count_metric_stats(
                 session,
                 admins=None,
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.expired,
+                metric=SubscriptionCountMetric.expired,
             )
-            limited = await get_user_count_metric_stats(
+            limited = await get_subscription_count_metric_stats(
                 session,
                 admins=None,
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.limited,
+                metric=SubscriptionCountMetric.limited,
             )
 
-            assert isinstance(online, UserCountMetricStatsList)
-            assert online.metric == UserCountMetric.online
+            assert isinstance(online, SubscriptionCountMetricStatsList)
+            assert online.metric == SubscriptionCountMetric.online
             assert online.stats[-1][0].count == 3
-            assert expired.metric == UserCountMetric.expired
+            assert expired.metric == SubscriptionCountMetric.expired
             assert expired.stats[-1][0].count == 1
-            assert limited.metric == UserCountMetric.limited
+            assert limited.metric == SubscriptionCountMetric.limited
             assert limited.stats[-1][0].count == 1
 
     @pytest.mark.asyncio
     async def test_partial_first_bucket_is_excluded(self):
         async with TestSession() as session:
-            _admin_id, user_id, node_id = await setup_test_data(session)
+            _admin_id, subscription_uuid, node_id = await setup_test_data(session)
 
             tehran_tz = timezone(timedelta(hours=3, minutes=30))
             start = datetime(2026, 5, 9, 14, 2, 37, tzinfo=tehran_tz)
@@ -1033,22 +1036,22 @@ class TestGetUserCountMetricStats:
             ]
             for idx, local_ts in enumerate(local_timestamps):
                 session.add(
-                    NodeUserUsage(
+                    NodeSubscriptionUsage(
                         created_at=local_ts.astimezone(UTC),
-                        user_id=user_id,
+                        subscription_uuid=subscription_uuid,
                         node_id=node_id,
                         used_traffic=idx + 1,
                     )
                 )
             await session.commit()
 
-            result = await get_user_count_metric_stats(
+            result = await get_subscription_count_metric_stats(
                 session,
                 admins=None,
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.online,
+                metric=SubscriptionCountMetric.online,
             )
 
             stats = result.stats[-1]
@@ -1061,7 +1064,7 @@ class TestGetUserCountMetricStats:
     @pytest.mark.asyncio
     async def test_node_grouping_node_filter_and_admin_filter(self):
         async with TestSession() as session:
-            admin_id, user_id, node_id = await setup_test_data(session)
+            admin_id, subscription_uuid, node_id = await setup_test_data(session)
             admin_username = (await session.execute(select(Admin.username).where(Admin.id == admin_id))).scalar_one()
 
             admin_two = Admin(username=f"admin_counts_{uuid4().hex[:8]}", hashed_password="secret", role_id=3)
@@ -1077,10 +1080,10 @@ class TestGetUserCountMetricStats:
             session.add_all([admin_two, node_two])
             await session.flush()
 
-            other_user = User(
-                username=f"other_count_{uuid4().hex[:8]}",
+            other_user = Subscription(
+                uuid=uuid4(),
                 admin_id=admin_two.id,
-                status=UserStatus.expired,
+                status=SubscriptionStatus.expired,
                 proxy_settings=ProxyTable().dict(no_obj=True),
             )
             session.add(other_user)
@@ -1089,53 +1092,53 @@ class TestGetUserCountMetricStats:
             start = datetime(2026, 12, 11, 0, 0, 0, tzinfo=UTC)
             end = datetime(2026, 12, 11, 1, 0, 0, tzinfo=UTC)
             rows = [
-                (user_id, node_id, start + timedelta(minutes=10)),
-                (user_id, node_two.id, start + timedelta(minutes=20)),
-                (other_user.id, node_id, start + timedelta(minutes=30)),
-                (other_user.id, node_two.id, start + timedelta(minutes=40)),
+                (subscription_uuid, node_id, start + timedelta(minutes=10)),
+                (subscription_uuid, node_two.id, start + timedelta(minutes=20)),
+                (other_user.uuid, node_id, start + timedelta(minutes=30)),
+                (other_user.uuid, node_two.id, start + timedelta(minutes=40)),
             ]
             for idx, (row_user_id, row_node_id, created_at) in enumerate(rows):
                 session.add(
-                    NodeUserUsage(
+                    NodeSubscriptionUsage(
                         created_at=created_at,
-                        user_id=row_user_id,
+                        subscription_uuid=row_user_id,
                         node_id=row_node_id,
                         used_traffic=idx + 1,
                     )
                 )
             await session.commit()
 
-            grouped_online = await get_user_count_metric_stats(
+            grouped_online = await get_subscription_count_metric_stats(
                 session,
                 admins=None,
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.online,
+                metric=SubscriptionCountMetric.online,
                 group_by_node=True,
             )
             assert grouped_online.stats[node_id][0].count == 2
             assert grouped_online.stats[node_two.id][0].count == 2
 
-            admin_filtered_online = await get_user_count_metric_stats(
+            admin_filtered_online = await get_subscription_count_metric_stats(
                 session,
                 admins=[admin_username],
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.online,
+                metric=SubscriptionCountMetric.online,
                 group_by_node=True,
             )
             assert admin_filtered_online.stats[node_id][0].count == 1
             assert admin_filtered_online.stats[node_two.id][0].count == 1
 
-            node_filtered_online = await get_user_count_metric_stats(
+            node_filtered_online = await get_subscription_count_metric_stats(
                 session,
                 admins=None,
                 start=start,
                 end=end,
                 period=Period.hour,
-                metric=UserCountMetric.online,
+                metric=SubscriptionCountMetric.online,
                 node_id=node_id,
             )
             assert list(node_filtered_online.stats) == [node_id]
@@ -1149,24 +1152,24 @@ class TestGetUserCountMetricStats:
             start = datetime(2026, 12, 11, 0, 0, 0, tzinfo=UTC)
             end = datetime(2026, 12, 11, 1, 0, 0, tzinfo=UTC)
 
-            with pytest.raises(ValueError, match="Only online user counts"):
-                await get_user_count_metric_stats(
+            with pytest.raises(ValueError, match="Only online subscription counts"):
+                await get_subscription_count_metric_stats(
                     session,
                     admins=None,
                     start=start,
                     end=end,
                     period=Period.hour,
-                    metric=UserCountMetric.expired,
+                    metric=SubscriptionCountMetric.expired,
                     node_id=node_id,
                 )
 
-            with pytest.raises(ValueError, match="Only online user counts"):
-                await get_user_count_metric_stats(
+            with pytest.raises(ValueError, match="Only online subscription counts"):
+                await get_subscription_count_metric_stats(
                     session,
                     admins=None,
                     start=start,
                     end=end,
                     period=Period.hour,
-                    metric=UserCountMetric.limited,
+                    metric=SubscriptionCountMetric.limited,
                     group_by_node=True,
                 )

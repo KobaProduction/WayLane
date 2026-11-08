@@ -182,11 +182,13 @@ class XrayConfiguration(BaseSubscription):
                 break
         else:
             rules.append(balancer_rule)
-        routing.setdefault("balancers", []).append({
-            "tag": balancer_tag,
-            "selector": [prefix],
-            "strategy": {"type": strategy},
-        })
+        routing.setdefault("balancers", []).append(
+            {
+                "tag": balancer_tag,
+                "selector": [prefix],
+                "strategy": {"type": strategy},
+            }
+        )
         if strategy == "leastPing":
             config["observatory"] = {
                 "subjectSelector": [prefix],
@@ -222,7 +224,7 @@ class XrayConfiguration(BaseSubscription):
         }
 
         if config.random_user_agent:
-            ws_settings["headers"]["User-Agent"] = choice(self.user_agent_list)
+            ws_settings["headers"]["Subscription-Agent"] = choice(self.user_agent_list)
 
         return self._normalize_and_remove_none_values(ws_settings)
 
@@ -237,7 +239,7 @@ class XrayConfiguration(BaseSubscription):
         }
 
         if config.random_user_agent:
-            httpupgrade_settings["headers"]["User-Agent"] = choice(self.user_agent_list)
+            httpupgrade_settings["headers"]["Subscription-Agent"] = choice(self.user_agent_list)
 
         return self._normalize_and_remove_none_values(httpupgrade_settings)
 
@@ -280,9 +282,9 @@ class XrayConfiguration(BaseSubscription):
 
         if config.random_user_agent:
             if config.mode in ("stream-one", "stream-up") and not config.no_grpc_header:
-                extra["headers"]["User-Agent"] = choice(self.grpc_user_agent_data)
+                extra["headers"]["Subscription-Agent"] = choice(self.grpc_user_agent_data)
             else:
-                extra["headers"]["User-Agent"] = choice(self.user_agent_list)
+                extra["headers"]["Subscription-Agent"] = choice(self.user_agent_list)
 
         xhttp_settings["extra"] = extra
         return self._normalize_and_remove_none_values(xhttp_settings)
@@ -336,7 +338,7 @@ class XrayConfiguration(BaseSubscription):
                         "path": ["/"],
                         "headers": {
                             "Host": [],
-                            "User-Agent": [],
+                            "Subscription-Agent": [],
                             "Accept-Encoding": ["gzip, deflate"],
                             "Connection": ["keep-alive"],
                             "Pragma": "no-cache",
@@ -375,7 +377,7 @@ class XrayConfiguration(BaseSubscription):
             tcp_settings["header"]["request"]["headers"]["Host"] = [host]
 
         if config.random_user_agent:
-            tcp_settings["header"]["request"]["headers"]["User-Agent"] = [choice(self.user_agent_list)]
+            tcp_settings["header"]["request"]["headers"]["Subscription-Agent"] = [choice(self.user_agent_list)]
 
         return self._normalize_and_remove_none_values(tcp_settings)
 
@@ -390,7 +392,7 @@ class XrayConfiguration(BaseSubscription):
         }
 
         if config.random_user_agent:
-            http_settings["headers"]["User-Agent"] = [choice(self.user_agent_list)]
+            http_settings["headers"]["Subscription-Agent"] = [choice(self.user_agent_list)]
 
         return self._normalize_and_remove_none_values(http_settings)
 
@@ -879,7 +881,7 @@ class XrayConfiguration(BaseSubscription):
                 finalmask = finalmask.model_dump(exclude_none=True, by_alias=True, mode="json")
             try:
                 finalmask = FinalMask.model_validate(finalmask)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
             if isinstance(finalmask, (FinalMask, dict)):
                 stream_settings["finalmask"] = dump_final_mask_for_xray(finalmask)

@@ -9,13 +9,13 @@ import nats
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.node.nats_memory import NatsUserSyncStore
+from app.node.nats_memory import NatsSubscriptionSyncStore
 
 
 async def main():
     url, bucket, worker_id, node_count = sys.argv[1:]
     nc = await nats.connect(url)
-    store = NatsUserSyncStore(await nc.jetstream().key_value(bucket))
+    store = NatsSubscriptionSyncStore(await nc.jetstream().key_value(bucket))
     emails = []
     try:
         async with asyncio.timeout(60):

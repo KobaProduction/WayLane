@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type CommandCreateTarget = 'user' | 'group' | 'host' | 'node' | 'admin' | 'template' | 'core'
+export type CommandCreateTarget = 'subscription' | 'group' | 'host' | 'node' | 'admin' | 'template' | 'core'
 
 interface CommandPaletteState {
   open: boolean

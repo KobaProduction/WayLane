@@ -14,7 +14,7 @@ import (
 	"github.com/KobaProduction/waylane/services/node/controller"
 )
 
-func (s *Service) SyncUser(stream grpc.ClientStreamingServer[common.User, common.Empty]) error {
+func (s *Service) SyncSubscription(stream grpc.ClientStreamingServer[common.Subscription, common.Empty]) error {
 	backend, err := s.backend()
 	if err != nil {
 		return err
@@ -26,34 +26,34 @@ func (s *Service) SyncUser(stream grpc.ClientStreamingServer[common.User, common
 			return stream.SendAndClose(&common.Empty{})
 		}
 
-		if user.GetEmail() == "" {
+		if user.GetSubscriptionUuid() == "" {
 			return errors.New("email is required")
 		}
 
-		log.Printf("Got user: %v", user.GetEmail())
+		log.Printf("Got user: %v", user.GetSubscriptionUuid())
 
-		if err = backend.SyncUser(stream.Context(), user); err != nil {
+		if err = backend.SyncSubscription(stream.Context(), user); err != nil {
 			log.Printf("Error syncing user: %v", err)
 			return status.Errorf(codes.Internal, "failed to update user: %v", err)
 		}
 	}
 }
 
-func (s *Service) SyncUsers(ctx context.Context, users *common.Users) (*common.Empty, error) {
+func (s *Service) SyncSubscriptions(ctx context.Context, users *common.Subscriptions) (*common.Empty, error) {
 	backend, err := s.backend()
 	if err != nil {
 		return nil, err
 	}
 
-	if err := backend.SyncUsers(ctx, users.GetUsers()); err != nil {
+	if err := backend.SyncSubscriptions(ctx, users.GetSubscriptions()); err != nil {
 		return nil, err
 	}
 
 	return nil, nil
 }
 
-func (s *Service) SyncUsersChunked(stream grpc.ClientStreamingServer[common.UsersChunk, common.Empty]) error {
-	chunks := make(map[uint64][]*common.User)
+func (s *Service) SyncSubscriptionsChunked(stream grpc.ClientStreamingServer[common.SubscriptionsChunk, common.Empty]) error {
+	chunks := make(map[uint64][]*common.Subscription)
 	var (
 		lastIndex uint64
 		sawLast   bool
@@ -68,7 +68,7 @@ func (s *Service) SyncUsersChunked(stream grpc.ClientStreamingServer[common.User
 			return status.Errorf(codes.Internal, "failed to receive chunk: %v", err)
 		}
 
-		chunks[chunk.GetIndex()] = append(chunks[chunk.GetIndex()], chunk.GetUsers()...)
+		chunks[chunk.GetIndex()] = append(chunks[chunk.GetIndex()], chunk.GetSubscriptions()...)
 
 		if chunk.GetLast() {
 			sawLast = true

@@ -109,10 +109,10 @@ func newRecordingXray(t *testing.T) (*Xray, *recordingInboundService) {
 	return &Xray{config: cfg, handler: handler}, service
 }
 
-func recordingUser(email string, inbounds ...string) *common.User {
-	return &common.User{
-		Email:    email,
-		Inbounds: inbounds,
+func recordingUser(email string, inbounds ...string) *common.Subscription {
+	return &common.Subscription{
+		SubscriptionUuid: email,
+		Inbounds:         inbounds,
 		Proxies: &common.Proxy{
 			Vmess:       &common.Vmess{Id: "6f1c6c5e-3f59-4a0e-9d8a-2b4f1c9d7e10"},
 			Vless:       &common.Vless{Id: "0b6f2a4e-6a54-4a51-9a3a-6f1e2b1f7c11", Flow: "xtls-rprx-vision"},
@@ -165,12 +165,12 @@ func TestSyncUserLeavesAnUnchangedUserAlone(t *testing.T) {
 	ctx := syncContext(t)
 	user := recordingUser("1.alice", recordingTags...)
 
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations(replaced(recordingTags...)...))
 
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), nil)
@@ -181,9 +181,9 @@ func TestSyncUserLeavesAUserLoadedAtStartupAlone(t *testing.T) {
 	ctx := syncContext(t)
 	user := recordingUser("1.alice", recordingTags...)
 
-	x.config.syncUsers([]*common.User{user})
+	x.config.syncUsers([]*common.Subscription{user})
 
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), nil)
@@ -194,13 +194,13 @@ func TestSyncUserReplacesOnlyTheAccountThatChanged(t *testing.T) {
 	ctx := syncContext(t)
 	user := recordingUser("1.alice", recordingTags...)
 
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	service.take()
 
 	user.Proxies.Trojan.Password = "rotated trojan secret"
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations(replaced("trojan")...))
@@ -210,17 +210,17 @@ func TestSyncUserRemovesAUserFromTheInboundsTheyLeave(t *testing.T) {
 	x, service := newRecordingXray(t)
 	ctx := syncContext(t)
 
-	if err := x.SyncUser(ctx, recordingUser("1.alice", recordingTags...)); err != nil {
+	if err := x.SyncSubscription(ctx, recordingUser("1.alice", recordingTags...)); err != nil {
 		t.Fatal(err)
 	}
 	service.take()
 
-	if err := x.SyncUser(ctx, recordingUser("1.alice", "vless", "trojan")); err != nil {
+	if err := x.SyncSubscription(ctx, recordingUser("1.alice", "vless", "trojan")); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations(removed("vmess", "ss", "ss2022", "hysteria")...))
 
-	if err := x.SyncUser(ctx, recordingUser("1.alice")); err != nil {
+	if err := x.SyncSubscription(ctx, recordingUser("1.alice")); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations(removed(recordingTags...)...))
@@ -232,17 +232,17 @@ func TestSyncUserRetriesAnAddThatFailed(t *testing.T) {
 	user := recordingUser("1.alice", "vless")
 
 	service.rejectNextAdd()
-	if err := x.SyncUser(ctx, user); err == nil {
+	if err := x.SyncSubscription(ctx, user); err == nil {
 		t.Fatal("a rejected add was not reported")
 	}
 	service.take()
 
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations(append(replaced("vless"), removed("vmess", "trojan", "ss", "ss2022", "hysteria")...)...))
 
-	if err := x.SyncUser(ctx, user); err != nil {
+	if err := x.SyncSubscription(ctx, user); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations(removed("vmess", "trojan", "ss", "ss2022", "hysteria")...))
@@ -254,14 +254,14 @@ func TestUpdateUsersLeavesUnchangedUsersAlone(t *testing.T) {
 	alice := recordingUser("1.alice", "vless", "trojan")
 	bob := recordingUser("2.bob", "vless", "trojan")
 
-	if err := x.UpdateUsers(ctx, []*common.User{alice, bob}); err != nil {
+	if err := x.UpdateUsers(ctx, []*common.Subscription{alice, bob}); err != nil {
 		t.Fatal(err)
 	}
 	service.take()
 
 	bob.Proxies.Vless.Id = "9c3e8f5a-1b2d-4c6e-8f0a-3d5b7c9e1f21"
 	carol := recordingUser("3.carol")
-	if err := x.UpdateUsers(ctx, []*common.User{alice, bob, carol}); err != nil {
+	if err := x.UpdateUsers(ctx, []*common.Subscription{alice, bob, carol}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -278,7 +278,7 @@ func TestUpdateUsersLeavesUnchangedUsersAlone(t *testing.T) {
 func TestUpdateUsersRetriesAnAddThatFailed(t *testing.T) {
 	x, service := newRecordingXray(t)
 	ctx := syncContext(t)
-	users := []*common.User{recordingUser("1.alice", "trojan")}
+	users := []*common.Subscription{recordingUser("1.alice", "trojan")}
 
 	service.rejectNextAdd()
 	if err := x.UpdateUsers(ctx, users); err == nil {
@@ -349,12 +349,12 @@ func TestUserSyncsSkipInboundsThatCannotHoldUsers(t *testing.T) {
 
 	alice := recordingUser("1.alice", "vless")
 	bob := recordingUser("2.bob")
-	if err := x.UpdateUsers(ctx, []*common.User{alice, bob}); err != nil {
+	if err := x.UpdateUsers(ctx, []*common.Subscription{alice, bob}); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations("vless:remove", "vless:add", "vless:remove"))
 
-	if err := x.SyncUser(ctx, bob); err != nil {
+	if err := x.SyncSubscription(ctx, bob); err != nil {
 		t.Fatal(err)
 	}
 	assertOperations(t, service.take(), operations("vless:remove"))

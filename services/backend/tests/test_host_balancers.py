@@ -4,6 +4,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -103,7 +104,7 @@ def test_xray_subscriptions_include_authorized_balancer_and_hide_individual_host
     from app.core import hosts as host_module
     monkeypatch.setattr(host_module.host_manager, "get_hosts", load_hosts)
     user = SimpleNamespace(
-        id=1, status="active", inbounds=["vless-main"],
+        uuid=uuid4(), status="active", inbounds=["vless-main"],
         proxy_settings=SimpleNamespace(dict=lambda: {
             "vless": {"id": "00000000-0000-0000-0000-000000000001"}
         }),
@@ -142,7 +143,10 @@ def test_balancer_crud_and_member_existence_validation(tmp_path):
 
     from app.db.models import ProxyHost
     from app.routers.host_balancer import (
-        _check_members, create_balancer, delete_balancer, list_balancers,
+        _check_members,
+        create_balancer,
+        delete_balancer,
+        list_balancers,
         update_balancer,
     )
 
@@ -230,7 +234,7 @@ def test_xray_balancer_does_not_hide_members_when_it_cannot_build(monkeypatch, t
     # does not have an outbound handler. Both individual entries must survive.
     hosts[1].protocol = "unsupported"
     user = SimpleNamespace(
-        id=2, status="active", inbounds=["vless-main"],
+        uuid=uuid4(), status="active", inbounds=["vless-main"],
         proxy_settings=SimpleNamespace(dict=lambda: {
             "vless": {"id": "00000000-0000-0000-0000-000000000001"},
             "unsupported": {"id": "00000000-0000-0000-0000-000000000002"},

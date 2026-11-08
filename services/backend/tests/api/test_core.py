@@ -1,20 +1,22 @@
+import asyncio
 import copy
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 from fastapi import status
+from sqlalchemy import select
 
 from app.core.xray import XRayConfig
+from app.db.models import Subscription
 from app.routers import core as core_router
 from app.utils.crypto import generate_wireguard_keypair
-from tests.api import client
+from tests.api import TestSession, client
 from tests.api.helpers import (
     auth_headers,
     create_core,
     create_group,
-    create_user,
     delete_core,
     delete_group,
-    delete_user,
     get_inbound_details,
     get_inbounds,
     unique_name,
@@ -61,17 +63,21 @@ def test_wireguard_core_create(access_token):
     delete_core(access_token, core["id"])
 
 
-def test_wireguard_core_create_skips_user_scan_and_allocates_on_group(access_token):
-    """Create only upserts pool rows; peer IPs are allocated when the inbound joins a group."""
+def test_wireguard_core_create_skips_user_scan_and_allocates_on_group(
+    access_token, active_subscription_factory, core_entitlement_headers
+):
+    """WireGuard allocation changes only after a Core-authorized UUID policy update."""
     starter = create_core(access_token, name=unique_name("wg_create_starter"))
     starter_group = create_group(access_token, name=unique_name("wg_create_starter_group"))
-    user = create_user(
-        access_token,
-        group_ids=[starter_group["id"]],
-        payload={"username": unique_name("wg_create_user")},
-    )
-    before = user["proxy_settings"].get("wireguard") or {}
+    subscription = active_subscription_factory(group_ids=[starter_group["id"]])
+    sid = subscription["uuid"]
 
+    async def _wireguard_settings():
+        async with TestSession() as db:
+            found = (await db.execute(select(Subscription).where(Subscription.uuid == UUID(sid)))).scalar_one()
+            return dict(found.proxy_settings.get("wireguard") or {})
+
+    before = asyncio.run(_wireguard_settings())
     private_key, _ = generate_wireguard_keypair()
     interface_name = unique_name("wg_create_if")
     wg_core = create_core(
@@ -90,38 +96,29 @@ def test_wireguard_core_create_skips_user_scan_and_allocates_on_group(access_tok
         usage = client.get("/api/wireguard/subnets", headers=auth_headers(access_token))
         assert usage.status_code == status.HTTP_200_OK
         assert any(row["subnet"] == "10.70.0.0/24" for row in usage.json())
-
-        user_after_create = client.get(
-            f"/api/user/{user['username']}",
-            headers=auth_headers(access_token),
-        )
-        assert user_after_create.status_code == status.HTTP_200_OK
-        after_wg = user_after_create.json()["proxy_settings"].get("wireguard") or {}
-        assert after_wg.get("peer_ips") == before.get("peer_ips", [])
+        # Merely adding a node/core must not silently mutate subscriptions.
+        after_create = asyncio.run(_wireguard_settings())
+        assert after_create.get("peer_ips") == before.get("peer_ips")
 
         wg_group = create_group(access_token, name=unique_name("wg_create_group"), inbound_tags=[interface_name])
         try:
-            add = client.post(
-                "/api/groups/bulk/add",
-                headers=auth_headers(access_token),
-                json={"group_ids": [wg_group["id"]], "users": [user["id"]]},
+            policy = client.put(
+                f"/api/subscriptions/{sid}/policy",
+                headers=core_entitlement_headers,
+                json={"revision": 1, "group_ids": [starter_group["id"], wg_group["id"]]},
             )
-            assert add.status_code == status.HTTP_200_OK
-
-            allocated = client.get(
-                f"/api/user/{user['username']}",
-                headers=auth_headers(access_token),
-            )
-            assert allocated.status_code == status.HTTP_200_OK
-            peer_ips = allocated.json()["proxy_settings"]["wireguard"]["peer_ips"]
+            assert policy.status_code == status.HTTP_200_OK, policy.text
+            peer_ips = asyncio.run(_wireguard_settings()).get("peer_ips")
             assert peer_ips == ["10.70.0.2/32"]
         finally:
+            client.delete(f"/api/subscriptions/{sid}", headers=auth_headers(access_token))
             delete_group(access_token, wg_group["id"])
     finally:
-        delete_user(access_token, user["username"])
+        client.delete(f"/api/subscriptions/{sid}", headers=auth_headers(access_token))
         delete_group(access_token, starter_group["id"])
         delete_core(access_token, wg_core["id"])
         delete_core(access_token, starter["id"])
+
 
 def test_core_update(access_token):
     """Test that the core update route is accessible."""

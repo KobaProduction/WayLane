@@ -14,9 +14,9 @@ import (
 func TestSyncUserRejectsNilUser(t *testing.T) {
 	wg := &WireGuard{state: lifecycleRunning}
 
-	err := wg.SyncUser(context.Background(), nil)
+	err := wg.SyncSubscription(context.Background(), nil)
 	if err == nil {
-		t.Fatal("expected SyncUser to fail for nil user")
+		t.Fatal("expected SyncSubscription to fail for nil user")
 	}
 	if !strings.Contains(err.Error(), "user is nil") {
 		t.Fatalf("unexpected error: %v", err)
@@ -62,9 +62,9 @@ func TestSyncUserRejectsUnparsableStoredPeer(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	user := &common.User{
-		Email:    "user@example.com",
-		Inbounds: []string{"wg-test"},
+	user := &common.Subscription{
+		SubscriptionUuid: "user@example.com",
+		Inbounds:         []string{"wg-test"},
 		Proxies: &common.Proxy{
 			Wireguard: &common.Wireguard{
 				PublicKey: validKey, PeerIps: []string{"10.61.0.10/32"},
@@ -72,9 +72,9 @@ func TestSyncUserRejectsUnparsableStoredPeer(t *testing.T) {
 		},
 	}
 
-	err = wg.SyncUser(context.Background(), user)
+	err = wg.SyncSubscription(context.Background(), user)
 	if err != nil {
-		t.Fatalf("expected SyncUser to succeed despite unparsable stored peer key, got: %v", err)
+		t.Fatalf("expected SyncSubscription to succeed despite unparsable stored peer key, got: %v", err)
 	}
 
 	if configureCalls != 1 {
@@ -122,10 +122,10 @@ func TestSyncUsersFailsWholeRequestOnInvalidKey(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "valid@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "valid@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: validKey, PeerIps: []string{"10.62.0.2/32"},
@@ -133,8 +133,8 @@ func TestSyncUsersFailsWholeRequestOnInvalidKey(t *testing.T) {
 			},
 		},
 		{
-			Email:    "invalid@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "invalid@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: "not-a-valid-wireguard-key", PeerIps: []string{"10.62.0.3/32"},
@@ -143,9 +143,9 @@ func TestSyncUsersFailsWholeRequestOnInvalidKey(t *testing.T) {
 		},
 	}
 
-	err = wg.SyncUsers(context.Background(), users)
+	err = wg.SyncSubscriptions(context.Background(), users)
 	if err != nil {
-		t.Fatalf("expected SyncUsers to succeed (quarantining invalid key), got: %v", err)
+		t.Fatalf("expected SyncSubscriptions to succeed (quarantining invalid key), got: %v", err)
 	}
 
 	if configureCalls != 1 {
@@ -189,10 +189,10 @@ func TestSyncUsersSkipsEmptyEmailUser(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: validKey, PeerIps: []string{"10.62.0.4/32"},
@@ -202,8 +202,8 @@ func TestSyncUsersSkipsEmptyEmailUser(t *testing.T) {
 	}
 
 	// normalizeUsers drops users with empty email before they reach any sync logic.
-	if err = wg.SyncUsers(context.Background(), users); err != nil {
-		t.Fatalf("expected SyncUsers to succeed when normalizeUsers drops empty-email user, got: %v", err)
+	if err = wg.SyncSubscriptions(context.Background(), users); err != nil {
+		t.Fatalf("expected SyncSubscriptions to succeed when normalizeUsers drops empty-email user, got: %v", err)
 	}
 	// No effective desired peers → no kernel call.
 	if configureCalls != 0 {
@@ -291,10 +291,10 @@ func TestSyncUsersReplaceAllRemovesStalePeersAndStats(t *testing.T) {
 		},
 	})
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "keep@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "keep@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: keepKey, PeerIps: []string{"10.63.0.2/32"},
@@ -302,8 +302,8 @@ func TestSyncUsersReplaceAllRemovesStalePeersAndStats(t *testing.T) {
 			},
 		},
 		{
-			Email:    "new@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "new@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: newKey, PeerIps: []string{"10.63.0.10/32"},
@@ -312,8 +312,8 @@ func TestSyncUsersReplaceAllRemovesStalePeersAndStats(t *testing.T) {
 		},
 	}
 
-	if err := wg.SyncUsers(context.Background(), users); err != nil {
-		t.Fatalf("SyncUsers failed: %v", err)
+	if err := wg.SyncSubscriptions(context.Background(), users); err != nil {
+		t.Fatalf("SyncSubscriptions failed: %v", err)
 	}
 
 	if applyCalls != 1 {
@@ -374,10 +374,10 @@ func TestSyncUsersNoEffectiveChangeSkipsReplaceApply(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "keep@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "keep@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: key, PeerIps: []string{"10.64.0.2/32"},
@@ -386,8 +386,8 @@ func TestSyncUsersNoEffectiveChangeSkipsReplaceApply(t *testing.T) {
 		},
 	}
 
-	if err := wg.SyncUsers(context.Background(), users); err != nil {
-		t.Fatalf("SyncUsers failed: %v", err)
+	if err := wg.SyncSubscriptions(context.Background(), users); err != nil {
+		t.Fatalf("SyncSubscriptions failed: %v", err)
 	}
 
 	if applyCalls != 0 {
@@ -430,10 +430,10 @@ func TestUpdateUsersNoEffectiveChangeSkipsApply(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "keep@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "keep@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: key, PeerIps: []string{"10.65.0.2/32"},
@@ -490,10 +490,10 @@ func TestUpdateUsersDuplicateEmailUsesLastEntry(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "user@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "user@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: oldKey, PeerIps: []string{"10.66.0.2/32"},
@@ -501,8 +501,8 @@ func TestUpdateUsersDuplicateEmailUsesLastEntry(t *testing.T) {
 			},
 		},
 		{
-			Email:    "user@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "user@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: newKey, PeerIps: []string{"10.66.0.2/32"},
@@ -562,10 +562,10 @@ func TestUpdateUsersRejectsKeyOwnedByUntouchedUser(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "other@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "other@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: ownedKey, PeerIps: []string{"10.67.0.3/32"},
@@ -631,10 +631,10 @@ func TestUpdateUsersAllowsKeyTransferWhenBothUsersTouched(t *testing.T) {
 	// old@example.com rotates to a new key; new@example.com claims the original key.
 	// Both users have valid credentials, so both appear in touchedEmails and the
 	// ownership transfer is permitted.
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "old@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "old@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: newKeyForOld, PeerIps: []string{"10.68.0.3/32"},
@@ -642,8 +642,8 @@ func TestUpdateUsersAllowsKeyTransferWhenBothUsersTouched(t *testing.T) {
 			},
 		},
 		{
-			Email:    "new@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "new@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: oldKey, PeerIps: []string{"10.68.0.2/32"},
@@ -691,10 +691,10 @@ func TestSyncUsersRejectsDuplicateIPsAcrossUsers(t *testing.T) {
 		state:        lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "user1@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "user1@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: key1, PeerIps: []string{"10.69.0.2/32"},
@@ -702,8 +702,8 @@ func TestSyncUsersRejectsDuplicateIPsAcrossUsers(t *testing.T) {
 			},
 		},
 		{
-			Email:    "user2@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "user2@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: key2, PeerIps: []string{"10.69.0.2/32"},
@@ -712,7 +712,7 @@ func TestSyncUsersRejectsDuplicateIPsAcrossUsers(t *testing.T) {
 		},
 	}
 
-	err = wg.SyncUsers(context.Background(), users)
+	err = wg.SyncSubscriptions(context.Background(), users)
 	if err == nil {
 		t.Fatal("expected error for duplicate IPs")
 	}
@@ -756,10 +756,10 @@ func TestUpdateUsersChangesAllowedIP(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "keep@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "keep@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: key, PeerIps: []string{"10.70.0.3/32"},
@@ -829,10 +829,10 @@ func TestUpdateUsersAndRestartReappliesKeepaliveToAllPeers(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "touched@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "touched@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{
 					PublicKey: touchedKey, PeerIps: []string{"10.71.0.2/32"},
@@ -950,7 +950,7 @@ func TestUpdateUsersRemovesPeerWhenUserLosesWireguardAccess(t *testing.T) {
 
 			wg.statsTracker.UpdateStatsBatch([]stats.Sample{{PublicKey: key, Email: "gone@example.com", Rx: 10, Tx: 5}})
 
-			users := []*common.User{{Email: "gone@example.com", Inbounds: []string{}, Proxies: proxies}}
+			users := []*common.Subscription{{SubscriptionUuid: "gone@example.com", Inbounds: []string{}, Proxies: proxies}}
 			if err := wg.UpdateUsers(context.Background(), users); err != nil {
 				t.Fatalf("UpdateUsers failed: %v", err)
 			}
@@ -1001,11 +1001,11 @@ func TestUpdateUsersAllowsKeyHandoverFromUserWhoLostAccess(t *testing.T) {
 		state: lifecycleRunning,
 	}
 
-	users := []*common.User{
-		{Email: "old@example.com", Proxies: &common.Proxy{Wireguard: &common.Wireguard{PublicKey: key}}},
+	users := []*common.Subscription{
+		{SubscriptionUuid: "old@example.com", Proxies: &common.Proxy{Wireguard: &common.Wireguard{PublicKey: key}}},
 		{
-			Email:    "new@example.com",
-			Inbounds: []string{"wg-test"},
+			SubscriptionUuid: "new@example.com",
+			Inbounds:         []string{"wg-test"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{PublicKey: key, PeerIps: []string{"10.73.0.3/32"}},
 			},
@@ -1066,10 +1066,10 @@ func newKeySpellingTestWG(t *testing.T, applied *[]wgtypes.Config) *WireGuard {
 	}
 }
 
-func keySpellingTestUser(email, publicKey, peerIP string) *common.User {
-	return &common.User{
-		Email:    email,
-		Inbounds: []string{"wg-test"},
+func keySpellingTestUser(email, publicKey, peerIP string) *common.Subscription {
+	return &common.Subscription{
+		SubscriptionUuid: email,
+		Inbounds:         []string{"wg-test"},
 		Proxies: &common.Proxy{
 			Wireguard: &common.Wireguard{PublicKey: publicKey, PeerIps: []string{peerIP}},
 		},
@@ -1088,12 +1088,12 @@ func TestUpdateUsersKeepsPeerWithNonCanonicalKey(t *testing.T) {
 	wg := newKeySpellingTestWG(t, &applied)
 	user := keySpellingTestUser("7", nonCanonicalKey(t, canonical), "10.75.0.7/32")
 
-	if err := wg.SyncUser(context.Background(), user); err != nil {
-		t.Fatalf("SyncUser failed: %v", err)
+	if err := wg.SyncSubscription(context.Background(), user); err != nil {
+		t.Fatalf("SyncSubscription failed: %v", err)
 	}
 	applied = nil
 
-	if err := wg.UpdateUsers(context.Background(), []*common.User{user}); err != nil {
+	if err := wg.UpdateUsers(context.Background(), []*common.Subscription{user}); err != nil {
 		t.Fatalf("UpdateUsers failed: %v", err)
 	}
 	for _, cfg := range applied {
@@ -1120,15 +1120,15 @@ func TestSyncUsersNonCanonicalKeyNoEffectiveChangeSkipsReplaceApply(t *testing.T
 	}
 	var applied []wgtypes.Config
 	wg := newKeySpellingTestWG(t, &applied)
-	users := []*common.User{keySpellingTestUser("7", nonCanonicalKey(t, canonical), "10.75.0.7/32")}
+	users := []*common.Subscription{keySpellingTestUser("7", nonCanonicalKey(t, canonical), "10.75.0.7/32")}
 
-	if err := wg.SyncUsers(context.Background(), users); err != nil {
-		t.Fatalf("SyncUsers failed: %v", err)
+	if err := wg.SyncSubscriptions(context.Background(), users); err != nil {
+		t.Fatalf("SyncSubscriptions failed: %v", err)
 	}
 	applied = nil
 
-	if err := wg.SyncUsers(context.Background(), users); err != nil {
-		t.Fatalf("SyncUsers failed: %v", err)
+	if err := wg.SyncSubscriptions(context.Background(), users); err != nil {
+		t.Fatalf("SyncSubscriptions failed: %v", err)
 	}
 	if len(applied) != 0 {
 		t.Fatalf("expected no ConfigureDevice calls for a no-op full sync, got %d", len(applied))
@@ -1142,12 +1142,12 @@ func TestSyncUsersRejectsOneKeySpelledTwoWaysAcrossUsers(t *testing.T) {
 	}
 	var applied []wgtypes.Config
 	wg := newKeySpellingTestWG(t, &applied)
-	users := []*common.User{
+	users := []*common.Subscription{
 		keySpellingTestUser("7", canonical, "10.75.0.7/32"),
 		keySpellingTestUser("8", nonCanonicalKey(t, canonical), "10.75.0.8/32"),
 	}
 
-	err = wg.SyncUsers(context.Background(), users)
+	err = wg.SyncSubscriptions(context.Background(), users)
 	if err == nil || !strings.Contains(err.Error(), "assigned to multiple users") {
 		t.Fatalf("expected a duplicate key error, got %v", err)
 	}

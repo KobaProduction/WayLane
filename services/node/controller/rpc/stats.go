@@ -31,13 +31,13 @@ func (s *Service) GetStats(ctx context.Context, request *common.StatRequest) (*c
 	return stats, nil
 }
 
-func (s *Service) GetUserOnlineStats(ctx context.Context, request *common.StatRequest) (*common.OnlineStatResponse, error) {
+func (s *Service) GetSubscriptionOnlineStats(ctx context.Context, request *common.StatRequest) (*common.OnlineStatResponse, error) {
 	backend, err := s.backend()
 	if err != nil {
 		return nil, err
 	}
 
-	stats, err := backend.GetUserOnlineStats(ctx, request.GetName())
+	stats, err := backend.GetSubscriptionOnlineStats(ctx, request.GetName())
 	if err != nil {
 		err = common.InterceptNotFound(err)
 		return nil, err
@@ -45,13 +45,13 @@ func (s *Service) GetUserOnlineStats(ctx context.Context, request *common.StatRe
 	return stats, nil
 }
 
-func (s *Service) GetUserOnlineIpListStats(ctx context.Context, request *common.StatRequest) (*common.StatsOnlineIpListResponse, error) {
+func (s *Service) GetSubscriptionOnlineIpListStats(ctx context.Context, request *common.StatRequest) (*common.StatsOnlineIpListResponse, error) {
 	backend, err := s.backend()
 	if err != nil {
 		return nil, err
 	}
 
-	stats, err := backend.GetUserOnlineIpListStats(ctx, request.GetName())
+	stats, err := backend.GetSubscriptionOnlineIpListStats(ctx, request.GetName())
 	if err != nil {
 		err = common.InterceptNotFound(err)
 		return nil, err

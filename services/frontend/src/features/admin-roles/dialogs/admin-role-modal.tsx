@@ -23,7 +23,7 @@ import useDirDetection from '@/hooks/use-dir-detection'
 import useDynamicErrorHandler from '@/hooks/use-dynamic-errors.ts'
 import { cn } from '@/lib/utils'
 import { bytesToFormGigabytes, formatBytes, gbToBytes } from '@/utils/formatByte'
-import { getGetRolesQueryKey, getGetRolesSimpleQueryKey, useCreateRole, useGetAllGroups, useGetUserTemplatesSimple, useModifyRole } from '@/service/api'
+import { getGetRolesQueryKey, getGetRolesSimpleQueryKey, useCreateRole, useGetAllGroups, useGetSubscriptionTemplatesSimple, useModifyRole } from '@/service/api'
 import { PermissionCountBadge, PermissionEditor } from '@/features/admin-roles/components/permission-editor'
 
 import {
@@ -61,7 +61,7 @@ export default function AdminRoleModal({ isDialogOpen, onOpenChange, form, editi
   const [openSection, setOpenSection] = useState<string | undefined>(SECTION_PERMISSIONS)
 
   const groupsQuery = useGetAllGroups({}, { query: { enabled: isDialogOpen } })
-  const templatesQuery = useGetUserTemplatesSimple(undefined, { query: { enabled: isDialogOpen } })
+  const templatesQuery = useGetSubscriptionTemplatesSimple(undefined, { query: { enabled: isDialogOpen } })
 
   const groupsOptions = useMemo(() => (groupsQuery.data?.groups || []).map(group => ({ id: group.id, name: group.name || `#${group.id}` })), [groupsQuery.data?.groups])
   const templatesOptions = useMemo(() => (templatesQuery.data?.templates || []).map(tpl => ({ id: tpl.id, name: tpl.name || `#${tpl.id}` })), [templatesQuery.data?.templates])
@@ -427,7 +427,7 @@ function BytesLimitField({ form, name, labelKey }: { form: AdminRoleForm; name: 
                   emptyValue={undefined}
                   className="pr-10"
                 />
-                <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium">{t('userDialog.gb', { defaultValue: 'GB' })}</span>
+                <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium">{t('subscriptionDialog.gb', { defaultValue: 'GB' })}</span>
               </div>
             </FormControl>
             {numericValue != null && numericValue > 0 && numericValue < ONE_GB_IN_BYTES && (

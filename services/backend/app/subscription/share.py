@@ -8,10 +8,10 @@ from jdatetime import date as jd
 
 from app.core.hosts import host_manager
 from app.db.crud.wireguard import pick_peer_ip_for_inbound
-from app.db.models import UserStatus
+from app.db.models import SubscriptionStatus
 from app.models.status_emojis import STATUS_EMOJIS
 from app.models.subscription import SubscriptionInboundData
-from app.models.user import UsersResponseWithInbounds
+from app.models.subscription_models import SubscriptionWithInbounds
 from app.settings import subscription_settings
 from app.subscription.client_templates import subscription_client_templates, subscription_xray_templates
 from app.subscription.config_cache import (
@@ -88,12 +88,13 @@ def _build_subscription_config(
 
 
 async def generate_subscription(
-    user: UsersResponseWithInbounds,
+    user: SubscriptionWithInbounds,
     config_format: str,
     as_base64: bool,
     randomize_order: bool = False,
 ) -> str | bytes:
     cache_key = make_sub_config_key(user, config_format, as_base64, randomize_order)
+
     async def render() -> str | bytes:
         client_templates = await subscription_client_templates()
         xray_template_overrides = await subscription_xray_templates() if config_format == "xray" else None
@@ -136,7 +137,7 @@ def inject_body_placement(conf: str | bytes, lines: list[str], placement: str, a
     if as_base64:
         try:
             decoded = base64.b64decode(conf).decode()
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             return conf
         merged = f"{block}\n{decoded}" if placement == "body_start" else f"{decoded}\n{block}"
         return base64.b64encode(merged.encode()).decode()
@@ -176,7 +177,7 @@ def _custom_variable_parts(custom_variable) -> tuple[str | None, str]:
 
 
 def get_effective_custom_variables(
-    user: UsersResponseWithInbounds, custom_variables: list | tuple | None = None
+    user: SubscriptionWithInbounds, custom_variables: list | tuple | None = None
 ) -> list:
     variables = list(custom_variables or [])
     admin_variables = getattr(getattr(user, "admin", None), "custom_variables", None) or []
@@ -200,7 +201,7 @@ def apply_custom_format_variables(format_variables: dict, custom_variables: list
             continue
         try:
             format_variables[key] = raw_value.format_map(base_variables)
-        except (ValueError, KeyError):
+        except ValueError, KeyError:
             format_variables[key] = raw_value
 
     return format_variables
@@ -213,7 +214,7 @@ def _format_dynamic_value(value, format_variables: dict):
             return value
         try:
             return value.format_map(format_variables)
-        except (ValueError, KeyError, AttributeError, IndexError, TypeError):
+        except ValueError, KeyError, AttributeError, IndexError, TypeError:
             # A value the variables cannot fill (stray brace, {0}, {X.y}) is kept as it is
             return value
     if isinstance(value, list):
@@ -223,7 +224,7 @@ def _format_dynamic_value(value, format_variables: dict):
     return value
 
 
-def setup_format_variables(user: UsersResponseWithInbounds, custom_variables: list | tuple | None = None) -> dict:
+def setup_format_variables(user: SubscriptionWithInbounds, custom_variables: list | tuple | None = None) -> dict:
     custom_variables = get_effective_custom_variables(user, custom_variables)
     user_status = user.status
     expire = user.expire
@@ -234,7 +235,7 @@ def setup_format_variables(user: UsersResponseWithInbounds, custom_variables: li
     if admin_data := user.admin:
         admin_username = admin_data.username
 
-    if user_status != UserStatus.on_hold:
+    if user_status != SubscriptionStatus.on_hold:
         if expire is not None:
             seconds_left = (expire - now).total_seconds()
             expire_date_obj = expire.date()
@@ -285,7 +286,7 @@ def setup_format_variables(user: UsersResponseWithInbounds, custom_variables: li
         {
             "SERVER_IP": SERVER_IP,
             "SERVER_IPV6": SERVER_IPV6,
-            "USERNAME": user.username,
+            "SUBSCRIPTION_UUID": str(user.uuid),
             "DATA_USAGE": readable_size(user.used_traffic),
             "DATA_LIMIT": data_limit,
             "DATA_LEFT": data_left,
@@ -302,7 +303,9 @@ def setup_format_variables(user: UsersResponseWithInbounds, custom_variables: li
     return apply_custom_format_variables(format_variables, custom_variables)
 
 
-async def filter_hosts(hosts: list[SubscriptionInboundData], user_status: UserStatus) -> list[SubscriptionInboundData]:
+async def filter_hosts(
+    hosts: list[SubscriptionInboundData], user_status: SubscriptionStatus
+) -> list[SubscriptionInboundData]:
     return [host for host in hosts if not host.status or user_status in host.status]
 
 
@@ -328,10 +331,10 @@ async def process_host(
         return
     settings = dict(settings)
 
-    # Keep user id accessible for protocol-level dynamic allocation helpers.
-    user_id = proxies.get("_user_id")
-    if user_id is not None:
-        settings["_user_id"] = user_id
+    # Keep the UUID available to protocol-level dynamic allocation helpers.
+    subscription_uuid = proxies.get("_subscription_uuid")
+    if subscription_uuid is not None:
+        settings["_subscription_uuid"] = subscription_uuid
 
     # Each WG interface only gets the user's peer IP from its own subnet.
     if inbound.protocol == "wireguard":
@@ -442,7 +445,7 @@ async def _prepare_download_settings(
 
 
 async def process_inbounds_and_tags(
-    user: UsersResponseWithInbounds,
+    user: SubscriptionWithInbounds,
     format_variables: dict,
     conf: StandardLinks
     | XrayConfiguration
@@ -457,7 +460,7 @@ async def process_inbounds_and_tags(
     custom_variables: list | tuple | None = None,
 ) -> str | bytes:
     proxy_settings = user.proxy_settings.dict()
-    proxy_settings["_user_id"] = user.id
+    proxy_settings["_subscription_uuid"] = user.uuid
     host_entries = [
         (host_id, host)
         for host_id, host in (await host_manager.get_hosts()).items()
@@ -485,10 +488,17 @@ async def process_inbounds_and_tags(
         from app.db.host_balancer import host_balancers
 
         async with GetDB() as db:
-            balancers = (await db.execute(
-                select(host_balancers).where(host_balancers.c.is_disabled.is_(False))
-                .order_by(host_balancers.c.id)
-            )).mappings().all()
+            balancers = (
+                (
+                    await db.execute(
+                        select(host_balancers)
+                        .where(host_balancers.c.is_disabled.is_(False))
+                        .order_by(host_balancers.c.id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
 
         # Only hide normal entries after all group members are authorized,
         # active and convertible for the requesting user.
@@ -500,8 +510,11 @@ async def process_inbounds_and_tags(
                 if host_data is None:
                     continue
                 processed = await process_host(
-                    host_data, format_variables.copy(), user.inbounds,
-                    proxy_settings, custom_variables,
+                    host_data,
+                    format_variables.copy(),
+                    user.inbounds,
+                    proxy_settings,
+                    custom_variables,
                 )
                 if not processed:
                     continue
@@ -519,21 +532,29 @@ async def process_inbounds_and_tags(
                 download_settings = getattr(inbound_copy.transport_config, "download_settings", None)
                 if isinstance(download_settings, SubscriptionInboundData):
                     processed_download = await _prepare_download_settings(
-                        download_settings, format_variables.copy(), user.inbounds,
-                        proxy_settings, client_templates, custom_variables, conf,
+                        download_settings,
+                        format_variables.copy(),
+                        user.inbounds,
+                        proxy_settings,
+                        client_templates,
+                        custom_variables,
+                        conf,
                     )
                     inbound_copy.transport_config.download_settings = processed_download
                 ready_members.append((address, inbound_copy, settings))
 
             # Hide individual entries only when their combined profile was
             # actually emitted. Unsupported protocols must not disappear.
-            if conf.add_balancer(
-                balancer_id=balancer["id"],
-                name=_format_dynamic_value(balancer["name"], format_variables),
-                members=ready_members,
-                strategy=balancer["strategy"],
-                probe_interval=balancer["probe_interval"],
-            ) and balancer["hide_members"]:
+            if (
+                conf.add_balancer(
+                    balancer_id=balancer["id"],
+                    name=_format_dynamic_value(balancer["name"], format_variables),
+                    members=ready_members,
+                    strategy=balancer["strategy"],
+                    probe_interval=balancer["probe_interval"],
+                )
+                and balancer["hide_members"]
+            ):
                 suppressed_host_ids.update(balancer["host_ids"])
 
     for host_id, host_data in host_entries:

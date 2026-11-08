@@ -1,7 +1,7 @@
-import { AdminDetails, SystemUsersStats, useGetAdmins } from '@/service/api'
+import { AdminDetails, SystemSubscriptionsStats, useGetAdmins } from '@/service/api'
 import AdminStatisticsCard from './admin-statistics-card'
 
-const DashboardAdminStatistics = ({ currentAdmin, systemStats }: { currentAdmin: AdminDetails | undefined; systemStats: SystemUsersStats | undefined }) => {
+const DashboardAdminStatistics = ({ currentAdmin, systemStats }: { currentAdmin: AdminDetails | undefined; systemStats: SystemSubscriptionsStats | undefined }) => {
   const { data } = useGetAdmins(undefined, {
     query: {
       refetchInterval: false,

@@ -91,9 +91,7 @@ class NatsSettings(EnvSettings):
     worker_sync_subject: str = Field(default="waylane.worker_sync", validation_alias="NATS_WORKER_SYNC_SUBJECT")
     node_command_subject: str = Field(default="waylane.node.command", validation_alias="NATS_NODE_COMMAND_SUBJECT")
     node_rpc_subject: str = Field(default="waylane.node.rpc", validation_alias="NATS_NODE_RPC_SUBJECT")
-    scheduler_rpc_subject: str = Field(
-        default="waylane.scheduler.rpc", validation_alias="NATS_SCHEDULER_RPC_SUBJECT"
-    )
+    scheduler_rpc_subject: str = Field(default="waylane.scheduler.rpc", validation_alias="NATS_SCHEDULER_RPC_SUBJECT")
     node_log_subject: str = Field(default="waylane.node.logs", validation_alias="NATS_NODE_LOG_SUBJECT")
     node_rpc_timeout: float = Field(default=30.0, validation_alias="NATS_NODE_RPC_TIMEOUT")
     scheduler_rpc_timeout: float = Field(default=5.0, validation_alias="NATS_SCHEDULER_RPC_TIMEOUT")
@@ -101,7 +99,6 @@ class NatsSettings(EnvSettings):
     node_update_users_batch_size: int = Field(default=100, validation_alias="NATS_NODE_UPDATE_USERS_BATCH_SIZE")
     core_pubsub_channel: str = Field(default="core_hosts_updates", validation_alias="CORE_PUBSUB_CHANNEL")
     host_pubsub_channel: str = Field(default="host_manager_updates", validation_alias="HOST_PUBSUB_CHANNEL")
-    telegram_kv_bucket: str = Field(default="waylane_telegram", validation_alias="NATS_TELEGRAM_KV_BUCKET")
     node_user_sync_kv_bucket: str = Field(
         default="waylane_node_user_sync", validation_alias="NATS_NODE_USER_SYNC_KV_BUCKET"
     )
@@ -111,9 +108,6 @@ class NatsSettings(EnvSettings):
     scheduler_leader_kv_bucket: str = Field(
         default="waylane_scheduler_leader", validation_alias="NATS_SCHEDULER_LEADER_KV_BUCKET"
     )
-    notification_stream: str = Field(default="NOTIFICATIONS", validation_alias="NATS_NOTIFICATION_STREAM")
-    notification_subject: str = Field(default="notifications.queue", validation_alias="NATS_NOTIFICATION_SUBJECT")
-    notification_consumer: str = Field(default="notification_workers", validation_alias="NATS_NOTIFICATION_CONSUMER")
     webhook_stream: str = Field(default="WEBHOOK_NOTIFICATIONS", validation_alias="NATS_WEBHOOK_STREAM")
     webhook_subject: str = Field(default="notifications.webhook", validation_alias="NATS_WEBHOOK_SUBJECT")
     webhook_consumer: str = Field(default="webhook_workers", validation_alias="NATS_WEBHOOK_CONSUMER")
@@ -153,10 +147,6 @@ class TemplateSettings(EnvSettings):
 class UserCleanupSettings(EnvSettings):
     autodelete_days: int = Field(default=-1, validation_alias="USERS_AUTODELETE_DAYS")
     include_limited_accounts: bool = Field(default=False, validation_alias="USER_AUTODELETE_INCLUDE_LIMITED_ACCOUNTS")
-
-
-class TelegramEnvSettings(EnvSettings):
-    do_not_log_bot: bool = Field(default=True, validation_alias="DO_NOT_LOG_TELEGRAM_BOT")
 
 
 class LoggingSettings(EnvSettings):
@@ -211,14 +201,14 @@ class JobSettings(EnvSettings):
     node_health_probe_timeout: int = Field(default=5, ge=1, validation_alias="NODE_HEALTH_PROBE_TIMEOUT")
     node_health_max_backoff: int = Field(default=60, ge=0, validation_alias="NODE_HEALTH_MAX_BACKOFF")
     record_node_usages_interval: int = Field(default=30, validation_alias="JOB_RECORD_NODE_USAGES_INTERVAL")
-    record_user_usages_interval: int = Field(default=10, validation_alias="JOB_RECORD_USER_USAGES_INTERVAL")
-    review_users_interval: int = Field(default=30, validation_alias="JOB_REVIEW_USERS_INTERVAL")
+    record_subscription_usages_interval: int = Field(default=10, validation_alias="JOB_RECORD_SUBSCRIPTION_USAGES_INTERVAL")
+    review_subscriptions_interval: int = Field(default=30, validation_alias="JOB_REVIEW_SUBSCRIPTIONS_INTERVAL")
     review_admin_limits_interval: int = Field(default=10, validation_alias="JOB_REVIEW_ADMIN_LIMITS_INTERVAL")
     send_notifications_interval: int = Field(default=30, validation_alias="JOB_SEND_NOTIFICATIONS_INTERVAL")
     gather_nodes_stats_interval: int = Field(default=25, validation_alias="JOB_GATHER_NODES_STATS_INTERVAL")
     remove_old_inbounds_interval: int = Field(default=600, validation_alias="JOB_REMOVE_OLD_INBOUNDS_INTERVAL")
-    remove_expired_users_interval: int = Field(default=3600, validation_alias="JOB_REMOVE_EXPIRED_USERS_INTERVAL")
-    reset_user_data_usage_interval: int = Field(default=600, validation_alias="JOB_RESET_USER_DATA_USAGE_INTERVAL")
+    remove_expired_subscriptions_interval: int = Field(default=3600, validation_alias="JOB_REMOVE_EXPIRED_SUBSCRIPTIONS_INTERVAL")
+    reset_subscription_data_usage_interval: int = Field(default=600, validation_alias="JOB_RESET_SUBSCRIPTION_DATA_USAGE_INTERVAL")
     reset_node_usage_interval: int = Field(default=60, validation_alias="JOB_RESET_NODE_USAGE_INTERVAL")
     check_node_limits_interval: int = Field(default=60, validation_alias="JOB_CHECK_NODE_LIMITS_INTERVAL")
     cleanup_subscription_updates_interval: int = Field(
@@ -239,7 +229,6 @@ subscription_env_settings = SubscriptionEnvSettings()
 jwt_settings = JwtSettings()
 template_settings = TemplateSettings()
 user_cleanup_settings = UserCleanupSettings()
-telegram_env_settings = TelegramEnvSettings()
 logging_settings = LoggingSettings()
 auth_settings = AuthSettings()
 usage_settings = UsageSettings()

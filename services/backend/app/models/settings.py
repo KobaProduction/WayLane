@@ -7,13 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.models.proxy import ShadowsocksMethods
 
 from .notification_enable import NotificationEnable
-from .validators import DiscordValidator, ProxyValidator, URLValidator
+from .validators import ProxyValidator
 
-TELEGRAM_TOKEN_PATTERN = r"^\d{8,12}:[A-Za-z0-9_-]{35}$"
 BUILTIN_FORMAT_VARIABLES = {
     "SERVER_IP",
     "SERVER_IPV6",
-    "USERNAME",
+    "SUBSCRIPTION_UUID",
     "DATA_USAGE",
     "DATA_LIMIT",
     "DATA_LEFT",
@@ -31,62 +30,6 @@ BUILTIN_FORMAT_VARIABLES = {
     "format",
 }
 BUILTIN_CUSTOM_VARIABLE_KEYS = {variable.upper() for variable in BUILTIN_FORMAT_VARIABLES}
-
-
-class RunMethod(StrEnum):
-    WEBHOOK = "webhook"
-    LONGPOLLING = "long-polling"
-
-
-class Telegram(BaseModel):
-    enable: bool = Field(default=False)
-    token: str | None = Field(default=None)
-    webhook_url: str | None = Field(default=None)
-    webhook_secret: str | None = Field(default=None)
-    proxy_url: str | None = Field(default=None)
-    method: RunMethod = Field(default=RunMethod.WEBHOOK)
-
-    mini_app_login: bool = Field(default=True)
-    mini_app_web_url: str | None = Field(default="")
-
-    for_admins_only: bool = Field(default=True)
-
-    @field_validator("mini_app_web_url")
-    @classmethod
-    def validate_mini_app_web_url(cls, v):
-        return URLValidator.validate_url(v)
-
-    @field_validator("webhook_url")
-    def validate_webhook_url(cls, v, values):
-        method = values.data.get("method", "webhook")
-        if method == "webhook":
-            return URLValidator.validate_url(v)
-
-    @field_validator("proxy_url")
-    @classmethod
-    def validate_proxy_url(cls, v):
-        return ProxyValidator.validate_proxy_url(v)
-
-    @field_validator("token")
-    @classmethod
-    def token_validation(cls, v):
-        if not v:
-            return v
-        if not re.match(TELEGRAM_TOKEN_PATTERN, v):
-            raise ValueError("Invalid telegram token format")
-        return v
-
-    @model_validator(mode="after")
-    def check_enable_requires_token_and_url(self):
-        if self.enable and (
-            (self.method == RunMethod.WEBHOOK and (not self.token or not self.webhook_url or not self.webhook_secret))
-            or (self.method == RunMethod.LONGPOLLING and not self.token)
-        ):
-            if self.method == RunMethod.WEBHOOK:
-                raise ValueError("Telegram bot cannot be enabled without token, webhook_url and webhook_secret.")
-            elif self.method == RunMethod.LONGPOLLING:
-                raise ValueError("Telegram bot cannot be enabled without token.")
-        return self
 
 
 class WebhookInfo(BaseModel):
@@ -112,81 +55,6 @@ class Webhook(BaseModel):
     def check_enable_requires_webhookinfo(self):
         if self.enable and (not self.webhooks or len(self.webhooks) == 0):
             raise ValueError("Webhook cannot be enabled without at least one WebhookInfo.")
-        return self
-
-
-class NotificationChannel(BaseModel):
-    """Channel configuration for sending notifications to a specific entity"""
-
-    telegram_chat_id: int | None = Field(default=None)
-    telegram_topic_id: int | None = Field(default=None)
-    discord_webhook_url: str | None = Field(default=None)
-
-    @field_validator("discord_webhook_url", mode="before")
-    @classmethod
-    def validate_discord_webhook(cls, value):
-        return DiscordValidator.validate_webhook(value)
-
-
-class NotificationChannels(BaseModel):
-    """Per-object notification channels"""
-
-    admin: NotificationChannel = Field(default_factory=NotificationChannel)
-    admin_role: NotificationChannel = Field(default_factory=NotificationChannel)
-    core: NotificationChannel = Field(default_factory=NotificationChannel)
-    group: NotificationChannel = Field(default_factory=NotificationChannel)
-    host: NotificationChannel = Field(default_factory=NotificationChannel)
-    node: NotificationChannel = Field(default_factory=NotificationChannel)
-    user: NotificationChannel = Field(default_factory=NotificationChannel)
-    user_template: NotificationChannel = Field(default_factory=NotificationChannel)
-    api_key: NotificationChannel = Field(default_factory=NotificationChannel)
-
-
-class NotificationSettings(BaseModel):
-    # Define Which Notfication System Work's
-    notify_telegram: bool = Field(default=False)
-    notify_discord: bool = Field(default=False)
-
-    # Telegram Settings
-    telegram_api_token: str | None = Field(default=None)
-
-    # Fallback Telegram Channel
-    telegram_chat_id: int | None = Field(default=None)
-    telegram_topic_id: int | None = Field(default=None)
-
-    # Fallback Discord Settings
-    discord_webhook_url: str | None = Field(default=None)
-
-    # Per-object notification channels
-    channels: NotificationChannels = Field(default_factory=NotificationChannels)
-
-    # Proxy Settings
-    proxy_url: str | None = Field(default=None)
-
-    max_retries: int = Field(gt=1)
-
-    @field_validator("proxy_url", mode="before")
-    @classmethod
-    def validate_proxy_url(cls, v):
-        return ProxyValidator.validate_proxy_url(v)
-
-    @field_validator("discord_webhook_url", mode="before")
-    @classmethod
-    def validate_discord_webhook(cls, value):
-        return DiscordValidator.validate_webhook(value)
-
-    @model_validator(mode="after")
-    def check_notify_discord_requires_url(self):
-        if self.notify_discord and not self.discord_webhook_url:
-            raise ValueError("Discord notification cannot be enabled without webhook url.")
-        return self
-
-    @model_validator(mode="after")
-    def check_notify_telegram_requires_token_and_id(self):
-        if self.notify_telegram and not self.telegram_api_token:
-            raise ValueError("Telegram notification cannot be enabled without token.")
-        if self.notify_telegram and not self.telegram_chat_id:
-            raise ValueError("Telegram notification cannot be enabled without chat id.")
         return self
 
 
@@ -388,9 +256,7 @@ class General(BaseModel):
 
 
 class SettingsSchema(BaseModel):
-    telegram: Telegram | None = Field(default=None)
     webhook: Webhook | None = Field(default=None)
-    notification_settings: NotificationSettings | None = Field(default=None)
     notification_enable: NotificationEnable | None = Field(default=None)
     subscription: Subscription | None = Field(default=None)
     hwid: HWIDSettings | None = Field(default=None)

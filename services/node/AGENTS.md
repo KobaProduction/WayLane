@@ -24,3 +24,13 @@ Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
 `scripts/verify.sh` runs source gates. Preserve provenance/licenses in
 `UPSTREAM.md` and `LICENSING.md`. No production node migration without
 explicit acceptance.
+
+## Subscription account identity
+
+`common/service.proto` is WayLane-owned and defines `Subscription` with canonical
+`subscription_uuid` (UUIDv4), including the sync, removal and statistics contracts.
+Its Python bridge and Go bindings are regenerated together. Only the Xray adapter
+maps the UUID to the external `Account.email` field as required by Xray; it is not
+a contact email or a subscription username. No WayLane product `User`, numeric
+subscription ID or subscriber `username` may be reintroduced. Node IDs remain
+separate machine identifiers.

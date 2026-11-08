@@ -24,9 +24,9 @@ func TestWireGuardRestartConcurrentWithShutdown(t *testing.T) {
 		"private_key":"%s"
 	}`, privateKey))
 
-	users := []*common.User{
+	users := []*common.Subscription{
 		{
-			Email:    "user@example.com",
+			SubscriptionUuid:    "user@example.com",
 			Inbounds: []string{"wg-test-restart"},
 			Proxies: &common.Proxy{
 				Wireguard: &common.Wireguard{

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -8,9 +7,8 @@ from uuid import uuid4
 
 from fastapi import status
 
-from app.db.crud.hwid import register_user_hwid, reset_user_hwids
 from config import nats_settings, runtime_settings
-from tests.api import TestSession, client
+from tests.api import client
 from tests.api.sample_data import XRAY_CONFIG
 
 _WAIT_FOR_INBOUNDS = runtime_settings.role.requires_nats and nats_settings.enabled
@@ -191,35 +189,7 @@ def delete_group(access_token: str, group_id: int) -> None:
     assert response.status_code == status.HTTP_204_NO_CONTENT
 
 
-def create_user(
-    access_token: str,
-    *,
-    username: str | None = None,
-    group_ids: Iterable[int] | None = None,
-    payload: dict[str, Any] | None = None,
-) -> dict:
-    body = {
-        "username": username or unique_name("user"),
-        "proxy_settings": {},
-        "data_limit": 1024 * 1024,
-        "data_limit_reset_strategy": "no_reset",
-        "status": "active",
-    }
-    if payload:
-        body.update(payload)
-    if group_ids is not None:
-        body["group_ids"] = list(group_ids)
-    response = client.post("/api/user", headers=auth_headers(access_token), json=body)
-    assert response.status_code == status.HTTP_201_CREATED
-    return response.json()
-
-
-def delete_user(access_token: str, username: str) -> None:
-    response = client.delete(f"/api/user/{username}", headers=auth_headers(access_token))
-    assert response.status_code == status.HTTP_204_NO_CONTENT
-
-
-def create_user_template(
+def create_subscription_template(
     access_token: str,
     *,
     name: str | None = None,
@@ -229,13 +199,11 @@ def create_user_template(
     extra_settings: dict[str, Any] | None = None,
     status_value: str = "active",
     reset_usages: bool = True,
-    username_prefix: str | None = None,
-    username_suffix: str | None = None,
     hwid_limit: int | None = None,
     on_hold_timeout: int | None = None,
 ) -> dict:
     payload = {
-        "name": name or unique_name("user_template"),
+        "name": name or unique_name("subscription_template"),
         "group_ids": list(group_ids),
         "data_limit": data_limit,
         "expire_duration": expire_duration,
@@ -244,33 +212,15 @@ def create_user_template(
     }
     if extra_settings is not None:
         payload["extra_settings"] = extra_settings
-    if username_prefix is not None:
-        payload["username_prefix"] = username_prefix
-    if username_suffix is not None:
-        payload["username_suffix"] = username_suffix
     if hwid_limit is not None:
         payload["hwid_limit"] = hwid_limit
     if on_hold_timeout is not None:
         payload["on_hold_timeout"] = on_hold_timeout
-    response = client.post("/api/user_template", headers=auth_headers(access_token), json=payload)
+    response = client.post("/api/subscription_template", headers=auth_headers(access_token), json=payload)
     assert response.status_code == status.HTTP_201_CREATED
     return response.json()
 
 
-def set_user_hwids(user_id: int, count: int) -> None:
-    """Give the user exactly `count` registered devices, written directly to the database."""
-
-    async def _register() -> None:
-        async with TestSession() as session:
-            # SQLite keeps a deleted user's devices and can reuse its id, so start from none
-            await reset_user_hwids(session, user_id)
-            for index in range(count):
-                await register_user_hwid(session, user_id, f"device-{index}")
-            await session.commit()
-
-    asyncio.run(_register())
-
-
-def delete_user_template(access_token: str, template_id: int) -> None:
-    response = client.delete(f"/api/user_template/{template_id}", headers=auth_headers(access_token))
+def delete_subscription_template(access_token: str, template_id: int) -> None:
+    response = client.delete(f"/api/subscription_template/{template_id}", headers=auth_headers(access_token))
     assert response.status_code == status.HTTP_204_NO_CONTENT

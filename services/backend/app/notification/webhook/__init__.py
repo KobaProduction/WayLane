@@ -1,132 +1,58 @@
+"""Generic outgoing notification events; no product user/contact payloads.
+
+Device-registration callbacks are separately persisted and HMAC-signed by
+:mod:`app.subscription.device_webhook` and must remain independent of this queue.
+"""
+
 from datetime import UTC, datetime as dt
-from enum import Enum
+from typing import Any
+from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
-from app.models.admin import AdminDetails
-from app.models.user import UserNotificationResponse, UserStatus
+from app.models.subscription_models import SubscriptionNotificationResponse
 from app.notification.queue_manager import enqueue_webhook
 from app.settings import webhook_settings
 
 
 def get_current_timestamp() -> float:
-    """Factory function to get current timestamp"""
     return dt.now(UTC).timestamp()
 
 
 class Notification(BaseModel):
-    class Type(str, Enum):
-        user_created = "user_created"
-        user_updated = "user_updated"
-        user_deleted = "user_deleted"
-        user_limited = "user_limited"
-        user_expired = "user_expired"
-        user_enabled = "user_enabled"
-        user_disabled = "user_disabled"
-        data_usage_reset = "data_usage_reset"
-        data_reset_by_next = "data_reset_by_next"
-        subscription_revoked = "subscription_revoked"
-
-        reached_usage_percent = "reached_usage_percent"
-        reached_days_left = "reached_days_left"
-
     enqueued_at: float = Field(default_factory=get_current_timestamp)
     send_at: float = Field(default_factory=get_current_timestamp)
     tries: int = Field(default=0)
 
 
-class UserNotification(Notification):
-    username: str
+class PanelEvent(Notification):
+    """A secret-free event addressed by the canonical subscription UUID."""
+
+    action: str
+    resource: str
+    resource_id: str | int | None = None
+    subscription_uuid: UUID | None = None
+    actor: str | None = None
+    details: dict[str, Any] | None = None
 
 
-class ReachedUsagePercent(UserNotification):
-    action: Notification.Type = Notification.Type.reached_usage_percent
-    user: UserNotificationResponse
-    used_percent: float
+async def status_change(subscription: SubscriptionNotificationResponse) -> None:
+    await notify(
+        PanelEvent(
+            action=f"subscription.status.{subscription.status.value}",
+            resource="subscription",
+            subscription_uuid=subscription.uuid,
+        )
+    )
 
 
-class ReachedDaysLeft(UserNotification):
-    action: Notification.Type = Notification.Type.reached_days_left
-    user: UserNotificationResponse
-    days_left: int
-
-
-class UserCreated(UserNotification):
-    action: Notification.Type = Notification.Type.user_created
-    by: AdminDetails
-    user: UserNotificationResponse
-
-
-class UserUpdated(UserNotification):
-    action: Notification.Type = Notification.Type.user_updated
-    by: AdminDetails
-    user: UserNotificationResponse
-
-
-class UserDeleted(UserNotification):
-    action: Notification.Type = Notification.Type.user_deleted
-    by: AdminDetails
-    user: UserNotificationResponse
-
-
-class UserLimited(UserNotification):
-    action: Notification.Type = Notification.Type.user_limited
-    user: UserNotificationResponse
-
-
-class UserExpired(UserNotification):
-    action: Notification.Type = Notification.Type.user_expired
-    user: UserNotificationResponse
-
-
-class UserEnabled(UserNotification):
-    action: Notification.Type = Notification.Type.user_enabled
-    by: AdminDetails | None = None
-    user: UserNotificationResponse
-
-
-class UserDisabled(UserNotification):
-    action: Notification.Type = Notification.Type.user_disabled
-    by: AdminDetails | None = None
-    user: UserNotificationResponse
-    reason: str | None = None
-
-
-class UserDataUsageReset(UserNotification):
-    action: Notification.Type = Notification.Type.data_usage_reset
-    by: AdminDetails
-    user: UserNotificationResponse
-
-
-class UserDataResetByNext(UserNotification):
-    action: Notification.Type = Notification.Type.data_usage_reset
-    user: UserNotificationResponse
-
-
-class UserSubscriptionRevoked(UserNotification):
-    action: Notification.Type = Notification.Type.subscription_revoked
-    by: AdminDetails
-    user: UserNotificationResponse
-
-
-async def status_change(user: UserNotificationResponse):
-    if user.status == UserStatus.limited:
-        await notify(UserLimited(username=user.username, user=user))
-    elif user.status == UserStatus.expired:
-        await notify(UserExpired(username=user.username, user=user))
-    elif user.status == UserStatus.disabled:
-        await notify(UserDisabled(username=user.username, user=user))
-    elif user.status == UserStatus.active or user.status == UserStatus.on_hold:
-        await notify(UserEnabled(username=user.username, user=user))
-
-
-async def notify(message: type[Notification]) -> None:
+async def notify(message: Notification | dict) -> None:
     if (await webhook_settings()).enable:
         await enqueue_webhook(jsonable_encoder(message))
 
 
-async def bulk_notify(messages: list[type[Notification]]) -> None:
+async def bulk_notify(messages: list[Notification | dict]) -> None:
     if (await webhook_settings()).enable:
         for message in messages:
             await enqueue_webhook(jsonable_encoder(message))

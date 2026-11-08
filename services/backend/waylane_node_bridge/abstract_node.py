@@ -12,7 +12,7 @@ class WayLaneNode(Controller, ABC):
         self,
         config: str,
         backend_type: service.BackendType,
-        users: list[service.User],
+        users: list[service.Subscription],
         keep_alive: int = 0,
         exclude_inbounds: list[str] | None = None,
         timeout: int | None = None,
@@ -46,25 +46,25 @@ class WayLaneNode(Controller, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_user_online_stats(self, email: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+    async def get_subscription_online_stats(self, subscription_uuid: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
         raise NotImplementedError
 
     @abstractmethod
-    async def get_user_online_ip_list(
-        self, email: str, timeout: int | None = None
+    async def get_subscription_online_ip_list(
+        self, subscription_uuid: str, timeout: int | None = None
     ) -> service.StatsOnlineIpListResponse | None:
         raise NotImplementedError
 
     @abstractmethod
     async def sync_users(
-        self, users: list[service.User], flush_pending: bool = False, timeout: int | None = None
+        self, users: list[service.Subscription], flush_pending: bool = False, timeout: int | None = None
     ) -> service.Empty | None:
         raise NotImplementedError
 
     @abstractmethod
     async def sync_users_chunked(
-        self, users: list[service.User], chunk_size: int = 100, flush_pending: bool = False, timeout: int | None = None
-    ) -> list[service.User]:
+        self, users: list[service.Subscription], chunk_size: int = 100, flush_pending: bool = False, timeout: int | None = None
+    ) -> list[service.Subscription]:
         raise NotImplementedError
 
     @abstractmethod
@@ -113,7 +113,7 @@ class WayLaneNode(Controller, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def _sync_batch_users(self, users: list[service.User]) -> list[service.User]:
+    async def _sync_batch_users(self, users: list[service.Subscription]) -> list[service.Subscription]:
         """Sync a batch of users individually. Returns list of failed users to requeue."""
         raise NotImplementedError
 

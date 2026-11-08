@@ -31,10 +31,10 @@ func newToBytesConfig(t *testing.T) *Config {
 	return cfg
 }
 
-func toBytesUsers() []*common.User {
-	return []*common.User{
+func toBytesUsers() []*common.Subscription {
+	return []*common.Subscription{
 		{
-			Email:    "1",
+			SubscriptionUuid:    "1",
 			Inbounds: []string{"static", "managed"},
 			Proxies:  &common.Proxy{Vless: &common.Vless{Id: "6b1d1f0e-5c1d-4c3a-9f6e-222222222222"}},
 		},
@@ -363,8 +363,8 @@ func TestToBytesWritesOnlyRealShadowsocks2022Users(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.syncUsers([]*common.User{{
-		Email:    "1",
+	cfg.syncUsers([]*common.Subscription{{
+		SubscriptionUuid:    "1",
 		Inbounds: []string{"aes128", "aes256"},
 		Proxies:  &common.Proxy{Shadowsocks: &common.Shadowsocks{Password: "user-one-password"}},
 	}})

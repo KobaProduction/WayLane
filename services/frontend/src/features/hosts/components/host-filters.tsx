@@ -5,13 +5,13 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import useDirDetection from '@/hooks/use-dir-detection'
 import { cn } from '@/lib/utils'
-import { type ProxyHostSecurity, type UserStatus } from '@/service/api'
+import { type ProxyHostSecurity, type SubscriptionStatus } from '@/service/api'
 import { Filter, RefreshCw, SearchIcon, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 export interface HostListFilters {
   search?: string
-  status?: UserStatus[]
+  status?: SubscriptionStatus[]
   inbound_tags?: string[]
   security?: ProxyHostSecurity
   is_disabled?: boolean

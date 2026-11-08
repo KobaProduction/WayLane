@@ -19,8 +19,8 @@ import { toast } from 'sonner'
 import { Power, PowerOff, Trash2 } from 'lucide-react'
 import HostModal from '../dialogs/host-modal'
 import SortableHost from './sortable-host'
-import { BulkActionItem, BulkActionsBar } from '@/features/users/components/bulk-actions-bar'
-import { BulkActionAlertDialog } from '@/features/users/components/bulk-action-alert-dialog'
+import { BulkActionItem, BulkActionsBar } from '@/components/common/bulk-actions-bar'
+import { BulkActionAlertDialog } from '@/components/common/bulk-action-alert-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export interface HostsListProps {

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import string
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from app.models.proxy import ProxyTable
-from app.models.user import UserCreate, UserModify
+from app.models.subscription_models import SubscriptionCreate, SubscriptionModify
 from app.utils.crypto import generate_wireguard_keypair
 
 _B64_ALPHABET = string.ascii_uppercase + string.ascii_lowercase + string.digits + "+/"
@@ -21,8 +22,8 @@ def _non_canonical(key: str) -> str:
     return key[:42] + _B64_ALPHABET[index + 1] + key[43:]
 
 
-def _create(wireguard: dict) -> UserCreate:
-    return UserCreate(username="wg_user", group_ids=[1], proxy_settings={"wireguard": wireguard})
+def _create(wireguard: dict) -> SubscriptionCreate:
+    return SubscriptionCreate(uuid=uuid4(), group_ids=[1], proxy_settings={"wireguard": wireguard})
 
 
 def test_non_canonical_public_key_is_stored_canonical():
@@ -32,7 +33,7 @@ def test_non_canonical_public_key_is_stored_canonical():
 
     assert _create({"public_key": twin}).proxy_settings.wireguard.public_key == public_key
     assert _create({"private_key": private_key, "public_key": twin}).proxy_settings.wireguard.public_key == public_key
-    assert UserModify(
+    assert SubscriptionModify(
         proxy_settings={"wireguard": {"public_key": f" {twin} "}}
     ).proxy_settings.wireguard.public_key == (public_key)
 

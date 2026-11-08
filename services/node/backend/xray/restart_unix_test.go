@@ -122,7 +122,7 @@ func TestSyncUsersOutlivesTheCaller(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	syncErr := make(chan error, 1)
-	go func() { syncErr <- x.SyncUsers(ctx, nil) }()
+	go func() { syncErr <- x.SyncSubscriptions(ctx, nil) }()
 	waitUntil(t, "the full sync starts its candidate core", x.core.Started)
 	pid := corePID(x)
 
@@ -134,10 +134,10 @@ func TestSyncUsersOutlivesTheCaller(t *testing.T) {
 	select {
 	case err := <-syncErr:
 		if err != nil {
-			t.Fatalf("SyncUsers failed after its caller went away: %v", err)
+			t.Fatalf("SyncSubscriptions failed after its caller went away: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("SyncUsers still running 10s after the core answered")
+		t.Fatal("SyncSubscriptions still running 10s after the core answered")
 	}
 	if got := corePID(x); got != pid {
 		t.Fatalf("xray was restarted again after the caller went away (pid %d, now %d)", pid, got)
@@ -154,7 +154,7 @@ func TestSyncUsersDoesNotStartXrayAfterShutdown(t *testing.T) {
 	x := newFakeCoreXray(t, &fakeStatsService{})
 
 	syncErr := make(chan error, 1)
-	go func() { syncErr <- x.SyncUsers(context.Background(), nil) }()
+	go func() { syncErr <- x.SyncSubscriptions(context.Background(), nil) }()
 	waitUntil(t, "the full sync starts its candidate core", x.core.Started)
 
 	// Stop while the candidate is still booting: Shutdown kills it, the sync
@@ -169,10 +169,10 @@ func TestSyncUsersDoesNotStartXrayAfterShutdown(t *testing.T) {
 	select {
 	case err := <-syncErr:
 		if err == nil {
-			t.Fatal("SyncUsers reported success after Shutdown")
+			t.Fatal("SyncSubscriptions reported success after Shutdown")
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("SyncUsers still running 10s after Shutdown")
+		t.Fatal("SyncSubscriptions still running 10s after Shutdown")
 	}
 }
 
@@ -243,12 +243,12 @@ func TestHealthRestartLeavesACoreThatAFullSyncReplaced(t *testing.T) {
 	}
 }
 
-func realXrayUsers(n int, inbounds []string) []*common.User {
-	users := make([]*common.User, 0, n)
+func realXrayUsers(n int, inbounds []string) []*common.Subscription {
+	users := make([]*common.Subscription, 0, n)
 	for i := range n {
-		users = append(users, &common.User{
-			Email:    strconv.Itoa(i + 1),
-			Inbounds: inbounds,
+		users = append(users, &common.Subscription{
+			SubscriptionUuid: strconv.Itoa(i + 1),
+			Inbounds:         inbounds,
 			Proxies: &common.Proxy{
 				Vmess:  &common.Vmess{Id: uuid.NewString()},
 				Vless:  &common.Vless{Id: uuid.NewString()},
@@ -322,14 +322,14 @@ func TestRestartHoldsUserSyncsUntilTheXrayAPIIsUp(t *testing.T) {
 	})
 
 	// The panel disables users while the new core boots: they are sent with no inbounds.
-	removed := make([]*common.User, 0, 51)
+	removed := make([]*common.Subscription, 0, 51)
 	for _, user := range users[:51] {
-		removed = append(removed, &common.User{Email: user.Email, Proxies: user.Proxies})
+		removed = append(removed, &common.Subscription{SubscriptionUuid: user.SubscriptionUuid, Proxies: user.Proxies})
 	}
 	if err := x.UpdateUsers(ctx, removed[:50]); err != nil {
 		t.Fatal(err)
 	}
-	if err := x.SyncUser(ctx, removed[50]); err != nil {
+	if err := x.SyncSubscription(ctx, removed[50]); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-restartErr; err != nil {
@@ -346,7 +346,7 @@ func TestRestartHoldsUserSyncsUntilTheXrayAPIIsUp(t *testing.T) {
 	live := 0
 	for _, user := range removed {
 		for _, tag := range tags {
-			if x.handler.RemoveInboundUser(ctx, tag, user.GetEmail()) == nil {
+			if x.handler.RemoveInboundUser(ctx, tag, user.GetSubscriptionUuid()) == nil {
 				live++
 			}
 		}

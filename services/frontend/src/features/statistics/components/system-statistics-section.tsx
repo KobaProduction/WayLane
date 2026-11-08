@@ -1,5 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card'
-import { SystemResourceStats, SystemUsersStats, NodeRealtimeStats } from '@/service/api'
+import { SystemResourceStats, SystemSubscriptionsStats, NodeRealtimeStats } from '@/service/api'
 import { useTranslation } from 'react-i18next'
 import { Clock3, Cpu, MemoryStick, HardDrive, Database, Upload, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -10,7 +10,7 @@ import { CircularProgress } from '@/components/ui/circular-progress'
 
 interface SystemStatisticsSectionProps {
   currentStats?: SystemResourceStats | NodeRealtimeStats | null
-  usersStats?: SystemUsersStats
+  usersStats?: SystemSubscriptionsStats
 }
 
 export default function SystemStatisticsSection({ currentStats, usersStats }: SystemStatisticsSectionProps) {

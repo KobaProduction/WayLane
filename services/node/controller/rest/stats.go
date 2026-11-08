@@ -33,7 +33,7 @@ func (s *Service) GetUserOnlineStat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := s.Backend().GetUserOnlineStats(r.Context(), request.GetName())
+	stats, err := s.Backend().GetSubscriptionOnlineStats(r.Context(), request.GetName())
 	if err != nil {
 		err = common.InterceptNotFound(err)
 		st, _ := status.FromError(err)
@@ -45,14 +45,14 @@ func (s *Service) GetUserOnlineStat(w http.ResponseWriter, r *http.Request) {
 	common.SendProtoResponse(w, stats)
 }
 
-func (s *Service) GetUserOnlineIpListStats(w http.ResponseWriter, r *http.Request) {
+func (s *Service) GetSubscriptionOnlineIpListStats(w http.ResponseWriter, r *http.Request) {
 	var request common.StatRequest
 	if err := common.ReadProtoBody(r.Body, &request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	stats, err := s.Backend().GetUserOnlineIpListStats(r.Context(), request.GetName())
+	stats, err := s.Backend().GetSubscriptionOnlineIpListStats(r.Context(), request.GetName())
 	if err != nil {
 		err = common.InterceptNotFound(err)
 		st, _ := status.FromError(err)

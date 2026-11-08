@@ -9,15 +9,15 @@ from waylane_node_bridge.common.service_pb2 import (
     Proxy,
     Shadowsocks,
     Trojan,
-    User,
+    Subscription,
     Vless,
     Vmess,
     Wireguard,
 )
 
 
-def create_user(email: str, proxies: Proxy, inbounds: list[str]) -> User:
-    return User(email=email, proxies=proxies, inbounds=inbounds)
+def create_subscription(subscription_uuid: str, proxies: Proxy, inbounds: list[str]) -> Subscription:
+    return Subscription(subscription_uuid=subscription_uuid, proxies=proxies, inbounds=inbounds)
 
 
 def create_proxy(

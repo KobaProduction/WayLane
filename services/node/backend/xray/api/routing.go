@@ -57,7 +57,7 @@ func buildTestRouteRequest(req *common.TestRouteRequest) *routingCommand.TestRou
 		TargetDomain: req.GetTargetDomain(),
 		TargetPort:   req.GetTargetPort(),
 		Protocol:     req.GetProtocol(),
-		User:         req.GetUser(),
+		User:         req.GetSubscriptionUuid(),
 		Attributes:   req.GetAttributes(),
 	}
 	if ip := net.ParseIP(req.GetTargetIp()); ip != nil {

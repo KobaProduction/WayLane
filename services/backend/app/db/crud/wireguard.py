@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_interface, ip_network
+from uuid import UUID
 
 from sqlalchemy import and_, delete, false, insert, select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -16,10 +17,10 @@ from app.db.models import (
     CoreType,
     Group,
     ProxyInbound,
-    User,
+    Subscription,
     WireGuardSubnet,
     inbounds_groups_association,
-    users_groups_association,
+    subscriptions_groups_association,
 )
 from app.subscription.config_cache import clear_sub_config_cache
 from app.utils.crypto import generate_wireguard_keypair, get_wireguard_public_key
@@ -294,7 +295,7 @@ def _wireguard_candidate_public_key(settings: dict | None) -> str | None:
 
 
 def _ensure_wireguard_keys(
-    db_user: User,
+    db_user: Subscription,
     *,
     shared_keys: set[str] | frozenset[str] = frozenset(),
     occupied_keys: set[str] | None = None,
@@ -332,7 +333,7 @@ def _user_peer_ips(db_user_settings: dict | None) -> list[str]:
     return list(((db_user_settings or {}).get("wireguard") or {}).get("peer_ips") or [])
 
 
-def _set_user_peer_ips(db_user: User, peer_ips: list[str]) -> None:
+def _set_user_peer_ips(db_user: Subscription, peer_ips: list[str]) -> None:
     proxy_settings = dict(db_user.proxy_settings or {})
     wg = dict(proxy_settings.get("wireguard") or {})
     wg["peer_ips"] = peer_ips
@@ -354,13 +355,13 @@ async def get_wg_cores(db: AsyncSession) -> list[CoreConfig]:
     return [core for core in result.scalars().all() if wg_core_interfaces(core)]
 
 
-def _accessible_tags_stmt(*, tags: Iterable[str] | None = None, user_ids: Iterable[int] | None = None):
-    """Join users ↔ enabled groups ↔ inbound tags, optionally filtered by tag and/or user id."""
+def _accessible_tags_stmt(*, tags: Iterable[str] | None = None, subscription_uuids: Iterable[UUID] | None = None):
+    """Join subscription UUIDs to enabled groups and inbound tags."""
     stmt = (
-        select(users_groups_association.c.user_id, ProxyInbound.tag)
+        select(subscriptions_groups_association.c.subscription_uuid, ProxyInbound.tag)
         .join(
             Group,
-            and_(Group.id == users_groups_association.c.groups_id, Group.is_disabled.is_(False)),
+            and_(Group.id == subscriptions_groups_association.c.groups_id, Group.is_disabled.is_(False)),
         )
         .join(inbounds_groups_association, inbounds_groups_association.c.group_id == Group.id)
         .join(ProxyInbound, ProxyInbound.id == inbounds_groups_association.c.inbound_id)
@@ -370,90 +371,90 @@ def _accessible_tags_stmt(*, tags: Iterable[str] | None = None, user_ids: Iterab
         if not tag_list:
             return stmt.where(false())
         stmt = stmt.where(ProxyInbound.tag.in_(tag_list))
-    if user_ids is not None:
-        id_list = list(user_ids)
+    if subscription_uuids is not None:
+        id_list = list(subscription_uuids)
         if not id_list:
             return stmt.where(false())
-        stmt = stmt.where(users_groups_association.c.user_id.in_(id_list))
+        stmt = stmt.where(subscriptions_groups_association.c.subscription_uuid.in_(id_list))
     return stmt
 
 
-async def get_users_accessible_tags(db: AsyncSession, user_ids: list[int]) -> dict[int, set[str]]:
-    """user_id -> inbound tags reachable through enabled groups. One joined SELECT per 10k ids."""
-    if not user_ids:
+async def get_subscriptions_accessible_tags(db: AsyncSession, subscription_uuids: list[UUID]) -> dict[UUID, set[str]]:
+    """Subscription UUID -> reachable inbound tags. One joined SELECT per 10k UUIDs."""
+    if not subscription_uuids:
         return {}
-    tags_by_user: dict[int, set[str]] = {}
+    tags_by_subscription: dict[UUID, set[str]] = {}
     # asyncpg caps a statement at 32767 bind parameters, so a big group can't go into one IN (...).
-    for start in range(0, len(user_ids), 10_000):
-        stmt = _accessible_tags_stmt(user_ids=user_ids[start : start + 10_000])
-        for user_id, tag in (await db.execute(stmt)).all():
-            tags_by_user.setdefault(user_id, set()).add(tag)
-    return tags_by_user
+    for start in range(0, len(subscription_uuids), 10_000):
+        stmt = _accessible_tags_stmt(subscription_uuids=subscription_uuids[start : start + 10_000])
+        for subscription_uuid, tag in (await db.execute(stmt)).all():
+            tags_by_subscription.setdefault(subscription_uuid, set()).add(tag)
+    return tags_by_subscription
 
 
-async def get_users_accessible_tags_by_inbound_tags(
-    db: AsyncSession, tags: Iterable[str]
-) -> dict[int, set[str]]:
+async def get_subscriptions_accessible_tags_by_inbound_tags(db: AsyncSession, tags: Iterable[str]) -> dict[UUID, set[str]]:
     """Like get_users_accessible_tags but for all users that can reach any of `tags` (no giant IN)."""
     tag_list = list(tags)
     if not tag_list:
         return {}
-    tags_by_user: dict[int, set[str]] = {}
-    for user_id, tag in (await db.execute(_accessible_tags_stmt(tags=tag_list))).all():
-        tags_by_user.setdefault(user_id, set()).add(tag)
-    return tags_by_user
+    tags_by_subscription: dict[UUID, set[str]] = {}
+    for subscription_uuid, tag in (await db.execute(_accessible_tags_stmt(tags=tag_list))).all():
+        tags_by_subscription.setdefault(subscription_uuid, set()).add(tag)
+    return tags_by_subscription
 
 
 async def _stored_wireguard_keys_in_use(
     db: AsyncSession,
     public_keys: Iterable[str],
-    excluded_user_ids: Iterable[int],
+    excluded_subscription_uuids: Iterable[UUID],
 ) -> set[str]:
-    """Find stored public keys held by users outside the current allocation batch."""
+    """Find stored public keys held by subscriptions outside the current allocation batch."""
     keys = sorted({key for key in public_keys if key})
-    excluded = set(excluded_user_ids)
+    excluded = set(excluded_subscription_uuids)
     if not keys:
         return set()
 
-    public_key = User.proxy_settings["wireguard"]["public_key"].as_string()
+    public_key = Subscription.proxy_settings["wireguard"]["public_key"].as_string()
     found: set[str] = set()
     for start in range(0, len(keys), 500):
-        stmt = select(User.id, public_key).where(public_key.in_(keys[start : start + 500]))
-        for user_id, stored_key in (await db.execute(stmt)).all():
-            if user_id not in excluded and stored_key:
+        stmt = select(Subscription.uuid, public_key).where(public_key.in_(keys[start : start + 500]))
+        for subscription_uuid, stored_key in (await db.execute(stmt)).all():
+            if subscription_uuid not in excluded and stored_key:
                 found.add(stored_key)
     return found
 
 
 def _peer_ips_present_clause():
     """Users with a non-empty wireguard.peer_ips array (dialect-portable JSON path)."""
-    peer_ips = User.proxy_settings["wireguard"]["peer_ips"]
+    peer_ips = Subscription.proxy_settings["wireguard"]["peer_ips"]
     return and_(peer_ips.is_not(None), peer_ips.as_string() != "[]")
 
 
-async def _user_ids_with_peer_ips(db: AsyncSession) -> list[int]:
-    """Return user ids that have a non-empty wireguard.peer_ips array."""
+async def _subscription_uuids_with_peer_ips(db: AsyncSession) -> list[UUID]:
+    """Return subscription UUIDs that have non-empty wireguard.peer_ips."""
     rows = (
-        await db.execute(select(User.id).where(_peer_ips_present_clause()).order_by(User.id))
-    ).scalars().all()
+        (await db.execute(select(Subscription.uuid).where(_peer_ips_present_clause()).order_by(Subscription.uuid)))
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
-async def _load_user_proxy_settings(db: AsyncSession, user_ids: list[int]) -> list[tuple[int, dict | None]]:
+async def _load_subscription_proxy_settings(db: AsyncSession, subscription_uuids: list[UUID]) -> list[tuple[UUID, dict | None]]:
     """Load (id, proxy_settings) for the given ids in stable chunks."""
-    if not user_ids:
+    if not subscription_uuids:
         return []
-    rows: list[tuple[int, dict | None]] = []
-    by_id: dict[int, dict | None] = {}
-    for i in range(0, len(user_ids), RECONCILE_USER_CHUNK):
-        chunk = user_ids[i : i + RECONCILE_USER_CHUNK]
-        for user_id, proxy_settings in (
-            await db.execute(select(User.id, User.proxy_settings).where(User.id.in_(chunk)))
+    rows: list[tuple[UUID, dict | None]] = []
+    by_id: dict[UUID, dict | None] = {}
+    for i in range(0, len(subscription_uuids), RECONCILE_USER_CHUNK):
+        chunk = subscription_uuids[i : i + RECONCILE_USER_CHUNK]
+        for subscription_uuid, proxy_settings in (
+            await db.execute(select(Subscription.uuid, Subscription.proxy_settings).where(Subscription.uuid.in_(chunk)))
         ).all():
-            by_id[user_id] = proxy_settings
-    for user_id in user_ids:
-        if user_id in by_id:
-            rows.append((user_id, by_id[user_id]))
+            by_id[subscription_uuid] = proxy_settings
+    for subscription_uuid in subscription_uuids:
+        if subscription_uuid in by_id:
+            rows.append((subscription_uuid, by_id[subscription_uuid]))
     return rows
 
 
@@ -504,10 +505,10 @@ async def _lock_subnet_rows(db: AsyncSession, keys: Iterable[str]) -> dict[str, 
 
 async def sync_users_allocations(
     db: AsyncSession,
-    users: list[User],
+    users: list[Subscription],
     *,
-    tags_by_user: dict[int, set[str]] | None = None,
-) -> list[User]:
+    tags_by_subscription: dict[UUID, set[str]] | None = None,
+) -> list[Subscription]:
     """Reconcile each user's wireguard peer_ips and keys with their current group access.
 
     Allocates from the subnet pool rows for newly-accessible subnets, releases entries for
@@ -518,35 +519,31 @@ async def sync_users_allocations(
     if not users:
         return []
     namespaces = wg_namespaces(await get_wg_cores(db))
-    if tags_by_user is None:
-        tags_by_user = await get_users_accessible_tags(db, [user.id for user in users])
+    if tags_by_subscription is None:
+        tags_by_subscription = await get_subscriptions_accessible_tags(db, [user.uuid for user in users])
 
     targets_by_user = {
-        user.id: {ns.key for ns in namespaces.values() if ns.tags & tags_by_user.get(user.id, set())}
-        for user in users
+        user.uuid: {ns.key for ns in namespaces.values() if ns.tags & tags_by_subscription.get(user.uuid, set())} for user in users
     }
     candidate_keys = {
         candidate
         for user in users
-        if targets_by_user[user.id]
-        and (candidate := _wireguard_candidate_public_key(user.proxy_settings)) is not None
+        if targets_by_user[user.uuid] and (candidate := _wireguard_candidate_public_key(user.proxy_settings)) is not None
     }
-    outside_keys = await _stored_wireguard_keys_in_use(
-        db, candidate_keys, [user.id for user in users]
-    )
-    by_candidate: dict[str, list[int]] = {}
+    outside_keys = await _stored_wireguard_keys_in_use(db, candidate_keys, [user.uuid for user in users])
+    by_candidate: dict[str, list[UUID]] = {}
     for user in users:
-        if not targets_by_user[user.id]:
+        if not targets_by_user[user.uuid]:
             continue
         candidate = _wireguard_candidate_public_key(user.proxy_settings)
         if candidate:
-            by_candidate.setdefault(candidate, []).append(user.id)
+            by_candidate.setdefault(candidate, []).append(user.uuid)
     shared_keys = outside_keys | {key for key, ids in by_candidate.items() if len(ids) > 1}
     occupied_keys = candidate_keys | outside_keys
 
     touched_keys: set[str] = set()
     for user in users:
-        tags = tags_by_user.get(user.id, set())
+        tags = tags_by_subscription.get(user.uuid, set())
         touched_keys.update(ns.key for ns in namespaces.values() if ns.tags & tags)
         for entry in _user_peer_ips(user.proxy_settings):
             host = peer_host(entry)
@@ -554,9 +551,9 @@ async def sync_users_allocations(
                 touched_keys.add(ns.key)
     rows = await _lock_subnet_rows(db, touched_keys)
 
-    changed: list[User] = []
+    changed: list[Subscription] = []
     for user in users:
-        targets = targets_by_user[user.id]
+        targets = targets_by_user[user.uuid]
         old_ips = _user_peer_ips(user.proxy_settings)
 
         kept: dict[str, int] = {}
@@ -584,9 +581,7 @@ async def sync_users_allocations(
         if new_ips != old_ips:
             _set_user_peer_ips(user, new_ips)
             user_changed = True
-        if targets and _ensure_wireguard_keys(
-            user, shared_keys=shared_keys, occupied_keys=occupied_keys
-        ):
+        if targets and _ensure_wireguard_keys(user, shared_keys=shared_keys, occupied_keys=occupied_keys):
             user_changed = True
         if user_changed:
             changed.append(user)
@@ -600,12 +595,12 @@ async def sync_users_allocations(
 
 async def sync_user_allocations(
     db: AsyncSession,
-    db_user: User,
+    db_user: Subscription,
     *,
     accessible_tags: set[str] | None = None,
 ) -> bool:
-    tags_by_user = {db_user.id: accessible_tags} if accessible_tags is not None else None
-    return bool(await sync_users_allocations(db, [db_user], tags_by_user=tags_by_user))
+    tags_by_subscription = {db_user.uuid: accessible_tags} if accessible_tags is not None else None
+    return bool(await sync_users_allocations(db, [db_user], tags_by_subscription=tags_by_subscription))
 
 
 async def _release_proxy_settings(db: AsyncSession, settings_list: Iterable[dict | None]) -> None:
@@ -624,29 +619,31 @@ async def _release_proxy_settings(db: AsyncSession, settings_list: Iterable[dict
     await db.flush()
 
 
-async def release_users_allocations(db: AsyncSession, users: list[User]) -> None:
+async def release_users_allocations(db: AsyncSession, users: list[Subscription]) -> None:
     """Give the users' peer IPs back to the pool (called right before user deletion)."""
     if not users:
         return
     await _release_proxy_settings(db, [user.proxy_settings for user in users])
 
 
-async def release_allocations_by_user_ids(db: AsyncSession, user_ids: list[int]) -> None:
-    """Same as release_users_allocations for delete paths that only hold user ids."""
-    if not user_ids:
+async def release_allocations_by_subscription_uuids(db: AsyncSession, subscription_uuids: list[UUID]) -> None:
+    """Release peer IPs for delete paths that carry subscription UUIDs."""
+    if not subscription_uuids:
         return
-    settings_list = (await db.execute(select(User.proxy_settings).where(User.id.in_(user_ids)))).scalars().all()
+    settings_list = (
+        (await db.execute(select(Subscription.proxy_settings).where(Subscription.uuid.in_(subscription_uuids)))).scalars().all()
+    )
     await _release_proxy_settings(db, settings_list)
 
 
 # --- full rebuild (core lifecycle & repair) ---------------------------------
 
 
-async def reconcile_wireguard_subnets(db: AsyncSession) -> list[int]:
+async def reconcile_wireguard_subnets(db: AsyncSession) -> list[UUID]:
     """Rebuild pool rows and fix user peer_ips from ground truth after a WG core change.
 
     Handles subnet resize/move, server-IP moves, interface renames, duplicate IPs and
-    orphaned namespaces. Flushes; the caller commits. Returns changed user ids.
+    orphaned namespaces. Flushes; the caller commits. Returns changed subscription UUIDs.
 
     Only loads users with WG group access or existing peer_ips.
     """
@@ -662,17 +659,17 @@ async def reconcile_wireguard_subnets(db: AsyncSession) -> list[int]:
     await _lock_subnet_rows(db, list(namespaces) + list(orphan_keys))
 
     all_tags = {tag for ns in namespaces.values() for tag in ns.tags}
-    eligible_tags = await get_users_accessible_tags_by_inbound_tags(db, all_tags) if all_tags else {}
+    eligible_tags = await get_subscriptions_accessible_tags_by_inbound_tags(db, all_tags) if all_tags else {}
 
-    peer_ip_ids = await _user_ids_with_peer_ips(db)
+    peer_ip_ids = await _subscription_uuids_with_peer_ips(db)
     relevant_ids = sorted(set(eligible_tags) | set(peer_ip_ids))
-    user_rows = await _load_user_proxy_settings(db, relevant_ids)
+    user_rows = await _load_subscription_proxy_settings(db, relevant_ids)
 
     used: dict[str, set[int]] = {key: set() for key in namespaces}
-    desired: dict[int, list[str]] = {}
-    need_alloc: dict[str, list[int]] = {}  # key -> user_ids (in scan order)
-    for user_id, proxy_settings in user_rows:
-        tags = eligible_tags.get(user_id, set())
+    desired: dict[UUID, list[str]] = {}
+    need_alloc: dict[str, list[UUID]] = {}  # key -> subscription UUIDs (in scan order)
+    for subscription_uuid, proxy_settings in user_rows:
+        tags = eligible_tags.get(subscription_uuid, set())
         targets = {ns.key for ns in namespaces.values() if ns.tags & tags}
         old_ips = _user_peer_ips(proxy_settings)
         kept: dict[str, int] = {}
@@ -689,40 +686,40 @@ async def reconcile_wireguard_subnets(db: AsyncSession) -> list[int]:
                 kept[ns.key] = offset
                 used[ns.key].add(offset)
         for key in sorted(targets - set(kept)):
-            need_alloc.setdefault(key, []).append(user_id)
-        desired[user_id] = [render_peer_ip(namespaces[key].subnet, offset) for key, offset in sorted(kept.items())]
+            need_alloc.setdefault(key, []).append(subscription_uuid)
+        desired[subscription_uuid] = [render_peer_ip(namespaces[key].subnet, offset) for key, offset in sorted(kept.items())]
 
     # in-memory allocation under the row locks taken above
-    granted: dict[int, dict[str, int]] = {}  # user_id -> {key: offset}
-    for key, user_ids in need_alloc.items():
+    granted: dict[UUID, dict[str, int]] = {}  # subscription UUID -> {key: offset}
+    for key, subscription_uuids in need_alloc.items():
         ns = namespaces[key]
         cursor = 1
-        for user_id in user_ids:
+        for subscription_uuid in subscription_uuids:
             while cursor in ns.reserved or cursor in used[key]:
                 cursor += 1
             if cursor >= ns.subnet.num_addresses - 1:
-                logger.warning(f"WireGuard subnet {ns.subnet} exhausted; user {user_id} left without an IP")
+                logger.warning(f"WireGuard subnet {ns.subnet} exhausted; user {subscription_uuid} left without an IP")
                 continue
             used[key].add(cursor)
-            granted.setdefault(user_id, {})[key] = cursor
+            granted.setdefault(subscription_uuid, {})[key] = cursor
             cursor += 1
 
-    changed_ids: list[int] = []
+    changed_ids: list[UUID] = []
     settings_by_id = {row[0]: row[1] for row in user_rows}
-    for user_id, ips in desired.items():
-        for key, offset in sorted(granted.get(user_id, {}).items()):
+    for subscription_uuid, ips in desired.items():
+        for key, offset in sorted(granted.get(subscription_uuid, {}).items()):
             ips.append(render_peer_ip(namespaces[key].subnet, offset))
         ips.sort(key=_peer_sort_key)
-        if ips != _user_peer_ips(settings_by_id[user_id]):
-            changed_ids.append(user_id)
+        if ips != _user_peer_ips(settings_by_id[subscription_uuid]):
+            changed_ids.append(subscription_uuid)
 
     if changed_ids:
         for i in range(0, len(changed_ids), RECONCILE_USER_CHUNK):
             chunk = changed_ids[i : i + RECONCILE_USER_CHUNK]
-            users = (await db.execute(select(User).where(User.id.in_(chunk)))).scalars().all()
+            users = (await db.execute(select(Subscription).where(Subscription.uuid.in_(chunk)))).scalars().all()
             for user in users:
-                _set_user_peer_ips(user, desired[user.id])
-                if desired[user.id]:
+                _set_user_peer_ips(user, desired[user.uuid])
+                if desired[user.uuid]:
                     _ensure_wireguard_keys(user)
 
     # rebuild pool rows from the used sets; drop rows for dead namespaces
