@@ -131,9 +131,9 @@ class StandardLinks(BaseSubscription):
 
         if config.random_user_agent:
             if config.mode in ("stream-one", "stream-up") and not config.no_grpc_header:
-                extra["headers"]["User-Agent"] = choice(self.grpc_user_agent_data)
+                extra["headers"]["Subscription-Agent"] = choice(self.grpc_user_agent_data)
             else:
-                extra["headers"]["User-Agent"] = choice(self.user_agent_list)
+                extra["headers"]["Subscription-Agent"] = choice(self.user_agent_list)
 
         extra = self._normalize_and_remove_none_values(extra)
         if extra:

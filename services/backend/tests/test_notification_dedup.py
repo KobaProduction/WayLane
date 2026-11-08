@@ -36,8 +36,8 @@ async def test_claim_notification_slot_drops_same_event_twice():
 async def test_safe_notification_wrapper_emits_once(monkeypatch: pytest.MonkeyPatch):
     gathered: list[str] = []
 
-    async def _gather(event_name, *aws):
-        gathered.append(event_name)
+    async def record_panel_event(event):
+        gathered.append(event.action)
 
     async def _enabled():
         class _Node:
@@ -50,14 +50,14 @@ async def test_safe_notification_wrapper_emits_once(monkeypatch: pytest.MonkeyPa
         return _Settings()
 
     monkeypatch.setattr("app.notification.notification_enable", _enabled)
-    monkeypatch.setattr("app.notification._gather_notifications", _gather)
+    monkeypatch.setattr("app.notification.wh.notify", record_panel_event)
 
     node = NodeNotification(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
     await connect_node(node)
     await connect_node(node)
     await recovered_node(node)
 
-    assert gathered == ["connect_node", "recovered_node"]
+    assert gathered == ["node.connect", "node.recovered"]
 
 
 @pytest.mark.asyncio

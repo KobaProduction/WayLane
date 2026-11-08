@@ -2,25 +2,20 @@ import asyncio
 import os
 import re
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException, status
-from sqlalchemy import select
+from fastapi import status
+from sqlalchemy import delete, select
 
-from app.db.crud.admin import get_admin_by_telegram_id
-from app.db.models import Admin, AdminUsageLogs, NodeUserUsage
+from app.db.models import Admin, AdminUsageLogs, NodeSubscriptionUsage, Subscription
 from app.models.admin import hash_password
-from app.models.settings import RunMethod, Telegram
-from app.routers.authentication import validate_mini_app_admin
 from app.utils.jwt import get_admin_payload
 from tests.api import TestSession, client
 from tests.api.helpers import (
     auth_headers,
     create_admin as _create_admin,
-    create_user,
     delete_admin,
-    delete_user,
     strong_password,
     unique_name,
 )
@@ -149,13 +144,14 @@ def test_get_admin_uses_aggregate_metrics_without_loading_relationships(access_t
     assert admin_token_response.status_code == status.HTTP_200_OK
     admin_token = admin_token_response.json()["access_token"]
 
-    user = create_user(admin_token, payload={"username": unique_name("admin_metric_user")})
+    subscription_uuid = uuid4()
 
     async def _seed_admin_usage():
         async with TestSession() as session:
             result = await session.execute(select(Admin).where(Admin.username == admin["username"]))
             db_admin = result.scalar_one()
             db_admin.used_traffic = 12345
+            session.add(Subscription(uuid=subscription_uuid, admin_id=db_admin.id, proxy_settings={}))
             session.add(AdminUsageLogs(admin_id=db_admin.id, used_traffic_at_reset=6789))
             await session.commit()
 
@@ -176,7 +172,12 @@ def test_get_admin_uses_aggregate_metrics_without_loading_relationships(access_t
         assert data["used_traffic"] == 12345
         assert data["lifetime_used_traffic"] == 19134
     finally:
-        delete_user(admin_token, user["username"])
+        async def _cleanup_subscription():
+            async with TestSession() as session:
+                await session.execute(delete(Subscription).where(Subscription.uuid == subscription_uuid))
+                await session.commit()
+
+        asyncio.run(_cleanup_subscription())
         delete_admin(access_token, admin["username"])
 
 
@@ -196,7 +197,7 @@ def test_protected_routes_use_lightweight_current_admin(access_token, monkeypatc
     try:
         with monkeypatch.context() as patch_context:
             patch_context.setattr("app.db.crud.admin.load_admin_attrs", _assert_lightweight_admin_load)
-            response = client.get(url="/api/users", headers=auth_headers(admin_token))
+            response = client.get(url="/api/subscriptions", headers=auth_headers(admin_token))
 
         assert response.status_code == status.HTTP_200_OK
     finally:
@@ -250,35 +251,6 @@ def test_admin_create_with_note(access_token):
     assert response.json()["note"] == note
 
     delete_admin(access_token, username)
-
-
-def test_admin_create_duplicate_telegram_id_conflict(access_token):
-    telegram_id = 9988776655
-    admin_a = create_admin(access_token)
-    admin_b_username = admin_username("tgdup")
-    admin_b_password = strong_password("TestAdminDup")
-    try:
-        response_a = client.put(
-            url=f"/api/admin/{admin_a['username']}",
-            json={"telegram_id": telegram_id},
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        assert response_a.status_code == status.HTTP_200_OK
-
-        response_b = client.post(
-            url="/api/admin",
-            json={
-                "username": admin_b_username,
-                "password": admin_b_password,
-                "telegram_id": telegram_id,
-                "role_id": 3,
-            },
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        assert response_b.status_code == status.HTTP_409_CONFLICT
-        assert response_b.json()["detail"] == "Telegram ID is already assigned to another admin."
-    finally:
-        delete_admin(access_token, admin_a["username"])
 
 
 def test_admin_db_login(access_token):
@@ -399,30 +371,6 @@ def test_update_admin_note(access_token):
     assert response.json()["note"] == note
 
     delete_admin(access_token, admin["username"])
-
-
-def test_update_admin_duplicate_telegram_id_conflict(access_token):
-    telegram_id = 8877665544
-    admin_a = create_admin(access_token)
-    admin_b = create_admin(access_token)
-    try:
-        first_update = client.put(
-            url=f"/api/admin/{admin_a['username']}",
-            json={"telegram_id": telegram_id},
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        assert first_update.status_code == status.HTTP_200_OK
-
-        second_update = client.put(
-            url=f"/api/admin/{admin_b['username']}",
-            json={"telegram_id": telegram_id},
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        assert second_update.status_code == status.HTTP_409_CONFLICT
-        assert second_update.json()["detail"] == "Telegram ID is already assigned to another admin."
-    finally:
-        delete_admin(access_token, admin_a["username"])
-        delete_admin(access_token, admin_b["username"])
 
 
 def test_promote_admin_to_owner_forbidden_via_api(access_token):
@@ -713,53 +661,33 @@ def test_disable_admin(access_token):
     delete_admin(access_token, admin["username"])
 
 
-def test_admin_delete_all_users_endpoint(access_token):
-    """Test deleting all users belonging to an admin."""
-
+def test_admin_cannot_delete_core_owned_subscription_indirectly(access_token):
+    """Deleting the owning administrator must never cascade a Core-owned subscription."""
     admin = create_admin(access_token)
-    admin_username = admin["username"]
+    sid = uuid4()
 
-    created_users = []
-    for idx in range(2):
-        user_name = unique_name(f"{admin_username}_user_{idx}")
-        user_response = client.post(
-            "/api/user",
-            headers={"Authorization": f"Bearer {access_token}"},
-            json={
-                "username": user_name,
-                "proxy_settings": {},
-                "data_limit": 1024,
-                "data_limit_reset_strategy": "no_reset",
-                "status": "active",
-            },
-        )
-        assert user_response.status_code == status.HTTP_201_CREATED
-        created_users.append(user_name)
+    async def _seed():
+        async with TestSession() as session:
+            db_admin = (await session.scalars(select(Admin).where(Admin.username == admin["username"]))).one()
+            session.add(Subscription(uuid=sid, admin_id=db_admin.id, proxy_settings={}))
+            await session.commit()
 
-        ownership_response = client.put(
-            f"/api/user/{user_name}/set_owner",
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={"admin_username": admin_username},
-        )
-        assert ownership_response.status_code == status.HTTP_200_OK
-        assert ownership_response.json()["admin"]["username"] == admin_username
+    async def _remove():
+        async with TestSession() as session:
+            await session.execute(delete(Subscription).where(Subscription.uuid == sid))
+            await session.commit()
 
-    response = client.delete(
-        url=f"/api/admin/{admin_username}/users",
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-    assert response.status_code == status.HTTP_200_OK
-    assert str(len(created_users)) in response.json()["detail"]
-
-    for username in created_users:
-        user_check = client.get(
-            "/api/users",
-            params={"username": username},
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        assert user_check.status_code == status.HTTP_200_OK
-        assert user_check.json()["users"] == []
-    delete_admin(access_token, admin_username)
+    try:
+        asyncio.run(_seed())
+        response = client.delete(f"/api/admin/{admin['username']}", headers=auth_headers(access_token))
+        assert response.status_code == status.HTTP_409_CONFLICT
+        async def _exists():
+            async with TestSession() as session:
+                return await session.scalar(select(Subscription.uuid).where(Subscription.uuid == sid))
+        assert asyncio.run(_exists()) == sid
+    finally:
+        asyncio.run(_remove())
+        delete_admin(access_token, admin["username"])
 
 
 def test_admin_delete(access_token):
@@ -805,24 +733,23 @@ def test_reset_admin_usage_keeps_lifetime_traffic(access_token):
 
 @pytest.mark.asyncio
 async def test_admin_usage_returns_stats_for_admin(access_token):
+    admin = create_admin(access_token)
+    login_response = client.post(
+        url="/api/admin/token",
+        data={"username": admin["username"], "password": admin["password"], "grant_type": "password"},
+    )
+    assert login_response.status_code == status.HTTP_200_OK
+    admin_token = login_response.json()["access_token"]
+    sid = uuid4()
+    now = datetime.now(UTC)
     try:
-        admin = create_admin(access_token)
-        login_response = client.post(
-            url="/api/admin/token",
-            data={"username": admin["username"], "password": admin["password"], "grant_type": "password"},
-        )
-        assert login_response.status_code == status.HTTP_200_OK
-        admin_token = login_response.json()["access_token"]
-
-        user = create_user(admin_token, payload={"username": unique_name("admin_usage_user")})
-        now = datetime.now(UTC)
-        usages = [
-            NodeUserUsage(user_id=user["id"], node_id=None, created_at=now - timedelta(hours=2), used_traffic=123),
-            NodeUserUsage(user_id=user["id"], node_id=None, created_at=now - timedelta(hours=1), used_traffic=456),
-        ]
-
         async with TestSession() as session:
-            session.add_all(usages)
+            db_admin = (await session.scalars(select(Admin).where(Admin.username == admin["username"]))).one()
+            session.add(Subscription(uuid=sid, admin_id=db_admin.id, proxy_settings={}))
+            session.add_all([
+                NodeSubscriptionUsage(subscription_uuid=sid, node_id=None, created_at=now - timedelta(hours=2), used_traffic=123),
+                NodeSubscriptionUsage(subscription_uuid=sid, node_id=None, created_at=now - timedelta(hours=1), used_traffic=456),
+            ])
             await session.commit()
 
         response = client.get(
@@ -834,15 +761,13 @@ async def test_admin_usage_returns_stats_for_admin(access_token):
         data = response.json()
         assert data["period"] == "hour"
         assert "-1" in data["stats"]
-        total = sum(item["total_traffic"] for item in data["stats"]["-1"])
-        assert total == 579
+        assert sum(item["total_traffic"] for item in data["stats"]["-1"]) == 579
     finally:
-        delete_user(admin_token, user["username"])
-        delete_admin(access_token, admin["username"])
         async with TestSession() as session:
-            for u in usages:
-                await session.delete(u)
-                await session.commit()
+            await session.execute(delete(NodeSubscriptionUsage).where(NodeSubscriptionUsage.subscription_uuid == sid))
+            await session.execute(delete(Subscription).where(Subscription.uuid == sid))
+            await session.commit()
+        delete_admin(access_token, admin["username"])
 
 
 @pytest.mark.asyncio
@@ -865,65 +790,6 @@ async def test_admin_usage_forbidden_for_other_admin(access_token):
 
     delete_admin(access_token, admin_a["username"])
     delete_admin(access_token, admin_b["username"])
-
-
-@pytest.mark.asyncio
-async def test_get_admin_by_telegram_id_handles_duplicate_rows(access_token):
-    telegram_id = 7766554433
-    async with TestSession() as session:
-        admin_a = Admin(
-            username=admin_username("tg_read_a"), hashed_password="secret", telegram_id=telegram_id, role_id=3
-        )
-        admin_b = Admin(
-            username=admin_username("tg_read_b"), hashed_password="secret", telegram_id=telegram_id, role_id=3
-        )
-        session.add_all([admin_a, admin_b])
-        await session.commit()
-
-        loaded = await get_admin_by_telegram_id(session, telegram_id, load_users=False, load_usage_logs=False)
-        assert loaded is not None
-        assert loaded.telegram_id == telegram_id
-        assert loaded.username == admin_a.username
-    delete_admin(access_token, admin_a.username)
-    delete_admin(access_token, admin_b.username)
-
-
-@pytest.mark.asyncio
-async def test_validate_mini_app_admin_duplicate_telegram_id_conflict(access_token, monkeypatch: pytest.MonkeyPatch):
-    telegram_id = 6655443322
-    admin_a = Admin(username=admin_username("mini_dup_a"), hashed_password="secret", telegram_id=telegram_id, role_id=3)
-    admin_b = Admin(username=admin_username("mini_dup_b"), hashed_password="secret", telegram_id=telegram_id, role_id=3)
-    async with TestSession() as session:
-        session.add_all(
-            [
-                admin_a,
-                admin_b,
-            ]
-        )
-        await session.commit()
-
-        async def fake_telegram_settings():
-            return Telegram(
-                enable=True,
-                mini_app_login=True,
-                method=RunMethod.LONGPOLLING,
-                token="12345678:" + ("A" * 35),
-            )
-
-        monkeypatch.setattr("app.routers.authentication.telegram_settings", fake_telegram_settings)
-        monkeypatch.setattr(
-            "app.routers.authentication.safe_parse_webapp_init_data",
-            lambda token, init_data: SimpleNamespace(user=SimpleNamespace(id=telegram_id)),
-        )
-
-        with pytest.raises(HTTPException) as exc_info:
-            await validate_mini_app_admin(session, "signed-init-data")
-
-        assert exc_info.value.status_code == status.HTTP_409_CONFLICT
-        assert exc_info.value.detail == "Telegram ID is assigned to multiple admins. Please contact support."
-
-    delete_admin(access_token, admin_a.username)
-    delete_admin(access_token, admin_b.username)
 
 
 # Tests for /api/admins/simple endpoint
@@ -1444,17 +1310,12 @@ def test_limited_admin_write_blocked_by_default(access_token):
 
         token = _login(admin["username"], admin["password"])
 
-        # Write operation should be blocked
+        # A correctly formed UUID create request must be denied before any
+        # new subscription can be provisioned by a limited administrator.
         response = client.post(
-            "/api/user",
+            "/api/subscriptions",
             headers=auth_headers(token),
-            json={
-                "username": unique_name("limited_user"),
-                "proxy_settings": {},
-                "data_limit": 0,
-                "data_limit_reset_strategy": "no_reset",
-                "status": "active",
-            },
+            json={"uuid": str(uuid4()), "group_ids": [1]},
         )
         assert response.status_code == status.HTTP_403_FORBIDDEN
     finally:
@@ -1472,7 +1333,7 @@ def test_limited_admin_read_allowed_when_disabled_when_limited_false(access_toke
         token = _login(admin["username"], admin["password"])
 
         # Read operation should be allowed
-        response = client.get("/api/users", headers=auth_headers(token))
+        response = client.get("/api/subscriptions", headers=auth_headers(token))
         assert response.status_code == status.HTTP_200_OK
     finally:
         delete_admin(access_token, admin["username"])
@@ -1486,7 +1347,7 @@ def test_limited_admin_all_blocked_when_disabled_when_limited_true(access_token)
         headers=auth_headers(access_token),
         json={
             "name": unique_name("limited_role"),
-            "permissions": {"users": {"read": True, "create": True}},
+            "permissions": {"subscriptions": {"read": True, "create": True}},
             "limits": {},
             "features": {"can_use_reset_strategy": True, "can_use_next_plan": True},
             "access": {},
@@ -1516,7 +1377,7 @@ def test_limited_admin_all_blocked_when_disabled_when_limited_true(access_token)
         token = _login(admin["username"], admin["password"])
 
         # Even read should be blocked
-        response = client.get("/api/users", headers=auth_headers(token))
+        response = client.get("/api/subscriptions", headers=auth_headers(token))
         assert response.status_code == status.HTTP_403_FORBIDDEN
     finally:
         delete_admin(access_token, admin["username"])

@@ -38,40 +38,40 @@ SCOPE_NONE = {"scope": 0}
 
 def test_owner_bypasses_all_checks():
     admin = _make_admin(is_owner=True)
-    enforce_permission(admin, "users", "delete")  # should not raise
+    enforce_permission(admin, "subscriptions", "delete")  # should not raise
 
 
 def test_allowed_action_passes():
-    admin = _make_admin(permissions={"users": {"read": True}})
-    enforce_permission(admin, "users", "read")  # should not raise
+    admin = _make_admin(permissions={"subscriptions": {"read": True}})
+    enforce_permission(admin, "subscriptions", "read")  # should not raise
 
 
 def test_missing_resource_raises():
     admin = _make_admin(permissions={})
     with pytest.raises(PermissionDenied):
-        enforce_permission(admin, "users", "read")
+        enforce_permission(admin, "subscriptions", "read")
 
 
 def test_missing_action_raises():
-    admin = _make_admin(permissions={"users": {"read": True}})
+    admin = _make_admin(permissions={"subscriptions": {"read": True}})
     with pytest.raises(PermissionDenied):
-        enforce_permission(admin, "users", "delete")
+        enforce_permission(admin, "subscriptions", "delete")
 
 
 def test_scope_own_is_allowed_at_permission_level():
-    admin = _make_admin(permissions={"users": {"read": SCOPE_OWN}})
-    enforce_permission(admin, "users", "read")  # should not raise (scope checked separately)
+    admin = _make_admin(permissions={"subscriptions": {"read": SCOPE_OWN}})
+    enforce_permission(admin, "subscriptions", "read")  # should not raise (scope checked separately)
 
 
 def test_scope_all_is_allowed():
-    admin = _make_admin(permissions={"users": {"read": SCOPE_ALL}})
-    enforce_permission(admin, "users", "read")  # should not raise
+    admin = _make_admin(permissions={"subscriptions": {"read": SCOPE_ALL}})
+    enforce_permission(admin, "subscriptions", "read")  # should not raise
 
 
 def test_scope_none_raises():
-    admin = _make_admin(permissions={"users": {"read": SCOPE_NONE}})
+    admin = _make_admin(permissions={"subscriptions": {"read": SCOPE_NONE}})
     with pytest.raises(PermissionDenied):
-        enforce_permission(admin, "users", "read")  # explicitly disabled
+        enforce_permission(admin, "subscriptions", "read")  # explicitly disabled
 
 
 # --- enforce_scope ---
@@ -79,28 +79,28 @@ def test_scope_none_raises():
 
 def test_owner_bypasses_scope():
     admin = _make_admin(is_owner=True, admin_id=1)
-    enforce_scope(admin, "users", "read", target_admin_id=99)  # should not raise
+    enforce_scope(admin, "subscriptions", "read", target_admin_id=99)  # should not raise
 
 
 def test_scope_own_allows_own_users():
-    admin = _make_admin(permissions={"users": {"read": SCOPE_OWN}}, admin_id=10)
-    enforce_scope(admin, "users", "read", target_admin_id=10)  # should not raise
+    admin = _make_admin(permissions={"subscriptions": {"read": SCOPE_OWN}}, admin_id=10)
+    enforce_scope(admin, "subscriptions", "read", target_admin_id=10)  # should not raise
 
 
 def test_scope_own_denies_other_users():
-    admin = _make_admin(permissions={"users": {"read": SCOPE_OWN}}, admin_id=10)
+    admin = _make_admin(permissions={"subscriptions": {"read": SCOPE_OWN}}, admin_id=10)
     with pytest.raises(PermissionDenied):
-        enforce_scope(admin, "users", "read", target_admin_id=99)
+        enforce_scope(admin, "subscriptions", "read", target_admin_id=99)
 
 
 def test_scope_all_allows_any_user():
-    admin = _make_admin(permissions={"users": {"read": SCOPE_ALL}}, admin_id=10)
-    enforce_scope(admin, "users", "read", target_admin_id=99)  # should not raise
+    admin = _make_admin(permissions={"subscriptions": {"read": SCOPE_ALL}}, admin_id=10)
+    enforce_scope(admin, "subscriptions", "read", target_admin_id=99)  # should not raise
 
 
 def test_true_permission_no_scope_check():
-    admin = _make_admin(permissions={"users": {"read": True}}, admin_id=10)
-    enforce_scope(admin, "users", "read", target_admin_id=99)  # should not raise (True = no scope)
+    admin = _make_admin(permissions={"subscriptions": {"read": True}}, admin_id=10)
+    enforce_scope(admin, "subscriptions", "read", target_admin_id=99)  # should not raise (True = no scope)
 
 
 # --- get_effective_limits ---

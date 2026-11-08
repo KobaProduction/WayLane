@@ -1,7 +1,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import status
 from sqlalchemy import func, select, update
@@ -16,15 +16,15 @@ from app.db.models import (
     NextPlan,
     Node,
     NodeStat,
+    NodeSubscriptionUsage,
     NodeUsage,
     NodeUsageResetLogs,
-    NodeUserUsage,
     PasskeyChallenge,
     ReminderType,
-    User,
+    Subscription,
     inbounds_groups_association,
+    subscriptions_groups_association,
     template_group_association,
-    users_groups_association,
 )
 from app.models.node import NodeCreate
 from tests.api import TestSession, client
@@ -34,10 +34,8 @@ from tests.api.helpers import (
     create_client_template,
     create_core,
     create_group,
-    create_user,
-    create_user_template,
-    delete_user,
-    delete_user_template,
+    create_subscription_template,
+    delete_subscription_template,
     get_inbounds,
     unique_name,
 )
@@ -142,15 +140,6 @@ def get_passkey_admin_id(credential_id: bytes) -> int | None:
     return asyncio.run(_get())
 
 
-def get_user_admin_id(username: str) -> int | None:
-    async def _get():
-        async with TestSession() as session:
-            result = await session.execute(select(User.admin_id).where(User.username == username))
-            return result.scalar_one()
-
-    return asyncio.run(_get())
-
-
 def delete_admin_if_present(access_token: str, username: str) -> None:
     response = client.delete(f"/api/admin/{username}", headers=auth_headers(access_token))
     assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
@@ -186,11 +175,6 @@ def delete_core_if_present(access_token: str, core_id: int) -> None:
 
 def delete_group_if_present(access_token: str, group_id: int) -> None:
     response = client.delete(f"/api/group/{group_id}", headers=auth_headers(access_token))
-    assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
-
-
-def delete_user_template_if_present(access_token: str, template_id: int) -> None:
-    response = client.delete(f"/api/user_template/{template_id}", headers=auth_headers(access_token))
     assert response.status_code in (status.HTTP_204_NO_CONTENT, status.HTTP_404_NOT_FOUND)
 
 
@@ -265,13 +249,13 @@ def get_node_core_config_id(node_id: int) -> int | None:
     return asyncio.run(_get())
 
 
-def seed_node_usage_rows(node_id: int, user_id: int) -> None:
+def seed_node_usage_rows(node_id: int, subscription_uuid: UUID) -> None:
     async def _seed():
         async with TestSession() as session:
             now = datetime.now(UTC)
             session.add_all(
                 [
-                    NodeUserUsage(user_id=user_id, node_id=node_id, created_at=now, used_traffic=1),
+                    NodeSubscriptionUsage(subscription_uuid=subscription_uuid, node_id=node_id, created_at=now, used_traffic=1),
                     NodeUsage(node_id=node_id, created_at=now + timedelta(minutes=1), uplink=2, downlink=3),
                     NodeUsageResetLogs(node_id=node_id, uplink=4, downlink=5),
                     NodeStat(
@@ -297,9 +281,11 @@ def get_node_related_counts(node_id: int) -> dict[str, int]:
                 "nodes": (
                     await session.execute(select(func.count()).select_from(Node).where(Node.id == node_id))
                 ).scalar_one(),
-                "user_usages": (
+                "subscription_usages": (
                     await session.execute(
-                        select(func.count()).select_from(NodeUserUsage).where(NodeUserUsage.node_id == node_id)
+                        select(func.count())
+                        .select_from(NodeSubscriptionUsage)
+                        .where(NodeSubscriptionUsage.node_id == node_id)
                     )
                 ).scalar_one(),
                 "usages": (
@@ -326,11 +312,11 @@ def get_group_association_counts(group_id: int) -> dict[str, int]:
     async def _counts():
         async with TestSession() as session:
             return {
-                "users": (
+                "subscriptions": (
                     await session.execute(
                         select(func.count())
-                        .select_from(users_groups_association)
-                        .where(users_groups_association.c.groups_id == group_id)
+                        .select_from(subscriptions_groups_association)
+                        .where(subscriptions_groups_association.c.groups_id == group_id)
                     )
                 ).scalar_one(),
                 "templates": (
@@ -352,13 +338,13 @@ def get_group_association_counts(group_id: int) -> dict[str, int]:
     return asyncio.run(_counts())
 
 
-def create_next_plan(user_id: int, user_template_id: int) -> None:
+def create_next_plan(subscription_uuid: UUID, subscription_template_id: int) -> None:
     async def _create():
         async with TestSession() as session:
             session.add(
                 NextPlan(
-                    user_id=user_id,
-                    user_template_id=user_template_id,
+                    subscription_uuid=subscription_uuid,
+                    subscription_template_id=subscription_template_id,
                     data_limit=2048,
                     expire=3600,
                     add_remaining_traffic=False,
@@ -369,14 +355,14 @@ def create_next_plan(user_id: int, user_template_id: int) -> None:
     asyncio.run(_create())
 
 
-def get_next_plan_state(user_id: int) -> dict | None:
+def get_next_plan_state(subscription_uuid: UUID) -> dict | None:
     async def _get():
         async with TestSession() as session:
             result = await session.execute(
-                select(NextPlan.id, NextPlan.user_template_id).where(NextPlan.user_id == user_id)
+                select(NextPlan.id, NextPlan.subscription_template_id).where(NextPlan.subscription_uuid == subscription_uuid)
             )
             row = result.one_or_none()
-            return None if row is None else {"exists": True, "user_template_id": row.user_template_id}
+            return None if row is None else {"exists": True, "subscription_template_id": row.subscription_template_id}
 
     return asyncio.run(_get())
 
@@ -387,41 +373,11 @@ def get_template_group_link_count(template_id: int) -> int:
             result = await session.execute(
                 select(func.count())
                 .select_from(template_group_association)
-                .where(template_group_association.c.user_template_id == template_id)
+                .where(template_group_association.c.subscription_template_id == template_id)
             )
             return result.scalar_one()
 
     return asyncio.run(_count())
-
-
-def test_bulk_delete_admins_clears_owned_users_usage_logs_and_api_keys(access_token):
-    admin = create_admin(access_token)
-    user = create_user(access_token, payload={"username": unique_name("bulk_admin_user")})
-    try:
-        owner_response = client.put(
-            f"/api/user/{user['username']}/set_owner",
-            headers=auth_headers(access_token),
-            params={"admin_username": admin["username"]},
-        )
-        assert owner_response.status_code == status.HTTP_200_OK
-
-        seed_admin_usage_log(admin["id"])
-        seed_api_key(admin["id"])
-
-        response = client.post(
-            "/api/admins/bulk/delete",
-            headers=auth_headers(access_token),
-            json={"ids": [admin["id"]]},
-        )
-
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-        assert get_user_admin_id(user["username"]) is None
-        assert count_admin_usage_logs(admin["id"]) == 0
-        assert count_api_keys(admin["id"]) == 0
-    finally:
-        delete_user(access_token, user["username"])
-        delete_admin_if_present(access_token, admin["username"])
 
 
 def test_bulk_delete_admins_removes_passkeys_challenges_and_reminders(access_token):
@@ -675,39 +631,6 @@ def test_bulk_delete_cores_rejects_default_core(access_token):
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
-def test_bulk_delete_groups_removes_all_associations(access_token):
-    core = create_core(access_token, name=unique_name("bulk_group_core"))
-    group = create_group(access_token, name=unique_name("bulk_group"))
-    user = create_user(
-        access_token,
-        payload={"username": unique_name("bulk_group_user")},
-        group_ids=[group["id"]],
-    )
-    template = create_user_template(
-        access_token,
-        name=unique_name("bulk_group_template"),
-        group_ids=[group["id"]],
-    )
-    try:
-        response = client.post(
-            "/api/groups/bulk/delete",
-            headers=auth_headers(access_token),
-            json={"ids": [group["id"]]},
-        )
-
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-
-        user_response = client.get(f"/api/user/{user['username']}", headers=auth_headers(access_token))
-        assert user_response.status_code == status.HTTP_200_OK
-        assert user_response.json()["group_ids"] == []
-        assert get_group_association_counts(group["id"]) == {"users": 0, "templates": 0, "inbounds": 0}
-    finally:
-        delete_user(access_token, user["username"])
-        delete_user_template(access_token, template["id"])
-        delete_core_if_present(access_token, core["id"])
-
-
 def test_bulk_delete_hosts_removes_selected_hosts(access_token):
     core = create_core(access_token, name=unique_name("bulk_host_core"))
     inbounds = get_inbounds(access_token)
@@ -746,94 +669,118 @@ def test_bulk_delete_hosts_removes_selected_hosts(access_token):
         delete_core_if_present(access_token, core["id"])
 
 
-def test_bulk_delete_nodes_removes_usage_tables(access_token, monkeypatch):
+def seed_internal_subscription_for_usage() -> UUID:
+    """Seed an unbound technical subscription to verify internal cascade behavior."""
+
+    async def _seed() -> UUID:
+        async with TestSession() as session:
+            subscription = Subscription(uuid=uuid4())
+            session.add(subscription)
+            await session.commit()
+            return subscription.uuid
+
+    return asyncio.run(_seed())
+
+
+def delete_internal_subscription(subscription_uuid: UUID) -> None:
+    async def _delete() -> None:
+        async with TestSession() as session:
+            subscription = await session.get(Subscription, subscription_uuid)
+            if subscription is not None:
+                await session.delete(subscription)
+                await session.commit()
+
+    asyncio.run(_delete())
+
+
+def test_bulk_delete_admins_clears_usage_logs_and_api_keys(access_token):
+    admin = create_admin(access_token)
+    try:
+        seed_admin_usage_log(admin["id"])
+        seed_api_key(admin["id"])
+        assert count_admin_usage_logs(admin["id"]) == 1
+        assert count_api_keys(admin["id"]) == 1
+        response = client.post(
+            "/api/admins/bulk/delete", headers=auth_headers(access_token), json={"ids": [admin["id"]]}
+        )
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.json()["count"] == 1
+        assert count_admin_usage_logs(admin["id"]) == 0
+        assert count_api_keys(admin["id"]) == 0
+    finally:
+        delete_admin_if_present(access_token, admin["username"])
+
+
+def test_bulk_delete_unassigned_group_cleans_template_and_inbound_links(access_token):
+    core = create_core(access_token, name=unique_name("bulk_group_core"))
+    group = create_group(access_token, name=unique_name("bulk_group"))
+    template = create_subscription_template(
+        access_token, name=unique_name("bulk_group_template"), group_ids=[group["id"]]
+    )
+    try:
+        before = get_group_association_counts(group["id"])
+        assert before["subscriptions"] == 0
+        assert before["templates"] == 1
+        assert before["inbounds"] > 0
+        response = client.post(
+            "/api/groups/bulk/delete", headers=auth_headers(access_token), json={"ids": [group["id"]]}
+        )
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.json()["count"] == 1
+        assert get_group_association_counts(group["id"]) == {"subscriptions": 0, "templates": 0, "inbounds": 0}
+    finally:
+        delete_subscription_template(access_token, template["id"])
+        delete_group_if_present(access_token, group["id"])
+        delete_core_if_present(access_token, core["id"])
+
+
+def test_bulk_delete_nodes_cleans_subscription_usage_rows(access_token, monkeypatch):
     from app.routers import node as node_router
 
     monkeypatch.setattr(node_router.node_operator, "_remove_node_impl", AsyncMock())
-
-    user = create_user(access_token, payload={"username": unique_name("bulk_node_user")})
+    subscription_uuid = seed_internal_subscription_for_usage()
     node_id = create_db_node(core_config_id=1, name=unique_name("bulk_node"))
-    seed_node_usage_rows(node_id, user["id"])
+    seed_node_usage_rows(node_id, subscription_uuid)
     try:
-        response = client.post(
-            "/api/nodes/bulk/delete",
-            headers=auth_headers(access_token),
-            json={"ids": [node_id]},
-        )
-
-        assert response.status_code == status.HTTP_200_OK
+        response = client.post("/api/nodes/bulk/delete", headers=auth_headers(access_token), json={"ids": [node_id]})
+        assert response.status_code == status.HTTP_200_OK, response.text
         assert response.json()["count"] == 1
         assert get_node_related_counts(node_id) == {
             "nodes": 0,
-            "user_usages": 0,
+            "subscription_usages": 0,
             "usages": 0,
             "usage_logs": 0,
             "stats": 0,
         }
     finally:
-        delete_user(access_token, user["username"])
+        delete_db_node(node_id)
+        delete_internal_subscription(subscription_uuid)
 
 
-def test_bulk_delete_user_templates_removes_group_links_and_next_plan_refs(access_token):
+def test_bulk_delete_subscription_templates_cleans_legacy_next_plan_records(access_token):
+    """Until internal NextPlan is retired, deleting its template must delete its plan."""
     core = create_core(access_token, name=unique_name("bulk_template_core"))
     group = create_group(access_token, name=unique_name("bulk_template_group"))
-    user = create_user(access_token, payload={"username": unique_name("bulk_template_user")})
-    template = create_user_template(
-        access_token,
-        name=unique_name("bulk_template"),
-        group_ids=[group["id"]],
-    )
-    create_next_plan(user["id"], template["id"])
+    subscription_uuid = seed_internal_subscription_for_usage()
+    template = create_subscription_template(access_token, name=unique_name("bulk_template"), group_ids=[group["id"]])
+    create_next_plan(subscription_uuid, template["id"])
     try:
+        assert get_template_group_link_count(template["id"]) == 1
+        assert get_next_plan_state(subscription_uuid) == {"exists": True, "subscription_template_id": template["id"]}
         response = client.post(
-            "/api/user_templates/bulk/delete",
+            "/api/subscription_templates/bulk/delete",
             headers=auth_headers(access_token),
             json={"ids": [template["id"]]},
         )
-
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_200_OK, response.text
         assert response.json()["count"] == 1
         assert get_template_group_link_count(template["id"]) == 0
-        # Same as the single delete: a next plan that renews from a deleted template is removed.
-        assert get_next_plan_state(user["id"]) is None
+        assert get_next_plan_state(subscription_uuid) is None
     finally:
-        delete_user(access_token, user["username"])
-        delete_group_if_present(access_token, group["id"])
-        delete_core_if_present(access_token, core["id"])
-
-
-def test_bulk_delete_user_templates_does_not_turn_template_next_plan_unlimited(access_token):
-    core = create_core(access_token, name=unique_name("bulk_template_plan_core"))
-    group = create_group(access_token, name=unique_name("bulk_template_plan_group"))
-    template = create_user_template(
-        access_token,
-        name=unique_name("bulk_template_plan"),
-        group_ids=[group["id"]],
-        data_limit=5 * 1024**3,
-        expire_duration=30 * 86400,
-    )
-    # A template next plan keeps its limits in the template, not in the plan row.
-    user = create_user(
-        access_token,
-        group_ids=[group["id"]],
-        payload={"username": unique_name("bulk_template_plan_user"), "next_plan": {"user_template_id": template["id"]}},
-    )
-    try:
-        response = client.post(
-            "/api/user_templates/bulk/delete",
-            headers=auth_headers(access_token),
-            json={"ids": [template["id"]]},
+        delete_internal_subscription(subscription_uuid)
+        cleanup_response = client.delete(
+            f"/api/subscription_template/{template['id']}", headers=auth_headers(access_token)
         )
-        assert response.status_code == status.HTTP_200_OK
-
-        response = client.get(f"/api/user/by-id/{user['id']}", headers=auth_headers(access_token))
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["next_plan"] is None
-
-        # Before the fix the plan survived without a template and renewed to unlimited traffic, no expiry.
-        response = client.post(f"/api/user/by-id/{user['id']}/active_next", headers=auth_headers(access_token))
-        assert response.status_code == status.HTTP_404_NOT_FOUND, response.json()
-    finally:
-        delete_user(access_token, user["username"])
+        assert cleanup_response.status_code in (204, 404)
         delete_group_if_present(access_token, group["id"])
         delete_core_if_present(access_token, core["id"])

@@ -11,10 +11,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, event
 
-from app.db.crud import user as user_crud
-from app.db.models import Admin, Node, NodeUserUsage, User, UserStatus
+from app.db.crud import subscription as subscription_crud
+from app.db.models import Admin, Node, NodeSubscriptionUsage, Subscription, SubscriptionStatus
 from app.models.proxy import ProxyTable
-from app.models.stats import Period, UserCountMetric
+from app.models.stats import Period, SubscriptionCountMetric
 from tests.api import IS_SQLITE, TestSession, engine
 
 # A window of its own, far from the rows other tests write
@@ -36,10 +36,16 @@ async def _create_usage_history() -> dict:
         session.add_all(admins)
         await session.flush()
 
-        statuses = [UserStatus.active, UserStatus.expired, UserStatus.limited, UserStatus.active, UserStatus.expired]
+        statuses = [
+            SubscriptionStatus.active,
+            SubscriptionStatus.expired,
+            SubscriptionStatus.limited,
+            SubscriptionStatus.active,
+            SubscriptionStatus.expired,
+        ]
         users = [
-            User(
-                username=f"shape_user{i}_{suffix}",
+            Subscription(
+                uuid=uuid4(),
                 admin_id=None if i == 4 else admins[i % 2].id,
                 status=status,
                 proxy_settings=ProxyTable().dict(no_obj=True),
@@ -81,31 +87,35 @@ async def _create_usage_history() -> dict:
                 for node_index, node in enumerate(nodes):
                     if (moment_index * user_index + node_index) % 2:
                         rows.append(
-                            NodeUserUsage(
+                            NodeSubscriptionUsage(
                                 created_at=moment,
-                                user_id=user.id,
+                                subscription_uuid=user.uuid,
                                 node_id=node.id,
                                 used_traffic=1000 * (moment_index + 1) + 10 * user_index + node_index,
                             )
                         )
             # A row without a node, as the node usage path allows
             rows.append(
-                NodeUserUsage(created_at=moment, user_id=users[moment_index % 5].id, node_id=None, used_traffic=7)
+                NodeSubscriptionUsage(
+                    created_at=moment, subscription_uuid=users[moment_index % 5].uuid, node_id=None, used_traffic=7
+                )
             )
         session.add_all(rows)
         await session.commit()
         return {
             "admins": [admin.username for admin in admins],
             "admin_ids": [admin.id for admin in admins],
-            "user_ids": [user.id for user in users],
+            "subscription_uuids": [user.uuid for user in users],
             "nodes": [node.id for node in nodes],
         }
 
 
 async def _delete_usage_history(history: dict) -> None:
     async with TestSession() as session:
-        await session.execute(delete(NodeUserUsage).where(NodeUserUsage.user_id.in_(history["user_ids"])))
-        await session.execute(delete(User).where(User.id.in_(history["user_ids"])))
+        await session.execute(
+            delete(NodeSubscriptionUsage).where(NodeSubscriptionUsage.subscription_uuid.in_(history["subscription_uuids"]))
+        )
+        await session.execute(delete(Subscription).where(Subscription.uuid.in_(history["subscription_uuids"])))
         await session.execute(delete(Node).where(Node.id.in_(history["nodes"])))
         await session.execute(delete(Admin).where(Admin.id.in_(history["admin_ids"])))
         await session.commit()
@@ -142,13 +152,13 @@ async def test_all_users_usages_same_with_and_without_users_join(usage_history, 
     for start, end in _ranges(tz):
         for scope in _usage_scopes(usage_history):
             async with TestSession() as session:
-                new = await user_crud.get_all_users_usages(
+                new = await subscription_crud.get_all_subscriptions_usages(
                     session, scope.get("admins"), start, end, period, **_without_admins(scope)
                 )
             with monkeypatch.context() as patch:
-                patch.setattr(user_crud, "_usage_history_needs_users_join", lambda *args: True)
+                patch.setattr(subscription_crud, '_usage_history_needs_subscriptions_join', lambda *args: True)
                 async with TestSession() as session:
-                    joined = await user_crud.get_all_users_usages(
+                    joined = await subscription_crud.get_all_subscriptions_usages(
                         session, scope.get("admins"), start, end, period, **_without_admins(scope)
                     )
             assert new.model_dump() == joined.model_dump(), (scope, start, end)
@@ -163,14 +173,14 @@ async def test_user_count_buckets_same_for_both_query_shapes(usage_history, monk
     admins = usage_history["admins"]
     node_one = usage_history["nodes"][0]
     scopes = [
-        (UserCountMetric.online, {}),
-        (UserCountMetric.online, {"group_by_node": True}),
-        (UserCountMetric.online, {"node_id": node_one}),
-        (UserCountMetric.online, {"admins": [admins[0]], "group_by_node": True}),
-        (UserCountMetric.expired, {}),
-        (UserCountMetric.expired, {"admins": admins}),
-        (UserCountMetric.limited, {}),
-        (UserCountMetric.limited, {"admins": [admins[1]]}),
+        (SubscriptionCountMetric.online, {}),
+        (SubscriptionCountMetric.online, {"group_by_node": True}),
+        (SubscriptionCountMetric.online, {"node_id": node_one}),
+        (SubscriptionCountMetric.online, {"admins": [admins[0]], "group_by_node": True}),
+        (SubscriptionCountMetric.expired, {}),
+        (SubscriptionCountMetric.expired, {"admins": admins}),
+        (SubscriptionCountMetric.limited, {}),
+        (SubscriptionCountMetric.limited, {"admins": [admins[1]]}),
     ]
     seen_counts = 0
     for start, end in _ranges(tz):
@@ -179,13 +189,13 @@ async def test_user_count_buckets_same_for_both_query_shapes(usage_history, monk
             for use_pairs in (False, True):
                 with monkeypatch.context() as patch:
                     patch.setattr(
-                        user_crud,
-                        "_user_count_buckets_from_distinct_pairs",
+                        subscription_crud,
+                        '_subscription_count_buckets_from_distinct_pairs',
                         lambda dialect, use_pairs=use_pairs: use_pairs,
                     )
                     async with TestSession() as session:
                         results.append(
-                            await user_crud.get_user_count_metric_stats(
+                            await subscription_crud.get_subscription_count_metric_stats(
                                 session, scope.get("admins"), start, end, period, metric, **_without_admins(scope)
                             )
                         )
@@ -209,14 +219,16 @@ async def test_usage_chart_and_count_query_shapes_per_dialect(usage_history):
     event.listen(engine.sync_engine, "before_cursor_execute", _capture)
     try:
         async with TestSession() as session:
-            await user_crud.get_all_users_usages(session, None, start, end, Period.day)
+            await subscription_crud.get_all_subscriptions_usages(session, None, start, end, Period.day)
             usage_sql = statements[-1]
-            await user_crud.get_user_count_metric_stats(session, None, start, end, Period.day, UserCountMetric.online)
+            await subscription_crud.get_subscription_count_metric_stats(
+                session, None, start, end, Period.day, SubscriptionCountMetric.online
+            )
             bucket_sql = statements[-1]
             dialect = session.bind.dialect.name
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", _capture)
 
     # Orphan history rows only exist on SQLite, which does not enforce ON DELETE CASCADE
-    assert ("join users" in usage_sql) == IS_SQLITE
+    assert ("join subscriptions" in usage_sql) == IS_SQLITE
     assert ("select distinct" in bucket_sql) == (dialect == "postgresql")

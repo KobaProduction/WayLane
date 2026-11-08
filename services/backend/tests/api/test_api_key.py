@@ -1,4 +1,5 @@
 import asyncio
+from uuid import uuid4
 
 import pytest
 from fastapi import status
@@ -7,7 +8,18 @@ from sqlalchemy import select
 from app.db.models import Admin, APIKey
 from app.models.admin import hash_password
 from tests.api import TestSession, client
-from tests.api.helpers import auth_headers, create_admin, delete_admin, strong_password, unique_name
+from tests.api.helpers import (
+    auth_headers,
+    create_admin,
+    create_core,
+    create_group,
+    delete_admin,
+    delete_core,
+    delete_group,
+    get_inbounds,
+    strong_password,
+    unique_name,
+)
 
 
 def _login(username: str, password: str) -> str:
@@ -100,34 +112,36 @@ def test_api_key_authenticates_protected_requests(access_token):
         assert detail["admin_id"] == admin["id"]
         assert "api_key" not in detail
 
-        username = unique_name("api_key_user")
-        create_user_response = client.post(
-            "/api/user",
-            headers={"X-Api-Key": raw_api_key},
-            json={
-                "username": username,
-                "proxy_settings": {},
-                "data_limit": 1024 * 1024,
-                "data_limit_reset_strategy": "no_reset",
-                "status": "active",
-            },
-        )
-        assert create_user_response.status_code == status.HTTP_201_CREATED
-        user = create_user_response.json()
-        assert user["username"] == username
-        assert user["admin"]["username"] == admin["username"]
+        core = create_core(access_token)
+        group = create_group(access_token, inbound_tags=[get_inbounds(access_token)[0]])
+        sid = str(uuid4())
+        try:
+            subscription_response = client.post(
+                "/api/subscriptions",
+                headers={"X-Api-Key": raw_api_key},
+                json={"uuid": sid, "group_ids": [group["id"]]},
+            )
+            assert subscription_response.status_code == status.HTTP_201_CREATED, subscription_response.text
+            subscription = subscription_response.json()
+            assert subscription["uuid"] == sid
+            assert subscription["entitlement"] == "payment_required"
+            assert "id" not in subscription and "username" not in subscription
+            details = client.get(f"/api/subscriptions/{sid}", headers={"X-Api-Key": raw_api_key})
+            assert details.status_code == 200, details.text
 
-        delete_user_response = client.delete(
-            f"/api/user/{username}",
-            headers={"Authorization": f"ApiKey {raw_api_key}"},
-        )
-        assert delete_user_response.status_code == status.HTTP_204_NO_CONTENT
-
-        delete_again_response = client.delete(
-            f"/api/user/{username}",
-            headers={"Authorization": f"ApiKey {raw_api_key}"},
-        )
-        assert delete_again_response.status_code == status.HTTP_404_NOT_FOUND
+            delete_response = client.delete(
+                f"/api/subscriptions/{sid}",
+                headers={"Authorization": f"ApiKey {raw_api_key}"},
+            )
+            assert delete_response.status_code == status.HTTP_204_NO_CONTENT, delete_response.text
+            missing_response = client.delete(
+                f"/api/subscriptions/{sid}", headers={"Authorization": f"ApiKey {raw_api_key}"}
+            )
+            assert missing_response.status_code == status.HTTP_404_NOT_FOUND
+        finally:
+            client.delete(f"/api/subscriptions/{sid}", headers=auth_headers(access_token))
+            delete_group(access_token, group["id"])
+            delete_core(access_token, core["id"])
     finally:
         delete_admin(access_token, admin["username"])
 
@@ -327,7 +341,7 @@ def test_custom_key_cannot_mint_or_become_inheriting_key():
     try:
         owner_headers = auth_headers(_login(owner["username"], owner["password"]))
         restricted = _create_key(
-            owner_headers, permissions={"users": {"read": {"scope": 2}}, "api_keys": _KEY_ADMIN_PERMISSIONS}
+            owner_headers, permissions={"subscriptions": {"read": {"scope": 2}}, "api_keys": _KEY_ADMIN_PERMISSIONS}
         )
         restricted_headers = _key_headers(restricted["api_key"])
         assert client.get("/api/admin-roles", headers=restricted_headers).status_code == status.HTTP_403_FORBIDDEN
@@ -345,7 +359,7 @@ def test_custom_key_cannot_mint_or_become_inheriting_key():
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
         # A narrower custom key it minted itself cannot be switched to inheriting either.
-        minted = _create_key(restricted_headers, permissions={"users": {"read": {"scope": 2}}})
+        minted = _create_key(restricted_headers, permissions={"subscriptions": {"read": {"scope": 2}}})
         response = client.patch(
             f"/api/api_key/{minted['id']}", headers=restricted_headers, json={"inherit_permissions": True}
         )
@@ -382,7 +396,7 @@ def _create_scoped_key_admin(access_token: str) -> tuple[dict, int]:
         json={
             "name": unique_name("scoped_key_role"),
             "permissions": {
-                "users": {"create": True, "read": {"scope": 1}},
+                "subscriptions": {"create": True, "read": {"scope": 1}},
                 "api_keys": _KEY_ADMIN_PERMISSIONS,
             },
         },

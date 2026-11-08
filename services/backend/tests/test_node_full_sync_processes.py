@@ -14,12 +14,12 @@ import pytest
 from grpclib.client import Channel
 from grpclib.const import Cardinality, Handler
 from grpclib.server import Server
-from waylane_node_bridge.common import service_grpc, service_pb2 as service
 
 from app.node import NodeManager
 from app.node.bridge import QueuedGrpcNode, register_refresh_handler
-from app.node.nats_memory import NatsUserSyncStore
+from app.node.nats_memory import NatsSubscriptionSyncStore
 from tests.test_nats_sync_integration import jetstream  # noqa: F401 - real NATS fixture
+from waylane_node_bridge.common import service_grpc, service_pb2 as service
 
 WORKER = Path(__file__).with_name("node_delivery_process_worker.py")
 
@@ -36,15 +36,17 @@ class Receiver:
 
     def __mapping__(self):
         return {
-            "/waylane.node.v1.NodeService/SyncUsers": Handler(self.full, Cardinality.UNARY_UNARY, service.Users, service.Empty),
+            "/waylane.node.v1.NodeService/SyncUsers": Handler(
+                self.full, Cardinality.UNARY_UNARY, service.Subscriptions, service.Empty
+            ),
             "/waylane.node.v1.NodeService/SyncUsersChunked": Handler(
-                self.chunked, Cardinality.STREAM_UNARY, service.UsersChunk, service.Empty
+                self.chunked, Cardinality.STREAM_UNARY, service.SubscriptionsChunk, service.Empty
             ),
         }
 
     async def full(self, stream):
         request = await stream.recv_message()
-        self.users = {user.email: list(user.inbounds) for user in request.users}
+        self.users = {user.subscription_uuid: list(user.inbounds) for user in request.users}
         self.events.append(("full", sorted(self.users)))
         await stream.send_message(service.Empty())
 
@@ -54,11 +56,11 @@ class Receiver:
             users.extend(chunk.users)
             if chunk.last:
                 break
-        if any(user.email.startswith(self.delay_prefix) for user in users):
+        if any(user.subscription_uuid.startswith(self.delay_prefix) for user in users):
             await asyncio.sleep(self.delay_seconds)
         for user in users:
-            self.users[user.email] = list(user.inbounds)
-        self.events.append(("delta", [f"{user.email}={list(user.inbounds)}" for user in users]))
+            self.users[user.subscription_uuid] = list(user.inbounds)
+        self.events.append(("delta", [f"{user.subscription_uuid}={list(user.inbounds)}" for user in users]))
         self.delta_landed.set()
         await stream.send_message(service.Empty())
 
@@ -140,10 +142,10 @@ class Database:
         await self.kv.put(self.key, json.dumps(self.state).encode())
 
     def snapshot(self):
-        return [service.User(email=email, inbounds=inbounds) for email, inbounds in self.state.items()]
+        return [service.Subscription(subscription_uuid=email, inbounds=inbounds) for email, inbounds in self.state.items()]
 
     async def resolve(self, _node, emails):
-        return [service.User(email=email, inbounds=self.state.get(email, [])) for email in emails]
+        return [service.Subscription(subscription_uuid=email, inbounds=self.state.get(email, [])) for email in emails]
 
 
 @pytest.mark.asyncio
@@ -151,8 +153,8 @@ class Database:
 async def test_delivery_from_another_process_crossing_a_snapshot_converges_to_latest_state(jetstream, flush):  # noqa: F811
     node_id = "fence-" + uuid4().hex[:6]
     async with receiver_server() as (receiver, port):
-        writer = NatsUserSyncStore(jetstream.kv)
-        local = NatsUserSyncStore(jetstream.kv)
+        writer = NatsSubscriptionSyncStore(jetstream.kv)
+        local = NatsSubscriptionSyncStore(jetstream.kv)
         database = Database(jetstream.kv, node_id)
         node = make_local_node(local, node_id, port, "parent")
         manager = NodeManager()
@@ -163,7 +165,7 @@ async def test_delivery_from_another_process_crossing_a_snapshot_converges_to_la
             # v1 is committed and queued; the other process claims it and its RPC is slow.
             await database.set("slow-user", ["v1"])
             await database.set("other-user", ["stable"])
-            await writer.enqueue_users(node_id, [service.User(email="slow-user", inbounds=["v1"])])
+            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["v1"])])
             await asyncio.sleep(0.4)
             captured, active = await local.capture_queued(node_id)
             assert active == 1 and captured == {}
@@ -172,7 +174,7 @@ async def test_delivery_from_another_process_crossing_a_snapshot_converges_to_la
                 snapshot = database.snapshot()  # read after quiescence: contains v1
                 # An API edit commits and enqueues while the snapshot is being applied.
                 await database.set("slow-user", ["v2"])
-                await writer.enqueue_users(node_id, [service.User(email="slow-user", inbounds=["v2"])])
+                await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["v2"])])
                 return snapshot
 
             await node.connect("0.5.4", "26.3.27")
@@ -203,8 +205,8 @@ async def test_worker_process_that_dies_after_sending_and_before_acking_is_recov
     node_id = "crash-" + uuid4().hex[:6]
     async with receiver_server() as (receiver, port):
         receiver.delay_seconds = 0.3
-        writer = NatsUserSyncStore(jetstream.kv)
-        local = NatsUserSyncStore(jetstream.kv)
+        writer = NatsSubscriptionSyncStore(jetstream.kv)
+        local = NatsSubscriptionSyncStore(jetstream.kv)
         node = make_local_node(local, node_id, port, "parent")
         manager = NodeManager()
         manager._nodes[1] = node
@@ -212,7 +214,7 @@ async def test_worker_process_that_dies_after_sending_and_before_acking_is_recov
         worker = await start_worker(jetstream, node_id, port, "worker-a", mode="die-after-send")
         try:
             await database.set("slow-user", ["delta"])  # the state every delivery reads
-            await writer.enqueue_users(node_id, [service.User(email="slow-user", inbounds=["delta"])])
+            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["delta"])])
             await asyncio.wait_for(receiver.delta_landed.wait(), 10)
             worker.stdin.write(b"die\n")
             await worker.stdin.drain()
@@ -244,7 +246,7 @@ async def test_two_child_workers_deliver_a_shared_burst_without_loss_in_bounded_
     within the 100-user budget, and only the explicitly re-enqueued user may be delivered a second time."""
     node_id = "burst-" + uuid4().hex[:6]
     async with receiver_server() as (receiver, port):
-        writer = NatsUserSyncStore(jetstream.kv)
+        writer = NatsSubscriptionSyncStore(jetstream.kv)
         database = Database(jetstream.kv, node_id)
         expected = {f"user-{number}" for number in range(650)}
         for email in expected:
@@ -252,11 +254,11 @@ async def test_two_child_workers_deliver_a_shared_burst_without_loss_in_bounded_
         await jetstream.kv.put(database.key, json.dumps(database.state).encode())
         workers = [await start_worker(jetstream, node_id, port, f"worker-{index}", seconds="15") for index in range(2)]
         try:
-            await writer.enqueue_users(node_id, [service.User(email=email, inbounds=["in"]) for email in expected])
+            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid=email, inbounds=["in"]) for email in expected])
             # Wake the processes' lazy workers the way a sibling connect would: their
             # own health poll is not part of this test, so re-enqueue one user.
             await asyncio.sleep(0.2)
-            await writer.enqueue_users(node_id, [service.User(email="user-0", inbounds=["in"])])
+            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="user-0", inbounds=["in"])])
             await wait_until(lambda: set(receiver.users) >= expected, timeout=40)
             async with asyncio.timeout(20):
                 while (await writer.capture_queued(node_id)) != ({}, 0):

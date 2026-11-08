@@ -4,10 +4,14 @@ import ast
 import hashlib
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+
+from app.db import models
 
 MIGRATIONS = Path("app/db/migrations")
 
@@ -47,11 +51,38 @@ def test_waylane_compatibility_bridge_must_never_recreate_existing_tables():
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-            if node.func.value.id == "op" and node.func.attr not in {"get_bind", "alter_column"}:
-                forbidden_calls.append(node.func.attr)
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "op"
+            and node.func.attr not in {"get_bind", "alter_column"}
+        ):
+            forbidden_calls.append(node.func.attr)
     assert not forbidden_calls, "Bridge must only adjust existing column types"
     assert "bootstrap_seed" not in source
     assert "secrets" not in source
     assert "create_table" not in source
     assert "drop_table" not in source
+
+
+def test_revision_map_cli_keeps_product_user_unavailable():
+    """Frozen revisions remain loadable without exporting User in runtime ORM."""
+    assert "User" not in vars(models)
+    assert not hasattr(models, "User")
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    for args in (("heads",), ("history", "-r", "-3:head")):
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", *args],
+            cwd=backend_dir,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "d9f2e8714c33" in result.stdout
+
+    # Neither command may install a permanent compatibility alias.
+    assert "User" not in vars(models)
+    assert not hasattr(models, "User")

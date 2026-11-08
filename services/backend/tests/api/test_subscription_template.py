@@ -5,10 +5,10 @@ from tests.api import client
 from tests.api.helpers import (
     create_core,
     create_group,
-    create_user_template,
+    create_subscription_template,
     delete_core,
     delete_group,
-    delete_user_template,
+    delete_subscription_template,
     unique_name,
 )
 
@@ -25,11 +25,11 @@ def cleanup_groups(access_token: str, core: dict, groups: list[dict]):
     delete_core(access_token, core["id"])
 
 
-def test_user_template_rejects_too_large_expire_duration(access_token):
+def test_subscription_template_rejects_too_large_expire_duration(access_token):
     core, groups = setup_groups(access_token, 1)
     try:
         response = client.post(
-            "/api/user_template",
+            "/api/subscription_template",
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "name": unique_name("template_too_large_duration"),
@@ -43,11 +43,11 @@ def test_user_template_rejects_too_large_expire_duration(access_token):
         cleanup_groups(access_token, core, groups)
 
 
-def test_user_template_rejects_too_large_on_hold_timeout(access_token):
+def test_subscription_template_rejects_too_large_on_hold_timeout(access_token):
     core, groups = setup_groups(access_token, 1)
     try:
         response = client.post(
-            "/api/user_template",
+            "/api/subscription_template",
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "name": unique_name("template_too_large_timeout"),
@@ -62,10 +62,10 @@ def test_user_template_rejects_too_large_on_hold_timeout(access_token):
         cleanup_groups(access_token, core, groups)
 
 
-def test_user_template_create(access_token):
+def test_subscription_template_create(access_token):
     """Test that the user template create route is accessible."""
     core, groups = setup_groups(access_token, 1)
-    template = create_user_template(access_token, group_ids=[groups[0]["id"]], name="test_user_template")
+    template = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="test_user_template")
     try:
         assert template["name"] == "test_user_template"
         assert template["group_ids"] == [groups[0]["id"]]
@@ -75,14 +75,14 @@ def test_user_template_create(access_token):
         assert template["status"] == "active"
         assert template["extra_settings"] is None
     finally:
-        delete_user_template(access_token, template["id"])
+        delete_subscription_template(access_token, template["id"])
         cleanup_groups(access_token, core, groups)
 
 
-def test_user_template_hwid_limit_persists_on_create_update_and_clear(access_token):
+def test_subscription_template_hwid_limit_persists_on_create_update_and_clear(access_token):
     """Test that HWID limits are stored and can be cleared on user templates."""
     core, groups = setup_groups(access_token, 1)
-    template = create_user_template(
+    template = create_subscription_template(
         access_token,
         group_ids=[groups[0]["id"]],
         name=unique_name("test_user_template_hwid"),
@@ -101,7 +101,7 @@ def test_user_template_hwid_limit_persists_on_create_update_and_clear(access_tok
             "hwid_limit": 5,
         }
         response = client.put(
-            f"/api/user_template/{template['id']}",
+            f"/api/subscription_template/{template['id']}",
             headers={"Authorization": f"Bearer {access_token}"},
             json=update_payload,
         )
@@ -109,40 +109,40 @@ def test_user_template_hwid_limit_persists_on_create_update_and_clear(access_tok
         assert response.json()["hwid_limit"] == 5
 
         response = client.put(
-            f"/api/user_template/{template['id']}",
+            f"/api/subscription_template/{template['id']}",
             headers={"Authorization": f"Bearer {access_token}"},
             json={**update_payload, "hwid_limit": None},
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["hwid_limit"] is None
     finally:
-        delete_user_template(access_token, template["id"])
+        delete_subscription_template(access_token, template["id"])
         cleanup_groups(access_token, core, groups)
 
 
-def test_user_templates_get(access_token):
+def test_subscription_templates_get(access_token):
     """Test that the user template get route is accessible."""
     core, groups = setup_groups(access_token, 1)
-    template = create_user_template(access_token, group_ids=[groups[0]["id"]])
+    template = create_subscription_template(access_token, group_ids=[groups[0]["id"]])
     try:
         response = client.get(
-            "/api/user_templates",
+            "/api/subscription_templates",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_200_OK
         assert any(item["id"] == template["id"] for item in response.json())
     finally:
-        delete_user_template(access_token, template["id"])
+        delete_subscription_template(access_token, template["id"])
         cleanup_groups(access_token, core, groups)
 
 
-def test_user_template_update(access_token):
+def test_subscription_template_update(access_token):
     """Test that the user template update route is accessible."""
     core, groups = setup_groups(access_token, 2)
-    template = create_user_template(access_token, group_ids=[groups[0]["id"]])
+    template = create_subscription_template(access_token, group_ids=[groups[0]["id"]])
     try:
         response = client.put(
-            f"/api/user_template/{template['id']}",
+            f"/api/subscription_template/{template['id']}",
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "name": "test_user_template_updated",
@@ -161,17 +161,17 @@ def test_user_template_update(access_token):
         assert response.json()["extra_settings"]["method"] == "xchacha20-poly1305"
         assert "flow" not in response.json()["extra_settings"]
     finally:
-        delete_user_template(access_token, template["id"])
+        delete_subscription_template(access_token, template["id"])
         cleanup_groups(access_token, core, groups)
 
 
-def test_user_template_get_by_id(access_token):
+def test_subscription_template_get_by_id(access_token):
     """Test that the user template get by id route is accessible."""
     core, groups = setup_groups(access_token, 2)
-    template = create_user_template(access_token, group_ids=[group["id"] for group in groups])
+    template = create_subscription_template(access_token, group_ids=[group["id"] for group in groups])
     try:
         response = client.get(
-            f"/api/user_template/{template['id']}",
+            f"/api/subscription_template/{template['id']}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -179,17 +179,17 @@ def test_user_template_get_by_id(access_token):
         assert set(response.json()["group_ids"]) == {group["id"] for group in groups}
         assert response.json()["expire_duration"] == template["expire_duration"]
     finally:
-        delete_user_template(access_token, template["id"])
+        delete_subscription_template(access_token, template["id"])
         cleanup_groups(access_token, core, groups)
 
 
-def test_user_template_delete(access_token):
+def test_subscription_template_delete(access_token):
     """Test that the user template delete route is accessible."""
     core, groups = setup_groups(access_token, 1)
-    template = create_user_template(access_token, group_ids=[groups[0]["id"]])
+    template = create_subscription_template(access_token, group_ids=[groups[0]["id"]])
     try:
         response = client.delete(
-            f"/api/user_template/{template['id']}",
+            f"/api/subscription_template/{template['id']}",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_204_NO_CONTENT
@@ -197,22 +197,22 @@ def test_user_template_delete(access_token):
         cleanup_groups(access_token, core, groups)
 
 
-# Tests for /api/user_templates/simple endpoint
+# Tests for /api/subscription_templates/simple endpoint
 
 
-def test_get_user_templates_simple_basic(access_token):
+def test_get_subscription_templates_simple_basic(access_token):
     """Test that user_templates/simple returns correct minimal data structure."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     created_names = []
     try:
-        tmpl1 = create_user_template(access_token, group_ids=[groups[0]["id"]], name=unique_name("tmpl_1"))
-        tmpl2 = create_user_template(access_token, group_ids=[groups[0]["id"]], name=unique_name("tmpl_2"))
+        tmpl1 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name=unique_name("tmpl_1"))
+        tmpl2 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name=unique_name("tmpl_2"))
         created_ids = [tmpl1["id"], tmpl2["id"]]
         created_names = [tmpl1["name"], tmpl2["name"]]
 
         response = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -228,22 +228,22 @@ def test_get_user_templates_simple_basic(access_token):
             assert name in response_names
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)
 
 
-def test_get_user_templates_simple_search(access_token):
+def test_get_subscription_templates_simple_search(access_token):
     """Test case-insensitive search by template name."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     try:
-        tmpl1 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_alpha_search")
-        tmpl2 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_beta_search")
-        tmpl3 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_other_search")
+        tmpl1 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_alpha_search")
+        tmpl2 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_beta_search")
+        tmpl3 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_other_search")
         created_ids = [tmpl1["id"], tmpl2["id"], tmpl3["id"]]
 
         response = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"search": "alpha"},
         )
@@ -253,24 +253,24 @@ def test_get_user_templates_simple_search(access_token):
         assert any(t["name"] == "tmpl_alpha_search" for t in data["templates"])
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)
 
 
-def test_get_user_templates_simple_sort_ascending(access_token):
+def test_get_subscription_templates_simple_sort_ascending(access_token):
     """Test ascending sort by name."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     created_names = []
     try:
-        tmpl1 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_c_sort")
-        tmpl2 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_a_sort")
-        tmpl3 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_b_sort")
+        tmpl1 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_c_sort")
+        tmpl2 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_a_sort")
+        tmpl3 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_b_sort")
         created_ids = [tmpl1["id"], tmpl2["id"], tmpl3["id"]]
         created_names = [tmpl1["name"], tmpl2["name"], tmpl3["name"]]
 
         response = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"sort": "name"},
         )
@@ -281,24 +281,24 @@ def test_get_user_templates_simple_sort_ascending(access_token):
         assert our_names == sorted(created_names)
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)
 
 
-def test_get_user_templates_simple_sort_descending(access_token):
+def test_get_subscription_templates_simple_sort_descending(access_token):
     """Test descending sort by name."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     created_names = []
     try:
-        tmpl1 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_a_desc")
-        tmpl2 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_b_desc")
-        tmpl3 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_c_desc")
+        tmpl1 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_a_desc")
+        tmpl2 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_b_desc")
+        tmpl3 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="tmpl_c_desc")
         created_ids = [tmpl1["id"], tmpl2["id"], tmpl3["id"]]
         created_names = [tmpl1["name"], tmpl2["name"], tmpl3["name"]]
 
         response = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"sort": "-name"},
         )
@@ -309,26 +309,28 @@ def test_get_user_templates_simple_sort_descending(access_token):
         assert our_names == sorted(created_names, reverse=True)
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)
 
 
-def test_get_user_templates_simple_pagination(access_token):
+def test_get_subscription_templates_simple_pagination(access_token):
     """Test pagination with offset and limit."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     try:
         for i in range(5):
-            tmpl = create_user_template(access_token, group_ids=[groups[0]["id"]], name=unique_name(f"tmpl_pag_{i}"))
+            tmpl = create_subscription_template(
+                access_token, group_ids=[groups[0]["id"]], name=unique_name(f"tmpl_pag_{i}")
+            )
             created_ids.append(tmpl["id"])
 
         response1 = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"offset": 0, "limit": 2},
         )
         response2 = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"offset": 2, "limit": 2},
         )
@@ -345,21 +347,23 @@ def test_get_user_templates_simple_pagination(access_token):
         assert len(ids1 & ids2) == 0
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)
 
 
-def test_get_user_templates_simple_skip_pagination(access_token):
+def test_get_subscription_templates_simple_skip_pagination(access_token):
     """Test all=true parameter returns all records."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     try:
         for i in range(10):
-            tmpl = create_user_template(access_token, group_ids=[groups[0]["id"]], name=unique_name(f"tmpl_all_{i}"))
+            tmpl = create_subscription_template(
+                access_token, group_ids=[groups[0]["id"]], name=unique_name(f"tmpl_all_{i}")
+            )
             created_ids.append(tmpl["id"])
 
         response = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"all": "true"},
         )
@@ -370,21 +374,21 @@ def test_get_user_templates_simple_skip_pagination(access_token):
         assert data["total"] >= 10
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)
 
 
-def test_get_user_templates_simple_empty_search(access_token):
+def test_get_subscription_templates_simple_empty_search(access_token):
     """Test search with no matching results."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     try:
-        tmpl1 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="known_tmpl_search_1")
-        tmpl2 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="known_tmpl_search_2")
+        tmpl1 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="known_tmpl_search_1")
+        tmpl2 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="known_tmpl_search_2")
         created_ids = [tmpl1["id"], tmpl2["id"]]
 
         response = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"search": "nonexistent_tmpl_xyz_12345"},
         )
@@ -395,35 +399,35 @@ def test_get_user_templates_simple_empty_search(access_token):
         assert len(data["templates"]) == 0
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)
 
 
-def test_get_user_templates_simple_invalid_sort(access_token):
+def test_get_subscription_templates_simple_invalid_sort(access_token):
     """Test error handling for invalid sort parameter."""
     response = client.get(
-        "/api/user_templates/simple",
+        "/api/subscription_templates/simple",
         headers={"Authorization": f"Bearer {access_token}"},
         params={"sort": "invalid_field_xyz"},
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
-def test_get_user_templates_simple_search_and_sort(access_token):
+def test_get_subscription_templates_simple_search_and_sort(access_token):
     """Test combining search and sort parameters."""
     core, groups = setup_groups(access_token, 1)
     created_ids = []
     created_names = []
     try:
-        tmpl1 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="alpha_tmpl_combo")
-        tmpl2 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="beta_tmpl_combo")
-        tmpl3 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="gamma_tmpl_combo")
-        tmpl4 = create_user_template(access_token, group_ids=[groups[0]["id"]], name="other_tmpl_combo")
+        tmpl1 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="alpha_tmpl_combo")
+        tmpl2 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="beta_tmpl_combo")
+        tmpl3 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="gamma_tmpl_combo")
+        tmpl4 = create_subscription_template(access_token, group_ids=[groups[0]["id"]], name="other_tmpl_combo")
         created_ids = [tmpl1["id"], tmpl2["id"], tmpl3["id"], tmpl4["id"]]
         created_names = [tmpl1["name"], tmpl2["name"], tmpl3["name"], tmpl4["name"]]
 
         response = client.get(
-            "/api/user_templates/simple",
+            "/api/subscription_templates/simple",
             headers={"Authorization": f"Bearer {access_token}"},
             params={"search": "_tmpl_combo", "sort": "-name"},
         )
@@ -436,5 +440,5 @@ def test_get_user_templates_simple_search_and_sort(access_token):
         assert matching_names == sorted(matching_names, reverse=True)
     finally:
         for template_id in created_ids:
-            delete_user_template(access_token, template_id)
+            delete_subscription_template(access_token, template_id)
         cleanup_groups(access_token, core, groups)

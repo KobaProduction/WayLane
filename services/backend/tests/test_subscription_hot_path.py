@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from uuid import uuid4
+
 import pytest
-from sqlalchemy import event, inspect as sa_inspect, select
+from sqlalchemy import event, insert, inspect as sa_inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import StaticPool
 
 from app.db import base
-from app.db.crud.user import get_user_by_id
-from app.db.models import Group, ProxyInbound, User, UserUsageResetLogs, users_groups_association
+from app.db.crud.subscription import get_subscription_by_uuid
+from app.db.models import (
+    Group,
+    ProxyInbound,
+    Subscription,
+    SubscriptionUsageResetLogs,
+    subscriptions_groups_association,
+)
 from app.operation.subscription import SubscriptionOperation
 
 
@@ -28,23 +37,23 @@ async def db_session():
     async with factory() as session:
         inbound = ProxyInbound(tag="vless-tcp")
         group = Group(name="g1", inbounds=[inbound])
-        user = User(username="subuser", used_traffic=1000)
+        user = Subscription(uuid=uuid4(), used_traffic=1000)
         session.add_all([inbound, group, user])
         await session.flush()
-        await session.execute(users_groups_association.insert().values(user_id=user.id, groups_id=group.id))
-        session.add(UserUsageResetLogs(user_id=user.id, used_traffic_at_reset=234))
+        await session.execute(subscriptions_groups_association.insert().values(subscription_uuid=user.uuid, groups_id=group.id))
+        session.add(SubscriptionUsageResetLogs(subscription_uuid=user.uuid, used_traffic_at_reset=234))
         await session.commit()
-        yield session, user.id, engine
+        yield session, user.uuid, engine
 
     await engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_slim_user_fetch_skips_heavy_relations(db_session):
-    session, user_id, _engine = db_session
-    user = await get_user_by_id(
+    session, subscription_uuid, _engine = db_session
+    user = await get_subscription_by_uuid(
         session,
-        user_id,
+        subscription_uuid,
         load_admin=True,
         load_admin_role=True,
         load_next_plan=False,
@@ -64,10 +73,12 @@ async def test_slim_user_fetch_skips_heavy_relations(db_session):
 
 @pytest.mark.asyncio
 async def test_inbounds_skips_sql_when_groups_and_inbounds_are_loaded(db_session):
-    session, user_id, engine = db_session
+    session, subscription_uuid, engine = db_session
     user = (
         await session.execute(
-            select(User).options(selectinload(User.groups).selectinload(Group.inbounds)).where(User.id == user_id)
+            select(Subscription)
+            .options(selectinload(Subscription.groups).selectinload(Group.inbounds))
+            .where(Subscription.uuid == subscription_uuid)
         )
     ).scalar_one()
 
@@ -89,16 +100,41 @@ async def test_inbounds_skips_sql_when_groups_and_inbounds_are_loaded(db_session
 
 
 @pytest.mark.asyncio
-async def test_validated_user_uses_lifetime_expression(db_session):
-    session, user_id, _engine = db_session
-    db_user = await get_user_by_id(
+async def test_validated_subscription_uses_lifetime_expression(db_session):
+    session, subscription_uuid, _engine = db_session
+    db_user = await get_subscription_by_uuid(
         session,
-        user_id,
+        subscription_uuid,
         load_next_plan=False,
         load_usage_logs=False,
         load_groups=False,
         load_lifetime_used_traffic=True,
     )
-    user = await SubscriptionOperation.validated_user(db_user)
+    user = await SubscriptionOperation.validated_subscription(db_user)
     assert user.lifetime_used_traffic == 1234
     assert user.inbounds == ["vless-tcp"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_subscription_insert_assigns_independent_uuid4_and_access_nonces(db_session):
+    """Bulk SQL writes must satisfy the same UUID/secret defaults as ORM instances."""
+    session, _subscription_uuid, _engine = db_session
+    # The bulk SQL INSERT path must allocate unique UUID defaults without an
+    # explicit username, numeric key, or pre-chosen UUID in the fixture.
+    existing = set((await session.scalars(select(Subscription.uuid))).all())
+    await session.execute(
+        insert(Subscription),
+        [{"created_at": datetime.now(UTC), "proxy_settings": {}} for _ in range(2)],
+    )
+    await session.commit()
+    subscriptions = (
+        await session.scalars(select(Subscription).where(Subscription.uuid.not_in(existing)))
+    ).all()
+
+    assert len(subscriptions) == 2
+    assert len({item.uuid for item in subscriptions}) == 2
+    assert all(item.uuid.version == 4 for item in subscriptions)
+    assert len({item.access_nonce for item in subscriptions}) == 2
+    assert all(isinstance(item.access_nonce, bytes) and len(item.access_nonce) == 16 for item in subscriptions)
+    assert all(item.entitlement == "payment_required" for item in subscriptions)
+    assert all(item.policy_revision == 0 and item.entitlement_revision == 0 for item in subscriptions)

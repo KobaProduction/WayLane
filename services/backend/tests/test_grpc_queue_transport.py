@@ -8,13 +8,13 @@ from grpclib.client import Channel
 from grpclib.const import Cardinality, Handler, Status
 from grpclib.exceptions import GRPCError
 from grpclib.server import Server
-from waylane_node_bridge.common import service_grpc, service_pb2 as service
 
 from app.node.bridge import QueuedGrpcNode
-from app.node.nats_memory import NatsUserSyncStore
+from app.node.nats_memory import NatsSubscriptionSyncStore
 from app.operation import node as node_operation
 from config import nats_settings
 from tests.test_nats_sync_integration import jetstream, wait_for_keys  # noqa: F401
+from waylane_node_bridge.common import service_grpc, service_pb2 as service
 
 
 async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstream, monkeypatch):  # noqa: F811
@@ -33,13 +33,13 @@ async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstr
             self.calls += 1
             if self.calls == 1:
                 raise GRPCError(Status.UNAVAILABLE, "temporary receiver failure")
-            self.delivered.extend(user.email for user in users)
+            self.delivered.extend(user.subscription_uuid for user in users)
             await stream.send_message(service.Empty())
 
         def __mapping__(self):
             return {
                 "/waylane.node.v1.NodeService/SyncUsersChunked": Handler(
-                    self.receive, Cardinality.STREAM_UNARY, service.UsersChunk, service.Empty
+                    self.receive, Cardinality.STREAM_UNARY, service.SubscriptionsChunk, service.Empty
                 )
             }
 
@@ -47,7 +47,7 @@ async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstr
     server = Server([receiver])
     await server.start("127.0.0.1", 0)
     port = server._server.sockets[0].getsockname()[1]
-    store = NatsUserSyncStore(jetstream.kv)
+    store = NatsSubscriptionSyncStore(jetstream.kv)
     node = QueuedGrpcNode(
         address="127.0.0.1",
         port=port,
@@ -63,7 +63,7 @@ async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstr
     monkeypatch.setattr(node_operation, "needs_shared_bridge_memory", lambda: True)
     monkeypatch.setattr(nats_settings, "node_update_users_batch_size", 100)
     try:
-        await store.enqueue_users("transport", [service.User(email=f"queued-{i}") for i in range(1200)])
+        await store.enqueue_users("transport", [service.Subscription(subscription_uuid=f"queued-{i}") for i in range(1200)])
         await node.connect("0.5.4", "26.3.27")
         await node_operation.NodeOperation._resume_shared_sync(node)
         async with asyncio.timeout(20):

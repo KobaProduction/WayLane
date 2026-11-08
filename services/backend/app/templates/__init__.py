@@ -9,7 +9,7 @@ from .filters import CUSTOM_FILTERS
 
 template_directories = ["app/templates"]
 if template_settings.custom_templates_directory:
-    # User's templates have priority over default templates
+    # Subscription's templates have priority over default templates
     template_directories.insert(0, template_settings.custom_templates_directory)
 
 # Everything rendered here is served as an HTML page, custom templates included.

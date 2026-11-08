@@ -9,15 +9,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
-from app.db.crud.user import _build_user_count_metrics_query, get_users_count_metrics
-from app.db.models import User, UserStatus
+from app.db.crud.subscription import _build_subscription_count_metrics_query, get_subscriptions_count_metrics
+from app.db.models import Subscription, SubscriptionStatus
 
 STATUSES = [
-    UserStatus.active,
-    UserStatus.disabled,
-    UserStatus.on_hold,
-    UserStatus.expired,
-    UserStatus.limited,
+    SubscriptionStatus.active,
+    SubscriptionStatus.disabled,
+    SubscriptionStatus.on_hold,
+    SubscriptionStatus.expired,
+    SubscriptionStatus.limited,
 ]
 
 
@@ -30,7 +30,6 @@ async def seeded_session():
     )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     now = datetime.now(UTC)
-    prefix = uuid4().hex[:8]
 
     try:
         async with engine.begin() as connection:
@@ -39,33 +38,33 @@ async def seeded_session():
         async with session_factory() as session:
             session.add_all(
                 [
-                    User(
-                        username=f"{prefix}_active",
+                    Subscription(
+                        uuid=uuid4(),
                         admin_id=101,
-                        status=UserStatus.active,
+                        status=SubscriptionStatus.active,
                         online_at=now - timedelta(seconds=30),
                     ),
-                    User(
-                        username=f"{prefix}_disabled",
+                    Subscription(
+                        uuid=uuid4(),
                         admin_id=101,
-                        status=UserStatus.disabled,
+                        status=SubscriptionStatus.disabled,
                     ),
-                    User(
-                        username=f"{prefix}_expired",
+                    Subscription(
+                        uuid=uuid4(),
                         admin_id=101,
-                        status=UserStatus.expired,
+                        status=SubscriptionStatus.expired,
                         online_at=now - timedelta(minutes=3),
                     ),
-                    User(
-                        username=f"{prefix}_limited",
+                    Subscription(
+                        uuid=uuid4(),
                         admin_id=202,
-                        status=UserStatus.limited,
+                        status=SubscriptionStatus.limited,
                         online_at=now - timedelta(seconds=45),
                     ),
-                    User(
-                        username=f"{prefix}_on_hold",
+                    Subscription(
+                        uuid=uuid4(),
                         admin_id=202,
-                        status=UserStatus.on_hold,
+                        status=SubscriptionStatus.on_hold,
                     ),
                 ]
             )
@@ -77,7 +76,7 @@ async def seeded_session():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("admin_id", [None, 101])
-async def test_user_count_metrics_use_one_select(seeded_session, admin_id):
+async def test_subscription_count_metrics_use_one_select(seeded_session, admin_id):
     engine, session = seeded_session
     select_count = 0
 
@@ -88,7 +87,7 @@ async def test_user_count_metrics_use_one_select(seeded_session, admin_id):
 
     event.listen(engine.sync_engine, "before_cursor_execute", count_selects)
     try:
-        await get_users_count_metrics(session, STATUSES, timedelta(minutes=2), admin_id=admin_id)
+        await get_subscriptions_count_metrics(session, STATUSES, timedelta(minutes=2), admin_id=admin_id)
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", count_selects)
 
@@ -96,10 +95,10 @@ async def test_user_count_metrics_use_one_select(seeded_session, admin_id):
 
 
 @pytest.mark.asyncio
-async def test_global_user_count_metrics_are_complete(seeded_session):
+async def test_global_subscription_count_metrics_are_complete(seeded_session):
     _, session = seeded_session
 
-    counts, online = await get_users_count_metrics(session, STATUSES, timedelta(minutes=2))
+    counts, online = await get_subscriptions_count_metrics(session, STATUSES, timedelta(minutes=2))
 
     assert counts == {
         "active": 1,
@@ -113,10 +112,10 @@ async def test_global_user_count_metrics_are_complete(seeded_session):
 
 
 @pytest.mark.asyncio
-async def test_user_count_metrics_are_scoped_to_admin(seeded_session):
+async def test_subscription_count_metrics_are_scoped_to_admin(seeded_session):
     _, session = seeded_session
 
-    counts, online = await get_users_count_metrics(session, STATUSES, timedelta(minutes=2), admin_id=101)
+    counts, online = await get_subscriptions_count_metrics(session, STATUSES, timedelta(minutes=2), admin_id=101)
 
     assert counts == {
         "active": 1,
@@ -130,10 +129,10 @@ async def test_user_count_metrics_are_scoped_to_admin(seeded_session):
 
 
 @pytest.mark.asyncio
-async def test_user_count_metrics_are_zero_for_unknown_admin(seeded_session):
+async def test_subscription_count_metrics_are_zero_for_unknown_admin(seeded_session):
     _, session = seeded_session
 
-    counts, online = await get_users_count_metrics(session, STATUSES, timedelta(minutes=2), admin_id=999)
+    counts, online = await get_subscriptions_count_metrics(session, STATUSES, timedelta(minutes=2), admin_id=999)
 
     assert counts == {
         "active": 0,
@@ -147,23 +146,23 @@ async def test_user_count_metrics_are_zero_for_unknown_admin(seeded_session):
 
 
 @pytest.mark.parametrize("dialect", [sqlite.dialect(), postgresql.dialect(), mysql.dialect()])
-def test_global_user_count_metrics_query_compiles_for_supported_dialects(dialect):
-    stmt = _build_user_count_metrics_query(STATUSES, datetime(2026, 1, 1, tzinfo=UTC))
+def test_global_subscription_count_metrics_query_compiles_for_supported_dialects(dialect):
+    stmt = _build_subscription_count_metrics_query(STATUSES, datetime(2026, 1, 1, tzinfo=UTC))
 
     sql = str(stmt.compile(dialect=dialect)).upper()
 
     assert sql.startswith("SELECT")
     assert "COUNT(CASE WHEN" in sql
-    assert sql.count("FROM USERS") == 1
+    assert sql.count("FROM SUBSCRIPTIONS") == 1
 
 
 @pytest.mark.parametrize("dialect", [sqlite.dialect(), postgresql.dialect(), mysql.dialect()])
-def test_scoped_user_count_metrics_query_compiles_to_indexable_counts(dialect):
-    stmt = _build_user_count_metrics_query(STATUSES, datetime(2026, 1, 1, tzinfo=UTC), admin_id=1)
+def test_scoped_subscription_count_metrics_query_compiles_to_indexable_counts(dialect):
+    stmt = _build_subscription_count_metrics_query(STATUSES, datetime(2026, 1, 1, tzinfo=UTC), admin_id=1)
 
     sql = str(stmt.compile(dialect=dialect)).upper()
 
     assert sql.startswith("SELECT")
     assert "COUNT(CASE WHEN" not in sql
     assert sql.count("SELECT COUNT(") == len(STATUSES) + 1
-    assert sql.count("USERS.ADMIN_ID =") == len(STATUSES) + 1
+    assert sql.count("SUBSCRIPTIONS.ADMIN_ID =") == len(STATUSES) + 1

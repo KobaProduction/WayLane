@@ -3,14 +3,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from waylane_node_bridge import Health
-from waylane_node_bridge.storage import LifecycleStatus
 
 from app.db.models import NodeStatus
 from app.jobs import node_checker
 from app.node import manager_sync
 from app.operation import node as node_operation
 from app.operation.node import NodeOperation
+from waylane_node_bridge import Health
+from waylane_node_bridge.storage import LifecycleStatus
 
 
 class FakeDB:
@@ -46,7 +46,7 @@ def setup_node(monkeypatch, *, health=Health.HEALTHY, state=None):
     monkeypatch.setattr(node_operation.node_manager, "update_node", AsyncMock(return_value=node))
     monkeypatch.setattr(node_operation.node_manager, "get_node", AsyncMock(return_value=node))
     reads = AsyncMock(return_value=[object()])
-    monkeypatch.setattr(node_operation, "core_users", reads)
+    monkeypatch.setattr(node_operation, "core_subscriptions", reads)
     monkeypatch.setattr(node_operation, "update_node_status", AsyncMock())
     monkeypatch.setattr(node_operation, "bulk_update_node_status", AsyncMock())
     monkeypatch.setattr(node_operation.notification, "connect_node", AsyncMock())
@@ -120,7 +120,7 @@ async def test_deferred_core_reads_do_not_overlap_on_shared_session(monkeypatch)
         return inbound_tags
 
     reads = AsyncMock(side_effect=read)
-    monkeypatch.setattr(node_operation, "core_users", reads)
+    monkeypatch.setattr(node_operation, "core_subscriptions", reads)
     _, loaders = await NodeOperation._get_core_users_map(FakeDB(), {1, 2}, lazy=True)
     reads.assert_not_awaited()
     result = await asyncio.gather(loaders[1](), loaders[2](), loaders[1](), loaders[2]())

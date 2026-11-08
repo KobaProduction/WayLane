@@ -1,4 +1,3 @@
-import html
 import re
 from datetime import UTC, datetime as dt, timezone as tz
 from string import Formatter
@@ -154,25 +153,6 @@ def format_validation_error(error: ValidationError) -> str:
     return "\n".join([e["loc"][0].replace("_", " ").capitalize() + ": " + e["msg"] for e in error.errors()])
 
 
-def escape_tg_html(list: tuple[str]) -> tuple[str]:
-    """Escapes HTML special characters for the telegram HTML parser."""
-    return tuple(html.escape(text) for text in list)
-
-
-def escape_ds_markdown(text: str) -> str:
-    """Escapes markdown special characters for Discord."""
-    # Other characters like >, |, [, ], (, ) are often handled by Discord's parser
-    # or are part of specific markdown constructs (e.g., links, blockquotes)
-    # that might not need general escaping.
-    escape_chars = r"[*_`~]"
-    return re.sub(escape_chars, r"\\\g<0>", text)
-
-
-def escape_ds_markdown_list(list: tuple[str]) -> tuple[str]:
-    """Escapes markdown special characters for Discord."""
-    return tuple(escape_ds_markdown(text) for text in list)
-
-
 # None of these belongs in a host address or URL prefix, and subscription pages print those values
 # inside HTML attributes and scripts, where any of them could break out of the markup.
 _MARKUP_UNSAFE_CHARS = frozenset("<>\"'`\\")
@@ -184,13 +164,13 @@ def has_markup_unsafe_chars(value: str) -> bool:
 
 
 # Largest width or precision a host format field may use. str.format_map builds the padded result before anything
-# can check its size, so "{USERNAME:>1000000000}" would allocate a gigabyte on save and on every subscription render.
+# can check its size, so "{SUBSCRIPTION_UUID:>1000000000}" would allocate a gigabyte on save and on every subscription render.
 MAX_FORMAT_SPEC_NUMBER = 256
 
 
 def has_oversized_format_spec(value: str) -> bool:
     """Returns True if a format field in value has a width or precision above MAX_FORMAT_SPEC_NUMBER, or a nested
-    field (``{USERNAME:>{PAD}}``) whose size is only known when it renders."""
+    field (``{SUBSCRIPTION_UUID:>{PAD}}``) whose size is only known when it renders."""
     try:
         specs = [spec for _, field, spec, _ in Formatter().parse(value) if field is not None and spec]
     except ValueError:

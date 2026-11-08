@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select
@@ -17,11 +18,16 @@ from sqlalchemy.pool import NullPool
 
 from app.db import base
 from app.db.crud.node import remove_node
-from app.db.models import Admin, AdminRole, AdminStatus, Node, NodeUsage, NodeUserUsage, System, User
+from app.db.models import Admin, AdminRole, AdminStatus, Node, NodeSubscriptionUsage, NodeUsage, Subscription, System
 from app.jobs import record_usages
 from app.models.proxy import ProxyTable
 from app.operation import admin_sync
 from config import database_settings
+
+
+def _uid(number: int) -> UUID:
+    """Stable, canonical UUIDv4 used solely to link synthetic telemetry fixtures."""
+    return UUID(int=int(number), version=4)
 
 
 class DummyNode:
@@ -49,10 +55,10 @@ def test_prepare_node_user_usage_params_aggregates_nonzero_deltas():
     params = record_usages._prepare_node_user_usage_params(
         {
             7: [
-                {"uid": "11", "value": 5},
-                {"uid": "11", "value": 3},
-                {"uid": "12", "value": 0},
-                {"uid": "13", "value": -2},
+                {"uid": str(_uid(11)), "value": 5},
+                {"uid": str(_uid(11)), "value": 3},
+                {"uid": str(_uid(12)), "value": 0},
+                {"uid": str(_uid(13)), "value": -2},
             ]
         },
         {7: 2},
@@ -60,8 +66,8 @@ def test_prepare_node_user_usage_params_aggregates_nonzero_deltas():
     )
 
     assert params == [
-        {"uid": 11, "value": 16, "node_id": 7, "created_at": bucket},
-        {"uid": 13, "value": -4, "node_id": 7, "created_at": bucket},
+        {"uid": _uid(11), "value": 16, "node_id": 7, "created_at": bucket},
+        {"uid": _uid(13), "value": -4, "node_id": 7, "created_at": bucket},
     ]
 
 
@@ -75,11 +81,11 @@ async def test_postgres_history_writes_the_first_sample_immediately(monkeypatch:
     monkeypatch.setattr(record_usages, "_write_node_user_usage_params", write_params)
     monkeypatch.setattr(record_usages, "_monotonic_now", lambda: 100.0)
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
 
     write_params.assert_awaited_once_with(
         "postgresql",
-        [{"uid": 11, "value": 5, "node_id": 7, "created_at": bucket}],
+        [{"uid": _uid(11), "value": 5, "node_id": 7, "created_at": bucket}],
     )
     assert not record_usages._pending_user_usage_history
     assert record_usages._user_usage_history_last_flush == 100.0
@@ -99,13 +105,13 @@ async def test_postgres_history_coalesces_until_flush_interval(monkeypatch: pyte
     monkeypatch.setattr(record_usages, "_monotonic_now", lambda: next(monotonic_values))
     monkeypatch.setattr(record_usages.usage_settings, "user_usage_history_flush_interval", 60)
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 7}]}, {7: 1})
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 9}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 7}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 9}]}, {7: 1})
 
     write_params.assert_awaited_once_with(
         "postgresql",
-        [{"uid": 11, "value": 21, "node_id": 7, "created_at": bucket}],
+        [{"uid": _uid(11), "value": 21, "node_id": 7, "created_at": bucket}],
     )
     assert not record_usages._pending_user_usage_history
 
@@ -125,15 +131,15 @@ async def test_postgres_history_flushes_old_bucket_before_rollover(monkeypatch: 
     monkeypatch.setattr(record_usages, "_monotonic_now", lambda: 100.0)
     monkeypatch.setattr(record_usages.usage_settings, "user_usage_history_flush_interval", 60)
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 7}]}, {7: 1})
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 9}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 7}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 9}]}, {7: 1})
 
     write_params.assert_awaited_once_with(
         "postgresql",
-        [{"uid": 11, "value": 12, "node_id": 7, "created_at": old_bucket}],
+        [{"uid": _uid(11), "value": 12, "node_id": 7, "created_at": old_bucket}],
     )
-    assert record_usages._pending_user_usage_history == {(new_bucket, 11, 7): 9}
+    assert record_usages._pending_user_usage_history == {(new_bucket, _uid(11), 7): 9}
 
 
 @pytest.mark.asyncio
@@ -149,19 +155,19 @@ async def test_postgres_history_retains_failed_flush_for_retry(monkeypatch: pyte
     monkeypatch.setattr(record_usages, "_write_node_user_usage_params", write_params)
     monkeypatch.setattr(record_usages, "_monotonic_now", lambda: next(monotonic_values))
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
 
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await record_usages.record_user_stats({7: [{"uid": "11", "value": 7}]}, {7: 1})
+        await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 7}]}, {7: 1})
 
-    assert record_usages._pending_user_usage_history == {(bucket, 11, 7): 12}
+    assert record_usages._pending_user_usage_history == {(bucket, _uid(11), 7): 12}
 
     flushed_rows = await record_usages.flush_user_usage_history_if_due(161.0)
 
     assert flushed_rows == 1
     assert write_params.await_args_list[1].args == (
         "postgresql",
-        [{"uid": 11, "value": 12, "node_id": 7, "created_at": bucket}],
+        [{"uid": _uid(11), "value": 12, "node_id": 7, "created_at": bucket}],
     )
     assert not record_usages._pending_user_usage_history
 
@@ -182,7 +188,7 @@ async def test_history_write_drops_a_batch_the_database_rejects(monkeypatch: pyt
 
     monkeypatch.setattr(record_usages, "safe_execute", fake_safe_execute)
     caplog.set_level(logging.ERROR)
-    rows = [{"uid": index + 1, "value": 1, "node_id": 7, "created_at": bucket} for index in range(2_000)]
+    rows = [{"uid": _uid(index + 1), "value": 1, "node_id": 7, "created_at": bucket} for index in range(2_000)]
 
     await record_usages._write_node_user_usage_params("mysql", rows)
 
@@ -211,13 +217,13 @@ async def test_postgres_history_drops_rows_the_database_rejects(monkeypatch: pyt
     monkeypatch.setattr(record_usages.usage_settings, "user_usage_history_flush_interval", 60)
     caplog.set_level(logging.ERROR)
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
     # This flush is rejected: retrying the same rows could never succeed, so they are dropped
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 7}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 7}]}, {7: 1})
     assert not record_usages._pending_user_usage_history
     assert "Dropped 1 node user usage history rows" in caplog.text
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 9}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 9}]}, {7: 1})
 
     assert len(executed) == 2
     assert executed[1]["traffic_values"] == [9]
@@ -242,11 +248,11 @@ async def test_postgres_history_caps_buffered_buckets_after_failed_flushes(monke
     monkeypatch.setattr(record_usages.usage_settings, "user_usage_history_flush_interval", 60)
     caplog.set_level(logging.ERROR)
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
     for _ in buckets[1:]:
         # Every bucket rollover tries to flush the older buckets and fails
         with pytest.raises(OperationalError):
-            await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
+            await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
 
     # Failed flushes keep at most an hour (6 buckets) of older history next to the current bucket
     pending_buckets = sorted({key[0] for key in record_usages._pending_user_usage_history})
@@ -258,7 +264,7 @@ async def test_postgres_history_caps_buffered_buckets_after_failed_flushes(monke
 async def test_due_history_flushes_without_a_new_usage_sample(monkeypatch: pytest.MonkeyPatch):
     bucket = datetime(2026, 8, 14, 18, 30, tzinfo=UTC)
     write_params = AsyncMock()
-    record_usages._pending_user_usage_history[(bucket, 11, 7)] = 5
+    record_usages._pending_user_usage_history[(bucket, _uid(11), 7)] = 5
     record_usages._user_usage_history_last_flush = 100.0
 
     monkeypatch.setattr(record_usages, "_write_node_user_usage_params", write_params)
@@ -271,7 +277,7 @@ async def test_due_history_flushes_without_a_new_usage_sample(monkeypatch: pytes
     assert flushed_rows == 1
     write_params.assert_awaited_once_with(
         "postgresql",
-        [{"uid": 11, "value": 5, "node_id": 7, "created_at": bucket}],
+        [{"uid": _uid(11), "value": 5, "node_id": 7, "created_at": bucket}],
     )
     assert not record_usages._pending_user_usage_history
 
@@ -290,8 +296,8 @@ async def test_postgres_history_omits_cross_cycle_net_zero_values(monkeypatch: p
     monkeypatch.setattr(record_usages, "_monotonic_now", lambda: next(monotonic_values))
     monkeypatch.setattr(record_usages.usage_settings, "user_usage_history_flush_interval", 60)
 
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": 5}]}, {7: 1})
-    await record_usages.record_user_stats({7: [{"uid": "11", "value": -5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": 5}]}, {7: 1})
+    await record_usages.record_user_stats({7: [{"uid": str(_uid(11)), "value": -5}]}, {7: 1})
     flushed_rows = await record_usages.flush_user_usage_history_if_due(160.0)
 
     assert flushed_rows == 0
@@ -302,7 +308,7 @@ async def test_postgres_history_omits_cross_cycle_net_zero_values(monkeypatch: p
 @pytest.mark.asyncio
 async def test_non_postgres_history_keeps_immediate_path(monkeypatch: pytest.MonkeyPatch):
     immediate_write = AsyncMock()
-    node_params = {7: [{"uid": "11", "value": 5}]}
+    node_params = {7: [{"uid": str(_uid(11)), "value": 5}]}
     coefficients = {7: 1}
 
     monkeypatch.setattr(record_usages, "get_dialect", AsyncMock(return_value="sqlite"))
@@ -317,7 +323,7 @@ async def test_non_postgres_history_keeps_immediate_path(monkeypatch: pytest.Mon
 async def test_shutdown_flushes_pending_postgres_history(monkeypatch: pytest.MonkeyPatch):
     bucket = datetime(2026, 8, 14, 18, 30, tzinfo=UTC)
     write_params = AsyncMock()
-    record_usages._pending_user_usage_history[(bucket, 11, 7)] = 5
+    record_usages._pending_user_usage_history[(bucket, _uid(11), 7)] = 5
 
     monkeypatch.setattr(record_usages, "_write_node_user_usage_params", write_params)
     monkeypatch.setattr(record_usages, "_monotonic_now", lambda: 120.0)
@@ -326,43 +332,43 @@ async def test_shutdown_flushes_pending_postgres_history(monkeypatch: pytest.Mon
 
     write_params.assert_awaited_once_with(
         "postgresql",
-        [{"uid": 11, "value": 5, "node_id": 7, "created_at": bucket}],
+        [{"uid": _uid(11), "value": 5, "node_id": 7, "created_at": bucket}],
     )
     assert not record_usages._pending_user_usage_history
 
 
 def test_postgres_user_traffic_update_uses_one_unnest_statement():
     usage_params = [
-        {"uid": 1, "value": 10},
-        {"uid": 2, "value": 20},
-        {"uid": 1, "value": 30},
+        {"uid": _uid(1), "value": 10},
+        {"uid": _uid(2), "value": 20},
+        {"uid": _uid(1), "value": 30},
     ]
 
     stmt, params = record_usages.build_user_traffic_update("postgresql", usage_params)
     sql = str(stmt.compile(dialect=postgresql.dialect()))
 
-    assert "UPDATE users" in sql
+    assert "UPDATE subscriptions" in sql
     assert "FROM unnest" in sql
     assert "online_at" not in sql
-    assert params == {"uids": [1, 2], "traffic_values": [40, 20]}
+    assert params == {"uids": [_uid(1), _uid(2)], "traffic_values": [40, 20]}
 
 
 def test_mysql_user_traffic_update_uses_one_case_statement():
     usage_params = [
-        {"uid": 1, "value": 10},
-        {"uid": 2, "value": 20},
-        {"uid": 1, "value": 30},
+        {"uid": _uid(1), "value": 10},
+        {"uid": _uid(2), "value": 20},
+        {"uid": _uid(1), "value": 30},
     ]
 
     stmt, params = record_usages.build_user_traffic_update("mysql", usage_params)
     compiled = stmt.compile(dialect=mysql.dialect(), compile_kwargs={"render_postcompile": True})
     sql = str(compiled)
 
-    assert "UPDATE users" in sql
-    assert "CASE users.id WHEN" in sql
+    assert "UPDATE subscriptions" in sql
+    assert "CASE subscriptions.uuid WHEN" in sql
     assert params is None
     # Repeated users are summed: a CASE only uses the first matching WHEN
-    assert list(compiled.params.values()) == [1, 40, 2, 20, 1, 2]
+    assert list(compiled.params.values()) == [_uid(1), 40, _uid(2), 20, _uid(1), _uid(2)]
 
 
 def _get_test_database_url(tmp_path) -> str:
@@ -443,24 +449,26 @@ async def session_factory(monkeypatch: pytest.MonkeyPatch, tmp_path):
 @pytest.mark.asyncio
 async def test_touch_users_online_at_throttles_indexed_timestamp_writes(session_factory):
     async with session_factory() as session:
-        user = User(username="online-write-throttle")
+        user = Subscription(uuid=uuid4())
         session.add(user)
         await session.commit()
-        user_id = user.id
+        subscription_uuid = user.uuid
 
     # Whole seconds: MySQL stores DATETIME without fractions and rounds them, which would
     # move the stored time past the 60 second cutoff the test checks
     first_seen = datetime.now(UTC).replace(microsecond=0)
-    await record_usages.touch_users_online_at([user_id], first_seen)
+    await record_usages.touch_users_online_at([subscription_uuid], first_seen)
 
     async def get_online_at():
         async with session_factory() as session:
-            return (await session.execute(select(User.online_at).where(User.id == user_id))).scalar_one()
+            return (
+                await session.execute(select(Subscription.online_at).where(Subscription.uuid == subscription_uuid))
+            ).scalar_one()
 
     initial_online_at = await get_online_at()
-    await record_usages.touch_users_online_at([user_id], first_seen + timedelta(seconds=30))
+    await record_usages.touch_users_online_at([subscription_uuid], first_seen + timedelta(seconds=30))
     throttled_online_at = await get_online_at()
-    await record_usages.touch_users_online_at([user_id], first_seen + timedelta(seconds=60))
+    await record_usages.touch_users_online_at([subscription_uuid], first_seen + timedelta(seconds=60))
     refreshed_online_at = await get_online_at()
 
     assert initial_online_at == throttled_online_at
@@ -475,11 +483,11 @@ async def test_record_user_usages_updates_users_and_admins(monkeypatch: pytest.M
         await session.flush()
         admin_id = admin.id
 
-        user_one = User(username="user1", admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
-        user_two = User(username="user2", admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
+        user_one = Subscription(uuid=uuid4(), admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
+        user_two = Subscription(uuid=uuid4(), admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
         session.add_all([user_one, user_two])
         await session.flush()
-        user_one_id, user_two_id = user_one.id, user_two.id
+        user_one_id, user_two_id = user_one.uuid, user_two.uuid
 
         node_one = Node(
             name="node-1",
@@ -536,10 +544,12 @@ async def test_record_user_usages_updates_users_and_admins(monkeypatch: pytest.M
 
     async with session_factory() as session:
         users_result = await session.execute(
-            select(User.id, User.used_traffic, User.online_at).where(User.id.in_([user_one_id, user_two_id]))
+            select(Subscription.uuid, Subscription.used_traffic, Subscription.online_at).where(
+                Subscription.uuid.in_([user_one_id, user_two_id])
+            )
         )
         user_rows = users_result.all()
-        user_totals = {row.id: (row.used_traffic, row.online_at) for row in user_rows}
+        user_totals = {row.uuid: (row.used_traffic, row.online_at) for row in user_rows}
 
         assert user_totals[user_one_id][0] == 275
         assert user_totals[user_two_id][0] == 100
@@ -551,10 +561,14 @@ async def test_record_user_usages_updates_users_and_admins(monkeypatch: pytest.M
         assert admin_used == 375
 
         node_usage_rows = await session.execute(
-            select(NodeUserUsage.node_id, NodeUserUsage.user_id, NodeUserUsage.used_traffic)
+            select(
+                NodeSubscriptionUsage.node_id,
+                NodeSubscriptionUsage.subscription_uuid,
+                NodeSubscriptionUsage.used_traffic,
+            )
         )
         node_usage_records = node_usage_rows.all()
-        usage_pairs = {(row.node_id, row.user_id) for row in node_usage_records}
+        usage_pairs = {(row.node_id, row.subscription_uuid) for row in node_usage_records}
         assert usage_pairs == {
             (node_one_id, user_one_id),
             (node_one_id, user_two_id),
@@ -564,10 +578,10 @@ async def test_record_user_usages_updates_users_and_admins(monkeypatch: pytest.M
         aggregated_usage = defaultdict(int)
         for record in node_usage_records:
             assert record.used_traffic > 0
-            aggregated_usage[record.user_id] += record.used_traffic
+            aggregated_usage[record.subscription_uuid] += record.used_traffic
 
-        for user_id, (total_usage, _) in user_totals.items():
-            assert aggregated_usage[user_id] == total_usage
+        for subscription_uuid, (total_usage, _) in user_totals.items():
+            assert aggregated_usage[subscription_uuid] == total_usage
 
 
 @pytest.mark.asyncio
@@ -578,7 +592,7 @@ async def test_record_user_usages_limits_overused_admin(monkeypatch: pytest.Monk
         await session.flush()
         admin_id = admin.id
 
-        user = User(username="limited-user", admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
+        user = Subscription(uuid=uuid4(), admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
         node = Node(
             name="node-1",
             address="10.0.0.1",
@@ -590,7 +604,7 @@ async def test_record_user_usages_limits_overused_admin(monkeypatch: pytest.Monk
         )
         session.add_all([user, node])
         await session.flush()
-        user_id, node_id = user.id, node.id
+        subscription_uuid, node_id = user.uuid, node.id
         await session.commit()
 
     monkeypatch.setattr(
@@ -598,12 +612,12 @@ async def test_record_user_usages_limits_overused_admin(monkeypatch: pytest.Monk
     )
 
     async def fake_get_users_stats(_: DummyNode, node_id: int | None = None):
-        return [{"uid": str(user_id), "value": 150}]
+        return [{"uid": str(subscription_uuid), "value": 150}]
 
-    remove_users = AsyncMock()
+    remove_subscriptions = AsyncMock()
     monkeypatch.setattr(record_usages, "get_users_stats", fake_get_users_stats)
     monkeypatch.setattr(record_usages.usage_settings, "disable_recording_node_usage", True)
-    monkeypatch.setattr("app.operation.admin_sync.sync_remove_users", remove_users)
+    monkeypatch.setattr("app.operation.admin_sync.sync_remove_subscriptions", remove_subscriptions)
 
     await record_usages.record_user_usages()
 
@@ -611,7 +625,7 @@ async def test_record_user_usages_limits_overused_admin(monkeypatch: pytest.Monk
         admin_status = await session.execute(select(Admin.status).where(Admin.id == admin_id))
         assert admin_status.scalar_one() == AdminStatus.limited
 
-    remove_users.assert_awaited_once()
+    remove_subscriptions.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -624,8 +638,8 @@ async def test_usage_cycles_match_a_reference_model(monkeypatch: pytest.MonkeyPa
         session.add_all(admins)
         await session.flush()
         users = [
-            User(
-                username=f"user-{index}",
+            Subscription(
+                uuid=uuid4(),
                 admin_id=admins[index % 3].id if index % 3 < 2 else None,
                 proxy_settings=ProxyTable().dict(no_obj=True),
             )
@@ -646,19 +660,21 @@ async def test_usage_cycles_match_a_reference_model(monkeypatch: pytest.MonkeyPa
         system = System(uplink=0, downlink=0)
         session.add_all([*users, *nodes, system])
         await session.flush()
-        user_admin = {user.id: user.admin_id for user in users}
+        user_admin = {user.uuid: user.admin_id for user in users}
         admin_ids = [admin.id for admin in admins]
         node_ids = [node.id for node in nodes]
         await session.commit()
 
-    user_ids = sorted(user_admin)
-    missing_user_id = user_ids[-1] + 10_000
+    subscription_uuids = sorted(user_admin)
+    missing_user_id = uuid4()
     coefficients = dict(zip(node_ids, (1, 1.5, 0)))
     users_per_node = dict(zip(node_ids, (1_100, 900, 300)))
     cycles = [
         {
-            node_id: [{"uid": uid, "value": rng.randint(1, 10**9)} for uid in rng.sample(user_ids, count)]
-            + [{"uid": missing_user_id, "value": 7}]
+            node_id: [
+                {"uid": str(uid), "value": rng.randint(1, 10**9)} for uid in rng.sample(subscription_uuids, count)
+            ]
+            + [{"uid": str(missing_user_id), "value": 7}]
             for node_id, count in users_per_node.items()
         }
         for _ in range(2)
@@ -695,14 +711,15 @@ async def test_usage_cycles_match_a_reference_model(monkeypatch: pytest.MonkeyPa
     for stats in cycles:
         for node_id, params in stats.items():
             for param in params:
-                if param["uid"] not in user_admin:
+                uid = UUID(param["uid"])
+                if uid not in user_admin:
                     continue
                 value = int(param["value"] * coefficients[node_id])
-                expected_users[param["uid"]] += value
-                if user_admin[param["uid"]]:
-                    expected_admins[user_admin[param["uid"]]] += value
+                expected_users[uid] += value
+                if user_admin[uid]:
+                    expected_admins[user_admin[uid]] += value
                 if value:
-                    expected_history[(param["uid"], node_id)] += value
+                    expected_history[(uid, node_id)] += value
     expected_nodes = {
         node_id: (
             sum(outbound[node_id][0]["up"] for outbound in outbound_cycles),
@@ -712,9 +729,13 @@ async def test_usage_cycles_match_a_reference_model(monkeypatch: pytest.MonkeyPa
     }
 
     async with session_factory() as session:
-        user_rows = (await session.execute(select(User.id, User.used_traffic, User.online_at))).all()
-        assert {row.id: row.used_traffic for row in user_rows} == {uid: expected_users[uid] for uid in user_ids}
-        assert {row.id for row in user_rows if row.online_at is not None} == {
+        user_rows = (
+            await session.execute(select(Subscription.uuid, Subscription.used_traffic, Subscription.online_at))
+        ).all()
+        assert {row.uuid: row.used_traffic for row in user_rows} == {
+            uid: expected_users[uid] for uid in subscription_uuids
+        }
+        assert {row.uuid for row in user_rows if row.online_at is not None} == {
             uid for uid, value in expected_users.items() if value > 0
         }
 
@@ -726,13 +747,18 @@ async def test_usage_cycles_match_a_reference_model(monkeypatch: pytest.MonkeyPa
         history_rows = (
             await session.execute(
                 select(
-                    NodeUserUsage.created_at, NodeUserUsage.user_id, NodeUserUsage.node_id, NodeUserUsage.used_traffic
+                    NodeSubscriptionUsage.created_at,
+                    NodeSubscriptionUsage.subscription_uuid,
+                    NodeSubscriptionUsage.node_id,
+                    NodeSubscriptionUsage.used_traffic,
                 )
             )
         ).all()
         assert len(history_rows) == len(expected_history)
         assert len({row.created_at for row in history_rows}) == 1
-        assert {(row.user_id, row.node_id): row.used_traffic for row in history_rows} == dict(expected_history)
+        assert {(row.subscription_uuid, row.node_id): row.used_traffic for row in history_rows} == dict(
+            expected_history
+        )
 
         node_rows = (await session.execute(select(Node.id, Node.uplink, Node.downlink))).all()
         assert {row.id: (row.uplink, row.downlink) for row in node_rows} == expected_nodes
@@ -752,7 +778,7 @@ async def test_record_user_stats_batched_skips_missing_users(session_factory):
         session.add(admin)
         await session.flush()
 
-        user = User(username="user", admin_id=admin.id, proxy_settings=ProxyTable().dict(no_obj=True))
+        user = Subscription(uuid=uuid4(), admin_id=admin.id, proxy_settings=ProxyTable().dict(no_obj=True))
         node = Node(
             name="node-1",
             address="10.0.0.1",
@@ -764,14 +790,14 @@ async def test_record_user_stats_batched_skips_missing_users(session_factory):
         )
         session.add_all([user, node])
         await session.flush()
-        user_id, node_id = user.id, node.id
-        missing_user_id = user_id + 10_000
+        subscription_uuid, node_id = user.uuid, node.id
+        missing_user_id = uuid4()
         await session.commit()
 
     await record_usages.record_user_stats_batched(
         {
             node_id: [
-                {"uid": str(user_id), "value": 100},
+                {"uid": str(subscription_uuid), "value": 100},
                 {"uid": str(missing_user_id), "value": 200},
             ]
         },
@@ -779,16 +805,18 @@ async def test_record_user_stats_batched_skips_missing_users(session_factory):
     )
 
     async with session_factory() as session:
-        rows = await session.execute(select(NodeUserUsage.user_id, NodeUserUsage.used_traffic))
+        rows = await session.execute(
+            select(NodeSubscriptionUsage.subscription_uuid, NodeSubscriptionUsage.used_traffic)
+        )
         records = rows.all()
 
-    assert records == [(user_id, 100)]
+    assert records == [(subscription_uuid, 100)]
 
 
 @pytest.mark.asyncio
 async def test_node_user_usage_history_skips_deleted_nodes(session_factory):
     async with session_factory() as session:
-        user = User(username="user", proxy_settings=ProxyTable().dict(no_obj=True))
+        user = Subscription(uuid=uuid4(), proxy_settings=ProxyTable().dict(no_obj=True))
         deleted_node = Node(
             name="node-deleted",
             address="10.0.0.1",
@@ -809,7 +837,7 @@ async def test_node_user_usage_history_skips_deleted_nodes(session_factory):
         )
         session.add_all([user, deleted_node, kept_node])
         await session.flush()
-        user_id, deleted_node_id, kept_node_id = user.id, deleted_node.id, kept_node.id
+        subscription_uuid, deleted_node_id, kept_node_id = user.uuid, deleted_node.id, kept_node.id
         await session.commit()
 
     # An admin deletes a node after its stats were read and before they are written
@@ -820,13 +848,13 @@ async def test_node_user_usage_history_skips_deleted_nodes(session_factory):
     await record_usages._write_node_user_usage_params(
         await record_usages.get_dialect(),
         [
-            {"uid": user_id, "value": 100, "node_id": deleted_node_id, "created_at": bucket},
-            {"uid": user_id, "value": 50, "node_id": kept_node_id, "created_at": bucket},
+            {"uid": subscription_uuid, "value": 100, "node_id": deleted_node_id, "created_at": bucket},
+            {"uid": subscription_uuid, "value": 50, "node_id": kept_node_id, "created_at": bucket},
         ],
     )
 
     async with session_factory() as session:
-        rows = await session.execute(select(NodeUserUsage.node_id, NodeUserUsage.used_traffic))
+        rows = await session.execute(select(NodeSubscriptionUsage.node_id, NodeSubscriptionUsage.used_traffic))
         assert rows.all() == [(kept_node_id, 50)]
 
 
@@ -839,7 +867,7 @@ async def test_postgres_history_keeps_flushing_after_a_node_is_deleted(
     monkeypatch: pytest.MonkeyPatch, session_factory
 ):
     async with session_factory() as session:
-        user = User(username="user", proxy_settings=ProxyTable().dict(no_obj=True))
+        user = Subscription(uuid=uuid4(), proxy_settings=ProxyTable().dict(no_obj=True))
         node_a = Node(
             name="node-a",
             address="10.0.0.1",
@@ -860,7 +888,7 @@ async def test_postgres_history_keeps_flushing_after_a_node_is_deleted(
         )
         session.add_all([user, node_a, node_b])
         await session.flush()
-        user_id, node_a_id, node_b_id = user.id, node_a.id, node_b.id
+        subscription_uuid, node_a_id, node_b_id = user.uuid, node_a.id, node_b.id
         await session.commit()
 
     clock = {"t": 1000.0}
@@ -870,11 +898,13 @@ async def test_postgres_history_keeps_flushing_after_a_node_is_deleted(
 
     # The first sample is written at once, the next one is buffered
     await record_usages.record_user_stats(
-        {node_a_id: [{"uid": user_id, "value": 100}], node_b_id: [{"uid": user_id, "value": 100}]}, coefficients
+        {node_a_id: [{"uid": subscription_uuid, "value": 100}], node_b_id: [{"uid": subscription_uuid, "value": 100}]},
+        coefficients,
     )
     clock["t"] += 5
     await record_usages.record_user_stats(
-        {node_a_id: [{"uid": user_id, "value": 50}], node_b_id: [{"uid": user_id, "value": 50}]}, coefficients
+        {node_a_id: [{"uid": subscription_uuid, "value": 50}], node_b_id: [{"uid": subscription_uuid, "value": 50}]},
+        coefficients,
     )
 
     # Node A is deleted while its sample is still buffered
@@ -885,11 +915,13 @@ async def test_postgres_history_keeps_flushing_after_a_node_is_deleted(
     await record_usages.flush_user_usage_history_if_due()
     for _ in range(5):
         clock["t"] += 61
-        await record_usages.record_user_stats({node_b_id: [{"uid": user_id, "value": 10}]}, coefficients)
+        await record_usages.record_user_stats({node_b_id: [{"uid": subscription_uuid, "value": 10}]}, coefficients)
 
     async with session_factory() as session:
         totals = await session.execute(
-            select(NodeUserUsage.node_id, func.sum(NodeUserUsage.used_traffic)).group_by(NodeUserUsage.node_id)
+            select(NodeSubscriptionUsage.node_id, func.sum(NodeSubscriptionUsage.used_traffic)).group_by(
+                NodeSubscriptionUsage.node_id
+            )
         )
         assert dict(totals.all()) == {node_b_id: 200}
     assert not record_usages._pending_user_usage_history
@@ -909,7 +941,7 @@ async def test_record_user_stats_batched_chunks_mysql_batches(monkeypatch: pytes
     monkeypatch.setattr(record_usages, "safe_execute", fake_safe_execute)
     monkeypatch.setattr(record_usages, "_get_time_bucket", lambda: None)
 
-    params = [{"uid": str(index + 1), "value": 1} for index in range(2_501)]
+    params = [{"uid": str(_uid(index + 1)), "value": 1} for index in range(2_501)]
 
     await record_usages.record_user_stats_batched({1: params}, {1: 1})
 
@@ -925,7 +957,7 @@ async def test_record_user_usages_returns_when_no_usage(monkeypatch: pytest.Monk
         await session.flush()
         admin_id = admin.id
 
-        user = User(username="user", admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
+        user = Subscription(uuid=uuid4(), admin_id=admin_id, proxy_settings=ProxyTable().dict(no_obj=True))
         node = Node(
             name="node-1",
             address="10.0.0.1",
@@ -937,7 +969,7 @@ async def test_record_user_usages_returns_when_no_usage(monkeypatch: pytest.Monk
         )
         session.add_all([user, node])
         await session.flush()
-        user_id, node_id = user.id, node.id
+        subscription_uuid, node_id = user.uuid, node.id
         await session.commit()
 
     nodes = [(node_id, DummyNode(node_id))]
@@ -952,13 +984,15 @@ async def test_record_user_usages_returns_when_no_usage(monkeypatch: pytest.Monk
     await record_usages.record_user_usages()
 
     async with session_factory() as session:
-        user_total = await session.execute(select(User.used_traffic).where(User.id == user_id))
+        user_total = await session.execute(
+            select(Subscription.used_traffic).where(Subscription.uuid == subscription_uuid)
+        )
         assert user_total.scalar_one() == 0
 
         admin_total = await session.execute(select(Admin.used_traffic).where(Admin.id == admin_id))
         assert admin_total.scalar_one() == 0
 
-        node_user_usage = await session.execute(select(NodeUserUsage.id))
+        node_user_usage = await session.execute(select(NodeSubscriptionUsage.id))
         assert node_user_usage.first() is None
 
 
@@ -1131,7 +1165,7 @@ async def test_safe_execute_retries_mysql_deadlock(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(record_usages, "get_dialect", AsyncMock(return_value="mysql"))
     monkeypatch.setattr(record_usages.asyncio, "sleep", AsyncMock())
 
-    await record_usages.safe_execute("stmt", [{"uid": 1}])
+    await record_usages.safe_execute("stmt", [{"uid": _uid(1)}])
 
     assert attempts["n"] == 3
 
@@ -1146,7 +1180,7 @@ async def test_safe_execute_raises_after_deadlock_retries(monkeypatch: pytest.Mo
     monkeypatch.setattr(record_usages.asyncio, "sleep", AsyncMock())
 
     with pytest.raises(OperationalError):
-        await record_usages.safe_execute("stmt", [{"uid": 1}], max_retries=3)
+        await record_usages.safe_execute("stmt", [{"uid": _uid(1)}], max_retries=3)
 
 
 @pytest.fixture(autouse=True)
@@ -1169,7 +1203,7 @@ async def test_record_user_usages_skips_when_already_running(monkeypatch: pytest
     await record_usages.record_user_usages()
 
     impl.assert_not_awaited()
-    assert "JOB_RECORD_USER_USAGES_INTERVAL" in caplog.text
+    assert "JOB_RECORD_SUBSCRIPTION_USAGES_INTERVAL" in caplog.text
     assert "UVICORN_WORKERS" in caplog.text
 
 
@@ -1208,7 +1242,7 @@ async def test_record_user_usages_warns_when_slower_than_interval(monkeypatch: p
 
     monkeypatch.setattr(record_usages.time, "monotonic", lambda: clock["t"])
     monkeypatch.setattr(record_usages, "_record_user_usages_impl", impl)
-    monkeypatch.setattr(record_usages.job_settings, "record_user_usages_interval", 10)
+    monkeypatch.setattr(record_usages.job_settings, "record_subscription_usages_interval", 10)
     caplog.set_level(logging.WARNING)
 
     await record_usages.record_user_usages()

@@ -23,13 +23,13 @@ from app.db.models import (
     NodeConnectionType,
     NodeStat,
     NodeStatus,
+    NodeSubscriptionUsage,
     NodeUsage,
     NodeUsageResetLogs,
-    NodeUserUsage,
     ProxyInbound,
-    User,
-    UserStatus,
-    users_groups_association,
+    Subscription,
+    SubscriptionStatus,
+    subscriptions_groups_association,
 )
 from app.models.admin import AdminDetails, AdminRoleData
 from app.models.core import CoreCreate
@@ -42,12 +42,12 @@ from app.models.stats import (
     NodeUsageStat,
     NodeUsageStatsList,
     Period,
-    UserCountMetric,
-    UserCountMetricStat,
-    UserCountMetricStatsList,
+    SubscriptionCountMetric,
+    SubscriptionCountMetricStat,
+    SubscriptionCountMetricStatsList,
 )
-from app.node import user as node_user_module
-from app.node.sync import _blocked_admin_ids_for_users
+from app.node import subscription as node_subscription_module
+from app.node.sync import _blocked_admin_ids_for_subscriptions
 from app.operation import OperatorType
 from app.operation.node import NodeOperation
 from app.routers import node as node_router
@@ -144,7 +144,6 @@ async def test_sync_users_blocked_admin_lookup_is_batched():
     active_username = unique_name("syaa")
     nonblocking_role_name = unique_name("sync_nonblocking_role")
     disabled_nonblocking_role_name = unique_name("sync_disabled_nonblocking_role")
-    user_prefix = unique_name("sync_user")
 
     async with TestSession() as session:
         nonblocking_role = AdminRole(
@@ -202,17 +201,17 @@ async def test_sync_users_blocked_admin_lookup_is_batched():
         await session.flush()
 
         users = [
-            User(username=f"{user_prefix}_blocked_a", admin_id=blocking_admin.id),
-            User(username=f"{user_prefix}_blocked_b", admin_id=blocking_admin.id),
-            User(username=f"{user_prefix}_disabled_blocked", admin_id=disabled_admin.id),
-            User(username=f"{user_prefix}_nonblocking", admin_id=nonblocking_admin.id),
-            User(username=f"{user_prefix}_disabled_nonblocking", admin_id=disabled_nonblocking_admin.id),
-            User(username=f"{user_prefix}_active", admin_id=active_admin.id),
+            Subscription(uuid=uuid4(), admin_id=blocking_admin.id),
+            Subscription(uuid=uuid4(), admin_id=blocking_admin.id),
+            Subscription(uuid=uuid4(), admin_id=disabled_admin.id),
+            Subscription(uuid=uuid4(), admin_id=nonblocking_admin.id),
+            Subscription(uuid=uuid4(), admin_id=disabled_nonblocking_admin.id),
+            Subscription(uuid=uuid4(), admin_id=active_admin.id),
         ]
         session.add_all(users)
         await session.commit()
 
-        user_ids = [user.id for user in users]
+        subscription_uuids = [user.uuid for user in users]
         blocking_admin_id = blocking_admin.id
         disabled_admin_id = disabled_admin.id
         nonblocking_admin_id = nonblocking_admin.id
@@ -229,8 +228,12 @@ async def test_sync_users_blocked_admin_lookup_is_batched():
     event.listen(engine.sync_engine, "before_cursor_execute", count_admin_role_queries)
     try:
         async with TestSession() as session:
-            loaded_users = list((await session.execute(select(User).where(User.id.in_(user_ids)))).scalars().all())
-            blocked_ids = await _blocked_admin_ids_for_users(loaded_users)
+            loaded_users = list(
+                (await session.execute(select(Subscription).where(Subscription.uuid.in_(subscription_uuids))))
+                .scalars()
+                .all()
+            )
+            blocked_ids = await _blocked_admin_ids_for_subscriptions(loaded_users)
 
         assert blocked_ids == {blocking_admin_id, disabled_admin_id}
         assert nonblocking_admin_id not in blocked_ids
@@ -245,7 +248,6 @@ async def test_sync_users_blocked_admin_lookup_is_batched():
 async def test_sync_users_blocked_admin_lookup_uses_preloaded_roles_without_fallback_query():
     blocking_username = unique_name("sylba")
     active_username = unique_name("sylaa")
-    user_prefix = unique_name("sync_loaded_user")
 
     async with TestSession() as session:
         blocking_admin = Admin(
@@ -264,20 +266,22 @@ async def test_sync_users_blocked_admin_lookup_uses_preloaded_roles_without_fall
         await session.flush()
 
         users = [
-            User(username=f"{user_prefix}_blocked", admin_id=blocking_admin.id),
-            User(username=f"{user_prefix}_active", admin_id=active_admin.id),
+            Subscription(uuid=uuid4(), admin_id=blocking_admin.id),
+            Subscription(uuid=uuid4(), admin_id=active_admin.id),
         ]
         session.add_all(users)
         await session.commit()
 
-        user_ids = [user.id for user in users]
+        subscription_uuids = [user.uuid for user in users]
         blocking_admin_id = blocking_admin.id
 
     async with TestSession() as session:
         loaded_users = list(
             (
                 await session.execute(
-                    select(User).options(selectinload(User.admin).selectinload(Admin.role)).where(User.id.in_(user_ids))
+                    select(Subscription)
+                    .options(selectinload(Subscription.admin).selectinload(Admin.role))
+                    .where(Subscription.uuid.in_(subscription_uuids))
                 )
             )
             .unique()
@@ -294,7 +298,7 @@ async def test_sync_users_blocked_admin_lookup_uses_preloaded_roles_without_fall
 
         event.listen(engine.sync_engine, "before_cursor_execute", count_admin_role_queries)
         try:
-            blocked_ids = await _blocked_admin_ids_for_users(loaded_users)
+            blocked_ids = await _blocked_admin_ids_for_subscriptions(loaded_users)
 
             assert blocked_ids == {blocking_admin_id}
             assert query_count == 0
@@ -305,7 +309,6 @@ async def test_sync_users_blocked_admin_lookup_uses_preloaded_roles_without_fall
 @pytest.mark.asyncio
 async def test_sync_users_blocked_admin_lookup_falls_back_when_admin_role_is_not_loaded():
     blocking_username = unique_name("sync_admin_no_role")
-    user_prefix = unique_name("sync_user_no_role")
 
     async with TestSession() as session:
         blocking_admin = Admin(
@@ -317,16 +320,22 @@ async def test_sync_users_blocked_admin_lookup_falls_back_when_admin_role_is_not
         session.add(blocking_admin)
         await session.flush()
 
-        user = User(username=f"{user_prefix}_blocked", admin_id=blocking_admin.id)
+        user = Subscription(uuid=uuid4(), admin_id=blocking_admin.id)
         session.add(user)
         await session.commit()
 
-        user_id = user.id
+        subscription_uuid = user.uuid
         blocking_admin_id = blocking_admin.id
 
     async with TestSession() as session:
         loaded_users = list(
-            (await session.execute(select(User).options(selectinload(User.admin)).where(User.id == user_id)))
+            (
+                await session.execute(
+                    select(Subscription)
+                    .options(selectinload(Subscription.admin))
+                    .where(Subscription.uuid == subscription_uuid)
+                )
+            )
             .unique()
             .scalars()
             .all()
@@ -344,7 +353,7 @@ async def test_sync_users_blocked_admin_lookup_falls_back_when_admin_role_is_not
 
         event.listen(engine.sync_engine, "before_cursor_execute", count_admin_role_queries)
         try:
-            blocked_ids = await _blocked_admin_ids_for_users(loaded_users)
+            blocked_ids = await _blocked_admin_ids_for_subscriptions(loaded_users)
 
             assert blocked_ids == {blocking_admin_id}
             assert query_count == 1
@@ -356,12 +365,14 @@ async def test_sync_users_blocked_admin_lookup_falls_back_when_admin_role_is_not
 async def test_core_users_only_excludes_admins_with_blocking_sync_roles(monkeypatch):
     inbound_tag = unique_name("sync_inbound")
     group_name = unique_name("sync_group")
-    user_prefix = unique_name("sync_core_user")
 
     monkeypatch.setattr(
-        node_user_module,
-        "_serialize_user_for_node",
-        lambda id, user_settings, inbounds, allowed_protocols=None: {"id": id, "inbounds": inbounds},
+        node_subscription_module,
+        "_serialize_subscription_for_node",
+        lambda subscription_uuid, user_settings, inbounds, allowed_protocols=None: {
+            "subscription_uuid": subscription_uuid,
+            "inbounds": inbounds,
+        },
     )
 
     async with TestSession() as session:
@@ -412,88 +423,107 @@ async def test_core_users_only_excludes_admins_with_blocking_sync_roles(monkeypa
         session.add(group)
         await session.flush()
 
-        active_user = User(
-            username=f"{user_prefix}_active",
+        active_user = Subscription(
+            uuid=uuid4(),
+            entitlement="active",
             admin_id=active_admin.id,
             proxy_settings=ProxyTable().dict(no_obj=True),
-            status=UserStatus.active,
+            status=SubscriptionStatus.active,
         )
-        blocked_user = User(
-            username=f"{user_prefix}_blocked",
+        blocked_user = Subscription(
+            uuid=uuid4(),
+            entitlement="active",
             admin_id=blocking_admin.id,
             proxy_settings=ProxyTable().dict(no_obj=True),
-            status=UserStatus.active,
+            status=SubscriptionStatus.active,
         )
-        nonblocked_user = User(
-            username=f"{user_prefix}_nonblocked",
+        nonblocked_user = Subscription(
+            uuid=uuid4(),
+            entitlement="active",
             admin_id=nonblocking_admin.id,
             proxy_settings=ProxyTable().dict(no_obj=True),
-            status=UserStatus.active,
+            status=SubscriptionStatus.active,
         )
         session.add_all([active_user, blocked_user, nonblocked_user])
         await session.flush()
 
         await session.execute(
-            users_groups_association.insert(),
+            subscriptions_groups_association.insert(),
             [
-                {"user_id": active_user.id, "groups_id": group.id},
-                {"user_id": blocked_user.id, "groups_id": group.id},
-                {"user_id": nonblocked_user.id, "groups_id": group.id},
+                {"subscription_uuid": active_user.uuid, "groups_id": group.id},
+                {"subscription_uuid": blocked_user.uuid, "groups_id": group.id},
+                {"subscription_uuid": nonblocked_user.uuid, "groups_id": group.id},
             ],
         )
         await session.commit()
 
-        expected_user_ids = {active_user.id, nonblocked_user.id}
-        blocked_user_id = blocked_user.id
+        expected_subscription_uuids = {active_user.uuid, nonblocked_user.uuid}
+        blocked_subscription_uuid = blocked_user.uuid
 
     async with TestSession() as session:
-        users = await node_user_module.core_users(session, inbound_tags=[inbound_tag])
+        users = await node_subscription_module.core_subscriptions(session, inbound_tags=[inbound_tag])
 
-    synced_user_ids = {user["id"] for user in users}
-    assert synced_user_ids == expected_user_ids
-    assert blocked_user_id not in synced_user_ids
+    synced_subscription_uuids = {user["subscription_uuid"] for user in users}
+    assert synced_subscription_uuids == expected_subscription_uuids
+    assert blocked_subscription_uuid not in synced_subscription_uuids
     assert all(user["inbounds"] == [inbound_tag] for user in users)
 
 
 async def test_core_users_can_be_restricted_to_ids_with_one_query(monkeypatch):
     inbound_tag = unique_name("state_inbound")
-    user_prefix = unique_name("state_user")
     monkeypatch.setattr(
-        node_user_module,
-        "_serialize_user_for_node",
-        lambda id, user_settings, inbounds, allowed_protocols=None: {"id": id, "inbounds": inbounds},
+        node_subscription_module,
+        "_serialize_subscription_for_node",
+        lambda subscription_uuid, user_settings, inbounds, allowed_protocols=None: {
+            "subscription_uuid": subscription_uuid,
+            "inbounds": inbounds,
+        },
     )
     async with TestSession() as session:
         inbound = ProxyInbound(tag=inbound_tag)
         group = Group(name=unique_name("state_group"), inbounds=[inbound])
         session.add(group)
         await session.flush()
-        active = User(
-            username=f"{user_prefix}_active", proxy_settings=ProxyTable().dict(no_obj=True), status=UserStatus.active
-        )
-        disabled = User(
-            username=f"{user_prefix}_disabled",
+        active = Subscription(
+            uuid=uuid4(),
+            entitlement="active",
             proxy_settings=ProxyTable().dict(no_obj=True),
-            status=UserStatus.disabled,
+            status=SubscriptionStatus.active,
         )
-        other = User(
-            username=f"{user_prefix}_other", proxy_settings=ProxyTable().dict(no_obj=True), status=UserStatus.active
+        disabled = Subscription(
+            uuid=uuid4(),
+            entitlement="active",
+            proxy_settings=ProxyTable().dict(no_obj=True),
+            status=SubscriptionStatus.disabled,
+        )
+        other = Subscription(
+            uuid=uuid4(),
+            entitlement="active",
+            proxy_settings=ProxyTable().dict(no_obj=True),
+            status=SubscriptionStatus.active,
         )
         session.add_all([active, disabled, other])
         await session.flush()
         await session.execute(
-            users_groups_association.insert(),
-            [{"user_id": u.id, "groups_id": group.id} for u in (active, disabled, other)],
+            subscriptions_groups_association.insert(),
+            [{"subscription_uuid": u.uuid, "groups_id": group.id} for u in (active, disabled, other)],
         )
         await session.commit()
-        ids = {"active": active.id, "disabled": disabled.id, "other": other.id}
+        ids = {"active": active.uuid, "disabled": disabled.uuid, "other": other.uuid}
 
     async with TestSession() as session:
-        users = await node_user_module.core_users(session, user_ids=[ids["active"], ids["disabled"], 10**9])
-        assert {user["id"] for user in users} == {ids["active"]}  # disabled and unknown ids are not carried
+        users = await node_subscription_module.core_subscriptions(
+            session, subscription_uuids=[ids["active"], ids["disabled"], uuid4()]
+        )
+        assert {user["subscription_uuid"] for user in users} == {
+            ids["active"]
+        }  # disabled and unknown ids are not carried
         assert users[0]["inbounds"] == [inbound_tag]
-        assert await node_user_module.core_users(session, user_ids=[]) == []
-        everyone = {user["id"] for user in await node_user_module.core_users(session, inbound_tags=[inbound_tag])}
+        assert await node_subscription_module.core_subscriptions(session, subscription_uuids=[]) == []
+        everyone = {
+            user["subscription_uuid"]
+            for user in await node_subscription_module.core_subscriptions(session, inbound_tags=[inbound_tag])
+        }
         assert {ids["active"], ids["other"]} <= everyone
 
 
@@ -505,23 +535,28 @@ async def test_current_state_reads_at_burst_scale_use_few_indexed_statements(mon
     from tests.api import GetTestDB
 
     inbound_tag = unique_name("burst_inbound")
-    user_prefix = unique_name("burst_user")
     async with TestSession() as session:
         inbound = ProxyInbound(tag=inbound_tag)
         group = Group(name=unique_name("burst_group"), inbounds=[inbound])
         session.add(group)
         await session.flush()
         users = [
-            User(username=f"{user_prefix}_{n}", proxy_settings=ProxyTable().dict(no_obj=True), status=UserStatus.active)
+            Subscription(
+                uuid=uuid4(),
+                entitlement="active",
+                proxy_settings=ProxyTable().dict(no_obj=True),
+                status=SubscriptionStatus.active,
+            )
             for n in range(1200)
         ]
         session.add_all(users)
         await session.flush()
         await session.execute(
-            users_groups_association.insert(), [{"user_id": u.id, "groups_id": group.id} for u in users]
+            subscriptions_groups_association.insert(),
+            [{"subscription_uuid": u.uuid, "groups_id": group.id} for u in users],
         )
         await session.commit()
-        ids = [u.id for u in users]
+        ids = [u.uuid for u in users]
 
     statements: list[str] = []
 
@@ -536,7 +571,7 @@ async def test_current_state_reads_at_burst_scale_use_few_indexed_statements(mon
         # Same 100 users delivered to 12 nodes at once (one API burst fanning out).
         started = time.perf_counter()
         results = await asyncio.gather(
-            *(node_sync.refresh_node_users(str(node), [str(i) for i in ids[:100]]) for node in range(12))
+            *(node_sync.refresh_node_subscriptions(str(node), [str(i) for i in ids[:100]]) for node in range(12))
         )
         same_users_seconds = time.perf_counter() - started
         same_users_statements = len(statements)
@@ -546,7 +581,7 @@ async def test_current_state_reads_at_burst_scale_use_few_indexed_statements(mon
         started = time.perf_counter()
         results = await asyncio.gather(
             *(
-                node_sync.refresh_node_users(str(node), [str(i) for i in ids[node * 100 : (node + 1) * 100]])
+                node_sync.refresh_node_subscriptions(str(node), [str(i) for i in ids[node * 100 : (node + 1) * 100]])
                 for node in range(12)
             )
         )
@@ -636,15 +671,15 @@ def usage_stats_payload() -> NodeUsageStatsList:
     )
 
 
-def user_count_metric_stats_payload() -> UserCountMetricStatsList:
+def user_count_metric_stats_payload() -> SubscriptionCountMetricStatsList:
     start = datetime(2024, 1, 1, tzinfo=UTC)
     end = start + timedelta(days=1)
-    return UserCountMetricStatsList(
-        metric=UserCountMetric.online,
+    return SubscriptionCountMetricStatsList(
+        metric=SubscriptionCountMetric.online,
         start=start,
         end=end,
         period=Period.day,
-        stats={1: [UserCountMetricStat(count=3, period_start=start)]},
+        stats={1: [SubscriptionCountMetricStat(count=3, period_start=start)]},
     )
 
 
@@ -764,7 +799,7 @@ def test_get_user_count_metric_passes_filters(access_token, node_operator_mock):
     start = datetime(2024, 2, 1, tzinfo=UTC)
     end = start + timedelta(days=7)
     response = client.get(
-        "/api/node/user_counts/online",
+        "/api/node/subscription_counts/online",
         headers=auth_headers(access_token),
         params={
             "start": start.isoformat(),
@@ -778,7 +813,7 @@ def test_get_user_count_metric_passes_filters(access_token, node_operator_mock):
     assert response.json() == counts.model_dump(mode="json")
 
     awaited_kwargs = node_operator_mock.get_user_count_metric.await_args.kwargs
-    assert awaited_kwargs["metric"] == UserCountMetric.online
+    assert awaited_kwargs["metric"] == SubscriptionCountMetric.online
     query = awaited_kwargs["query"]
     assert query.node_id == 5
     assert query.group_by_node is True
@@ -789,13 +824,13 @@ def test_get_user_count_metric_passes_filters(access_token, node_operator_mock):
 
 def test_get_user_count_metric_rejects_status_metric_node_scope(access_token, node_operator_mock):
     response = client.get(
-        "/api/node/user_counts/limited",
+        "/api/node/subscription_counts/limited",
         headers=auth_headers(access_token),
         params={"period": "day", "group_by_node": True},
     )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "Only online user counts" in response.json()["detail"]
+    assert "Only online subscription counts" in response.json()["detail"]
     node_operator_mock.get_user_count_metric.assert_not_called()
 
 
@@ -1379,15 +1414,15 @@ async def test_remove_node_deletes_associated_usage_tables():
         db_node = await db_create_node(session, node_model)
         node_id = db_node.id
 
-        user = User(username=unique_name("bulk_user"), proxy_settings={})
+        user = Subscription(uuid=uuid4(), proxy_settings={})
         session.add(user)
         await session.commit()
         await session.refresh(user)
 
         now = datetime.now(UTC)
         user_usages = [
-            NodeUserUsage(
-                user_id=user.id,
+            NodeSubscriptionUsage(
+                subscription_uuid=user.uuid,
                 node_id=node_id,
                 created_at=now + timedelta(minutes=idx),
                 used_traffic=idx + 1,
@@ -1429,7 +1464,7 @@ async def test_remove_node_deletes_associated_usage_tables():
         async def count_rows(model):
             return await session.scalar(select(func.count()).select_from(model).where(model.node_id == node_id))
 
-        assert await count_rows(NodeUserUsage) == len(user_usages)
+        assert await count_rows(NodeSubscriptionUsage) == len(user_usages)
         assert await count_rows(NodeUsage) == len(node_usages)
         assert await count_rows(NodeUsageResetLogs) == len(reset_logs)
         assert await count_rows(NodeStat) == len(node_stats)
@@ -1437,7 +1472,7 @@ async def test_remove_node_deletes_associated_usage_tables():
         db_node = await session.get(Node, node_id)
         await db_remove_node(session, db_node)
 
-        assert await count_rows(NodeUserUsage) == 0
+        assert await count_rows(NodeSubscriptionUsage) == 0
         assert await count_rows(NodeUsage) == 0
         assert await count_rows(NodeUsageResetLogs) == 0
         assert await count_rows(NodeStat) == 0

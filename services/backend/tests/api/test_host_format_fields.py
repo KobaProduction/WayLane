@@ -15,10 +15,8 @@ from tests.api.helpers import (
     auth_headers,
     create_core,
     create_group,
-    create_user,
     delete_core,
     delete_group,
-    delete_user,
     unique_name,
 )
 
@@ -29,27 +27,27 @@ UNRENDERABLE_VALUES = [
     ("path", "/ws/{0}"),
     ("path", "/ws/{}"),
     ("sni", ["cdn{.example.com"]),
-    ("host", ["{USERNAME.missing}.example.com"]),
+    ("host", ["{SUBSCRIPTION_UUID.missing}.example.com"]),
     ("address", ["edge}.example.com"]),
-    ("remark", "{USERNAME[0]}"),
-    ("remark", "{USERNAME.upper}"),
+    ("remark", "{SUBSCRIPTION_UUID[0]}"),
+    ("remark", "{SUBSCRIPTION_UUID.upper}"),
 ]
 
 # str.format_map builds the padded result first, so a width like 1000000000 would allocate a gigabyte on every render
 OVERSIZED_FORMAT_VALUES = [
-    ("path", "/ws/{USERNAME:>100000}"),
-    ("sni", ["{USERNAME:.100000}.example.com"]),
-    ("host", ["{USERNAME:0300}.example.com"]),
+    ("path", "/ws/{SUBSCRIPTION_UUID:>100000}"),
+    ("sni", ["{SUBSCRIPTION_UUID:.100000}.example.com"]),
+    ("host", ["{SUBSCRIPTION_UUID:0300}.example.com"]),
     ("address", ["{SERVER_IP:^257}"]),
-    ("remark", "{USERNAME:^100000}"),
+    ("remark", "{SUBSCRIPTION_UUID:^100000}"),
 ]
 
 # !r and !a wrap the value in quotes: an address with quotes is skipped as unsafe, the other fields break
 QUOTING_CONVERSION_VALUES = [
     ("address", ["{SERVER_IP!r}"]),
-    ("sni", ["{USERNAME!r}.example.com"]),
-    ("host", ["{USERNAME!a}.example.com"]),
-    ("path", "/ws/{USERNAME!a}"),
+    ("sni", ["{SUBSCRIPTION_UUID!r}.example.com"]),
+    ("host", ["{SUBSCRIPTION_UUID!a}.example.com"]),
+    ("path", "/ws/{SUBSCRIPTION_UUID!a}"),
 ]
 
 
@@ -114,11 +112,11 @@ def test_host_with_format_variables_is_accepted(access_token):
     headers = auth_headers(access_token)
     core = create_core(access_token)
     payload = _host_payload(
-        remark="{USERNAME:>256} {USERNAME!r} {{literal}} {CUSTOM_VAR}",
+        remark="{SUBSCRIPTION_UUID:>256} {SUBSCRIPTION_UUID!r} {{literal}} {CUSTOM_VAR}",
         address=["{SERVER_IP!s}"],
-        sni=["{USERNAME}.example.com"],
+        sni=["{SUBSCRIPTION_UUID}.example.com"],
         host=["cdn.example.com"],
-        path="/ws/{USERNAME}?ed={DAYS_LEFT:>4}",
+        path="/ws/{SUBSCRIPTION_UUID}?ed={DAYS_LEFT:>4}",
     )
     try:
         response = client.post("/api/host", headers=headers, json=payload)
@@ -138,11 +136,11 @@ async def _store_unvalidated_fields(host_id: int, **fields) -> None:
         await host_manager.add_hosts(db, await get_hosts(db=db))
 
 
-def test_subscription_survives_stored_host_with_unrenderable_fields(access_token):
+def test_subscription_survives_stored_host_with_unrenderable_fields(access_token, active_subscription_factory):
     headers = auth_headers(access_token)
     core = create_core(access_token)
     group = create_group(access_token, inbound_tags=[INBOUND_TAG])
-    user = create_user(access_token, group_ids=[group["id"]])
+    user = active_subscription_factory(group_ids=[group["id"]])
     host_ids = []
     try:
         for address in ("good.example.com", "broken.example.com"):
@@ -152,44 +150,44 @@ def test_subscription_survives_stored_host_with_unrenderable_fields(access_token
         asyncio.run(
             _store_unvalidated_fields(
                 host_ids[1],
-                remark="{USERNAME[99]}",
+                remark="{SUBSCRIPTION_UUID[99]}",
                 address={"edge}.example.com"},
                 sni={"cdn{.example.com"},
-                host={"{USERNAME.missing}.example.com"},
+                host={"{SUBSCRIPTION_UUID.missing}.example.com"},
                 path="/ws/{0}",
             )
         )
 
         for client_type in ("links", "links_base64", "xray", "sing_box", "clash", "clash_meta"):
             config_cache.clear_sub_config_cache()
-            response = client.get(f"{user['subscription_url']}/{client_type}")
+            response = client.get(f"{user['url']}/{client_type}")
             assert response.status_code == status.HTTP_200_OK, (client_type, response.text)
         config_cache.clear_sub_config_cache()
         # The healthy host is still served next to the broken one
-        assert "good.example.com" in client.get(f"{user['subscription_url']}/links").text
+        assert "good.example.com" in client.get(f"{user['url']}/links").text
     finally:
         for host_id in host_ids:
             client.delete(f"/api/host/{host_id}", headers=headers)
-        delete_user(access_token, user["username"])
+        client.delete(f"/api/subscriptions/{user['uuid']}", headers=auth_headers(access_token))
         delete_group(access_token, group["id"])
         delete_core(access_token, core["id"])
 
 
 def test_format_dynamic_value_keeps_values_the_variables_cannot_fill():
-    variables = defaultdict(lambda: "<missing>", {"USERNAME": "bob"})
-    request = {"headers": {"Host": ["{USERNAME}.example.com", "{USERNAME.x}", "{USERNAME[9]}", "/ws{", "{0}"]}}
+    variables = defaultdict(lambda: "<missing>", {"SUBSCRIPTION_UUID": "bob"})
+    request = {"headers": {"Host": ["{SUBSCRIPTION_UUID}.example.com", "{SUBSCRIPTION_UUID.x}", "{SUBSCRIPTION_UUID[9]}", "/ws{", "{0}"]}}
 
     assert _format_dynamic_value(request, variables) == {
-        "headers": {"Host": ["bob.example.com", "{USERNAME.x}", "{USERNAME[9]}", "/ws{", "{0}"]}
+        "headers": {"Host": ["bob.example.com", "{SUBSCRIPTION_UUID.x}", "{SUBSCRIPTION_UUID[9]}", "/ws{", "{0}"]}
     }
 
 
 def test_format_dynamic_value_does_not_pad_oversized_widths():
     """A stored oversized width (saved before the check) is kept as raw text instead of being padded on every render."""
-    variables = defaultdict(lambda: "<missing>", {"USERNAME": "bob", "PAD": "100000"})
-    oversized = ["{USERNAME:>100000}", "{USERNAME:.100000}", "{USERNAME:>{PAD}}"]
+    variables = defaultdict(lambda: "<missing>", {"SUBSCRIPTION_UUID": "bob", "PAD": "100000"})
+    oversized = ["{SUBSCRIPTION_UUID:>100000}", "{SUBSCRIPTION_UUID:.100000}", "{SUBSCRIPTION_UUID:>{PAD}}"]
 
     assert _format_dynamic_value(oversized, variables) == oversized
-    assert _format_dynamic_value("{USERNAME:>5}|{USERNAME:.2}|{USERNAME:0>256}", variables) == (
+    assert _format_dynamic_value("{SUBSCRIPTION_UUID:>5}|{SUBSCRIPTION_UUID:.2}|{SUBSCRIPTION_UUID:0>256}", variables) == (
         f"  bob|bo|{'0' * 253}bob"
     )

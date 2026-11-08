@@ -1,6 +1,7 @@
 import base64
 from copy import deepcopy
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -9,7 +10,7 @@ from app.core.xray import XRayConfig
 from app.db.crud.wireguard import wg_core_interfaces, wg_core_tags, wg_namespaces
 from app.models.core import CoreType
 from app.models.protocol import ProxyProtocol
-from app.node.user import _serialize_user_for_node
+from app.node.subscription import _serialize_subscription_for_node
 from app.utils.crypto import generate_wireguard_keypair
 
 
@@ -62,13 +63,14 @@ def test_xray_wireguard_metadata_and_node_credentials(encoding):
     assert restored.inbounds_by_tag == parsed.inbounds_by_tag
     assert restored.protocols == parsed.protocols
 
-    user = _serialize_user_for_node(
-        42,
+    subscription_uuid = uuid4()
+    user = _serialize_subscription_for_node(
+        subscription_uuid,
         {"wireguard": {"public_key": public, "peer_ips": ["10.90.0.2/32", "fd90::2/128"]}},
         parsed.inbounds,
         parsed.protocols,
     )
-    assert user.email == "42"
+    assert user.subscription_uuid == str(subscription_uuid)
     assert list(user.inbounds) == ["xray-wg"]
     assert user.proxies.wireguard.public_key == public
     assert list(user.proxies.wireguard.peer_ips) == ["10.90.0.2/32", "fd90::2/128"]

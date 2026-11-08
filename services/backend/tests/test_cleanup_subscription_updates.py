@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import event, insert, select
 
-from app.db.models import User, UserSubscriptionUpdate
+from app.db.models import Subscription, SubscriptionUpdate
 from app.jobs import cleanup_subscription_updates as job
 from app.models.proxy import ProxyTable
 from tests.test_record_usages import reset_user_usage_history_buffer, session_factory  # noqa: F401
@@ -35,40 +36,40 @@ def cleanup_db(session_factory, monkeypatch: pytest.MonkeyPatch):  # noqa: F811
     return session_factory
 
 
-async def _seed(session_factory, rows_per_user: list[int], prefix: str) -> dict[int, list[int]]:  # noqa: F811
+async def _seed(session_factory, rows_per_user: list[int], prefix: str) -> dict[UUID, list[int]]:  # noqa: F811
     """Give each user its number of updates, one second apart; return their ids newest first."""
     now = datetime.now(UTC).replace(microsecond=0)
     async with session_factory() as db:
         users = [
-            User(username=f"{prefix}{index}", proxy_settings=ProxyTable().dict(no_obj=True))
+            Subscription(uuid=uuid4(), proxy_settings=ProxyTable().dict(no_obj=True))
             for index in range(len(rows_per_user))
         ]
         db.add_all(users)
         await db.flush()
         rows = [
-            {"user_id": user.id, "user_agent": "v2rayNG/1.8", "created_at": now - timedelta(seconds=age)}
+            {"subscription_uuid": user.uuid, "user_agent": "v2rayNG/1.8", "created_at": now - timedelta(seconds=age)}
             for user, count in zip(users, rows_per_user)
             for age in range(count)
         ]
         if rows:
-            await db.execute(insert(UserSubscriptionUpdate), rows)
+            await db.execute(insert(SubscriptionUpdate), rows)
         await db.commit()
-        user_ids = [user.id for user in users]
-    return await _updates_by_user(session_factory, user_ids)
+        subscription_uuids = [user.uuid for user in users]
+    return await _updates_by_user(session_factory, subscription_uuids)
 
 
-async def _updates_by_user(session_factory, user_ids: list[int]) -> dict[int, list[int]]:  # noqa: F811
+async def _updates_by_user(session_factory, subscription_uuids: list[UUID]) -> dict[UUID, list[int]]:  # noqa: F811
     async with session_factory() as db:
         rows = (
             await db.execute(
-                select(UserSubscriptionUpdate.user_id, UserSubscriptionUpdate.id)
-                .where(UserSubscriptionUpdate.user_id.in_(user_ids))
-                .order_by(UserSubscriptionUpdate.created_at.desc())
+                select(SubscriptionUpdate.subscription_uuid, SubscriptionUpdate.id)
+                .where(SubscriptionUpdate.subscription_uuid.in_(subscription_uuids))
+                .order_by(SubscriptionUpdate.created_at.desc())
             )
         ).all()
-    updates = {user_id: [] for user_id in user_ids}
+    updates = {subscription_uuid: [] for subscription_uuid in subscription_uuids}
     for row in rows:
-        updates[row.user_id].append(row.id)
+        updates[row.subscription_uuid].append(row.id)
     return updates
 
 
@@ -76,10 +77,10 @@ async def _updates_by_user(session_factory, user_ids: list[int]) -> dict[int, li
 async def test_cleanup_keeps_the_newest_updates_of_each_user(cleanup_db):
     before = await _seed(cleanup_db, [LIMIT + 4, LIMIT + 1, LIMIT, 1, 0], "keep")
 
-    await job.cleanup_user_subscription_updates()
+    await job.cleanup_subscription_updates()
 
     after = await _updates_by_user(cleanup_db, list(before))
-    assert after == {user_id: ids[:LIMIT] for user_id, ids in before.items()}
+    assert after == {subscription_uuid: ids[:LIMIT] for subscription_uuid, ids in before.items()}
 
 
 @pytest.mark.asyncio
@@ -95,7 +96,7 @@ async def test_cleanup_statement_does_not_grow_with_users(cleanup_db):
 
         event.listen(sync_engine, "before_cursor_execute", count)
         try:
-            await job.cleanup_user_subscription_updates()
+            await job.cleanup_subscription_updates()
         finally:
             event.remove(sync_engine, "before_cursor_execute", count)
         # (statements, most bind parameters in one statement): asyncpg rejects more than 32767 parameters

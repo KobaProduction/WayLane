@@ -14,14 +14,14 @@ import logging
 import os
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from sqlalchemy import and_, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import GetDB
-from app.db.models import User
+from app.db.models import Subscription
 from app.db.subscription_firewall import subscription_device_events
 from app.subscription.firewall import load_config
 
@@ -57,12 +57,16 @@ def due_event_filter(now: datetime):
     )
 
 
-
 def validate_webhook_url(url: str) -> str:
     """Forbid redirects, credentials and private-address SSRF in production."""
     parts = urlsplit(url)
-    if (parts.scheme not in ("https", "http") or not parts.hostname or
-            parts.username or parts.password or parts.fragment):
+    if (
+        parts.scheme not in ("https", "http")
+        or not parts.hostname
+        or parts.username
+        or parts.password
+        or parts.fragment
+    ):
         raise ValueError("Webhook requires a valid HTTP(S) URL without credentials/fragment")
     host = parts.hostname.lower()
     try:
@@ -73,8 +77,11 @@ def validate_webhook_url(url: str) -> str:
     # Legacy bot/webhook receivers may be exposed only on an internal Coolify
     # network. Require explicit server-side host allowlisting, never a blind
     # exemption for private IPs or localhost based on a submitted URL.
-    trusted = {value.strip().lower() for value in
-               os.getenv("WAYLANE_WEBHOOK_ALLOWED_INTERNAL_HOSTS", "").split(",") if value.strip()}
+    trusted = {
+        value.strip().lower()
+        for value in os.getenv("WAYLANE_WEBHOOK_ALLOWED_INTERNAL_HOSTS", "").split(",")
+        if value.strip()
+    }
     allow_internal = host in trusted or (local_dev and host in ("localhost", "127.0.0.1", "::1"))
     if parts.scheme != "https" and not allow_internal:
         raise ValueError("Webhook URL must use HTTPS or an explicitly allowlisted internal host")
@@ -85,28 +92,36 @@ def validate_webhook_url(url: str) -> str:
     return url
 
 
-async def enqueue_device_event(db: AsyncSession, event_type: str, user_id: int,
-                               hwid: str | None, details: dict | None = None) -> str | None:
+async def enqueue_device_event(
+    db: AsyncSession, event_type: str, subscription_uuid: UUID, hwid: str | None, details: dict | None = None
+) -> str | None:
     # Do not permanently accumulate HWID data or webhooks while the feature is
     # disabled. When enabled, delivery failures remain durably retriable.
     if not (await load_config(db))["webhook_enabled"]:
         return None
-    # A callback identifies the *provider user*, not a commercial user or
-    # device registration owned by the consumer. Do not disclose raw HWIDs to
-    # external webhook receivers: WayLane remains their sole owner.
-    username = await db.scalar(select(User.username).where(User.id == user_id))
-    if not username:
+    # Only the canonical UUID crosses the provider boundary. Numeric database
+    # keys, legacy usernames, and raw HWIDs never leave WayLane.
+    subscription_uuid = await db.scalar(select(Subscription.uuid).where(Subscription.uuid == subscription_uuid))
+    if subscription_uuid is None:
         return None
     event_id = str(uuid4())
     payload = {
-        "id": event_id, "type": event_type, "user_id": user_id,
-        "username": username, "details": details or {},
+        "id": event_id,
+        "type": event_type,
+        "subscription_uuid": str(subscription_uuid),
+        "details": details or {},
         "occurred_at": datetime.now(UTC).isoformat(),
     }
-    await db.execute(insert(subscription_device_events).values(
-        id=event_id, event_type=event_type, user_id=user_id,
-        hwid=hwid, payload=payload, status="pending",
-    ))
+    await db.execute(
+        insert(subscription_device_events).values(
+            id=event_id,
+            event_type=event_type,
+            subscription_uuid=subscription_uuid,
+            hwid=hwid,
+            payload=payload,
+            status="pending",
+        )
+    )
     return event_id
 
 
@@ -133,7 +148,8 @@ async def deliver_device_event(event_id: str, *, force: bool = False) -> bool:
                     subscription_device_events.c.lease_until < now,
                 ),
             )
-            if force else due_event_filter(now)
+            if force
+            else due_event_filter(now)
         )
         stmt = (
             update(subscription_device_events)
@@ -169,13 +185,17 @@ async def deliver_device_event(event_id: str, *, force: bool = False) -> bool:
         timestamp = str(int(datetime.now(UTC).timestamp()))
         signature = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
         async with httpx.AsyncClient(timeout=5, trust_env=False, follow_redirects=False) as client:
-            response = await client.post(url, content=body, headers={
-                "Content-Type": "application/json",
-                "X-WayLane-Event": payload["type"],
-                "X-WayLane-Event-ID": payload["id"],
-                "X-WayLane-Timestamp": timestamp,
-                "X-WayLane-Signature": "sha256=" + signature,
-            })
+            response = await client.post(
+                url,
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-WayLane-Event": payload["type"],
+                    "X-WayLane-Event-ID": payload["id"],
+                    "X-WayLane-Timestamp": timestamp,
+                    "X-WayLane-Signature": "sha256=" + signature,
+                },
+            )
         response.raise_for_status()
         ok = True
         error = None
@@ -190,9 +210,7 @@ async def deliver_device_event(event_id: str, *, force: bool = False) -> bool:
 
     finished_at = datetime.now(UTC)
     exhausted = not ok and attempt >= MAX_ATTEMPTS
-    next_attempt_at = None if ok or exhausted else (
-        finished_at + timedelta(seconds=retry_delay_seconds(attempt))
-    )
+    next_attempt_at = None if ok or exhausted else (finished_at + timedelta(seconds=retry_delay_seconds(attempt)))
     async with GetDB() as db:
         finalized = await db.execute(
             update(subscription_device_events)
@@ -203,7 +221,8 @@ async def deliver_device_event(event_id: str, *, force: bool = False) -> bool:
             )
             .values(
                 status="delivered" if ok else ("exhausted" if exhausted else "failed"),
-                lease_until=None, delivery_token=None,
+                lease_until=None,
+                delivery_token=None,
                 next_attempt_at=next_attempt_at,
                 last_error=error,
                 delivered_at=finished_at if ok else None,
@@ -214,12 +233,17 @@ async def deliver_device_event(event_id: str, *, force: bool = False) -> bool:
         if exhausted:
             logger.error(
                 "Device webhook exhausted retries: event_id=%s attempts=%s reason=%s",
-                event_id, attempt, error,
+                event_id,
+                attempt,
+                error,
             )
         elif not ok:
             logger.warning(
                 "Device webhook delivery failed: event_id=%s attempt=%s reason=%s next_retry_at=%s",
-                event_id, attempt, error, next_attempt_at.isoformat(),
+                event_id,
+                attempt,
+                error,
+                next_attempt_at.isoformat(),
             )
         else:
             logger.info("Device webhook delivered: event_id=%s attempt=%s", event_id, attempt)
@@ -228,11 +252,13 @@ async def deliver_device_event(event_id: str, *, force: bool = False) -> bool:
 
 def dispatch_after_commit(event_id: str) -> None:
     """Start one attempt on the active request loop; durable DB row survives crashes."""
+
     async def attempt():
         try:
             await deliver_device_event(event_id)
         except Exception:
             logger.exception("Device webhook event failed (id=%s)", event_id)
+
     asyncio.create_task(attempt())
 
 
@@ -254,8 +280,10 @@ async def retry_due_device_events(limit: int = RETRY_BATCH_LIMIT) -> dict:
                 ),
             )
             .values(
-                status="exhausted", lease_until=None,
-                delivery_token=None, next_attempt_at=None,
+                status="exhausted",
+                lease_until=None,
+                delivery_token=None,
+                next_attempt_at=None,
             )
         )
         if finished.rowcount:
@@ -264,19 +292,21 @@ async def retry_due_device_events(limit: int = RETRY_BATCH_LIMIT) -> dict:
         settings = await load_config(db)
         if not settings["webhook_enabled"] or not settings["webhook_url"]:
             return {"selected": 0, "delivered": 0, "failed": 0}
-        events = (await db.scalars(
-            select(subscription_device_events.c.id)
-            .where(
-                due_event_filter(now),
-                subscription_device_events.c.attempts < MAX_ATTEMPTS,
+        events = (
+            await db.scalars(
+                select(subscription_device_events.c.id)
+                .where(
+                    due_event_filter(now),
+                    subscription_device_events.c.attempts < MAX_ATTEMPTS,
+                )
+                .order_by(
+                    subscription_device_events.c.next_attempt_at,
+                    subscription_device_events.c.created_at,
+                    subscription_device_events.c.id,
+                )
+                .limit(max(1, min(limit, 100)))
             )
-            .order_by(
-                subscription_device_events.c.next_attempt_at,
-                subscription_device_events.c.created_at,
-                subscription_device_events.c.id,
-            )
-            .limit(max(1, min(limit, 100)))
-        )).all()
+        ).all()
     semaphore = asyncio.Semaphore(RETRY_CONCURRENCY)
 
     async def attempt(event_id: str) -> bool:
@@ -287,8 +317,9 @@ async def retry_due_device_events(limit: int = RETRY_BATCH_LIMIT) -> dict:
                 # A failed row stays pending or leased until expiry; do not
                 # stop unrelated events because one delivery encounters an
                 # unexpected DB/transport error. Never log raw event payloads.
-                logger.error("Device webhook retry worker error: event_id=%s error_type=%s",
-                             event_id, type(exc).__name__)
+                logger.error(
+                    "Device webhook retry worker error: event_id=%s error_type=%s", event_id, type(exc).__name__
+                )
                 return False
 
     results = await asyncio.gather(*(attempt(event_id) for event_id in events))
@@ -296,7 +327,9 @@ async def retry_due_device_events(limit: int = RETRY_BATCH_LIMIT) -> dict:
     if events:
         logger.info(
             "Device webhook retry batch: selected=%s delivered=%s deferred_or_failed=%s",
-            len(events), delivered, len(events) - delivered,
+            len(events),
+            delivered,
+            len(events) - delivered,
         )
     return {"selected": len(events), "delivered": delivered, "failed": len(events) - delivered}
 
@@ -311,8 +344,12 @@ async def requeue_exhausted_event(event_id: str) -> bool:
                 subscription_device_events.c.status == "exhausted",
             )
             .values(
-                status="pending", attempts=0, last_error=None,
-                next_attempt_at=None, lease_until=None, delivery_token=None,
+                status="pending",
+                attempts=0,
+                last_error=None,
+                next_attempt_at=None,
+                lease_until=None,
+                delivery_token=None,
             )
         )
         await db.commit()
@@ -324,18 +361,20 @@ async def requeue_exhausted_event(event_id: str) -> bool:
 async def retry_pending_events(limit: int = 50) -> dict:
     """Explicit admin replay of pending/failed events without their backoff delay."""
     async with GetDB() as db:
-        events = (await db.scalars(
-            select(subscription_device_events.c.id)
-            .where(
-                subscription_device_events.c.status.in_(("pending", "failed")),
-                subscription_device_events.c.attempts < MAX_ATTEMPTS,
+        events = (
+            await db.scalars(
+                select(subscription_device_events.c.id)
+                .where(
+                    subscription_device_events.c.status.in_(("pending", "failed")),
+                    subscription_device_events.c.attempts < MAX_ATTEMPTS,
+                )
+                .order_by(
+                    subscription_device_events.c.created_at,
+                    subscription_device_events.c.id,
+                )
+                .limit(max(1, min(limit, 100)))
             )
-            .order_by(
-                subscription_device_events.c.created_at,
-                subscription_device_events.c.id,
-            )
-            .limit(max(1, min(limit, 100)))
-        )).all()
+        ).all()
     delivered = 0
     for event_id in events:
         delivered += bool(await deliver_device_event(event_id, force=True))
@@ -369,9 +408,12 @@ async def check_legacy_device_access(
         "subscription": token,
         "ip": ip,
         "hwid": {
-            "user_agent": user_agent, "hwid": hwid,
-            "os": device_os or "", "os_version": os_version or "",
-            "device_locale": "", "app_version": "",
+            "user_agent": user_agent,
+            "hwid": hwid,
+            "os": device_os or "",
+            "os_version": os_version or "",
+            "device_locale": "",
+            "app_version": "",
         },
     }
     try:
@@ -380,10 +422,11 @@ async def check_legacy_device_access(
         if response.status_code != 200:
             return
         status = response.json().get("status", "BOT_ERROR")
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         return
     if status in ("LIMIT_DEVICES", "ACCESS_DENIED"):
         from fastapi import HTTPException
+
         if status == "LIMIT_DEVICES":
             raise HTTPException(403, "Device limit reached")
         raise HTTPException(403, "Access denied by device-check webhook")

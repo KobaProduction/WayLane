@@ -1,4 +1,4 @@
-"""Node payloads carry every inbound tag of a user on every database.
+"""Node payloads carry every inbound tag of an entitled subscription on every database.
 
 MySQL cuts GROUP_CONCAT output at group_concat_max_len, 1024 bytes by default.
 Locally this runs on in-memory SQLite; with TEST_FROM set (CI's PostgreSQL,
@@ -11,13 +11,20 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest_asyncio
-from sqlalchemy import delete, insert
+from sqlalchemy import delete, insert, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.db import base
-from app.db.models import Group, ProxyInbound, User, UserStatus, inbounds_groups_association, users_groups_association
-from app.node.user import core_users
+from app.db.models import (
+    Group,
+    ProxyInbound,
+    Subscription,
+    SubscriptionStatus,
+    inbounds_groups_association,
+    subscriptions_groups_association,
+)
+from app.node.subscription import core_subscriptions
 
 
 # On the test's loop, so the teardown can still close the connections it opened.
@@ -38,7 +45,7 @@ async def session_factory():
         await base.engine.dispose()
 
 
-async def test_user_with_many_inbounds_gets_every_tag(session_factory):
+async def test_entitled_subscription_with_many_inbounds_gets_every_tag(session_factory):
     suffix = uuid4().hex[:8]
     # 40 tags of 31 characters: 1279 bytes once joined, past MySQL's default limit.
     tags = [f"VLESS-TCP-REALITY-{suffix}-{i:04d}" for i in range(40)]
@@ -52,33 +59,52 @@ async def test_user_with_many_inbounds_gets_every_tag(session_factory):
             insert(inbounds_groups_association),
             [{"inbound_id": inbound_id, "group_id": group_id} for inbound_id in inbound_ids],
         )
-        user_id = (
+        subscription_uuid = (
             await db.execute(
-                insert(User).values(
-                    username=f"many-{suffix}",
-                    status=UserStatus.active,
+                insert(Subscription).values(
+                    uuid=uuid4(),
+                    status=SubscriptionStatus.active,
+                    entitlement="active",
                     created_at=datetime.now(UTC),
                     proxy_settings={"vless": {"id": str(uuid4())}},
                 )
             )
         ).inserted_primary_key[0]
-        await db.execute(insert(users_groups_association).values(user_id=user_id, groups_id=group_id))
+        await db.execute(
+            insert(subscriptions_groups_association).values(subscription_uuid=subscription_uuid, groups_id=group_id)
+        )
         await db.commit()
 
     try:
         async with session_factory() as db:
             # The Start shape (one core's tags) and the delivery refresh shape (user ids).
-            [start] = await core_users(db, inbound_tags=tags)
-            [refresh] = await core_users(db, user_ids=[user_id])
+            [start] = await core_subscriptions(db, inbound_tags=tags)
+            [refresh] = await core_subscriptions(db, subscription_uuids=[subscription_uuid])
         assert sorted(start.inbounds) == tags
         assert sorted(refresh.inbounds) == tags
+        # Same technically-active subscription must disappear immediately
+        # when VPN Core suspends commercial entitlement.
+        async with session_factory() as db:
+            await db.execute(
+                update(Subscription)
+                .where(Subscription.uuid == subscription_uuid)
+                .values(entitlement="payment_required")
+            )
+            await db.commit()
+        async with session_factory() as db:
+            assert await core_subscriptions(db, inbound_tags=tags) == []
+            assert await core_subscriptions(db, subscription_uuids=[subscription_uuid]) == []
     finally:
         async with session_factory() as db:
-            await db.execute(delete(users_groups_association).where(users_groups_association.c.user_id == user_id))
+            await db.execute(
+                delete(subscriptions_groups_association).where(
+                    subscriptions_groups_association.c.subscription_uuid == subscription_uuid
+                )
+            )
             await db.execute(
                 delete(inbounds_groups_association).where(inbounds_groups_association.c.group_id == group_id)
             )
-            await db.execute(delete(User).where(User.id == user_id))
+            await db.execute(delete(Subscription).where(Subscription.uuid == subscription_uuid))
             await db.execute(delete(ProxyInbound).where(ProxyInbound.id.in_(inbound_ids)))
             await db.execute(delete(Group).where(Group.id == group_id))
             await db.commit()

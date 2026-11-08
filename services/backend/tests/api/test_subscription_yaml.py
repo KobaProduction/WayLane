@@ -10,28 +10,26 @@ from tests.api.helpers import (
     auth_headers,
     create_core,
     create_group,
-    create_user,
     delete_core,
     delete_group,
-    delete_user,
     get_inbound_details,
 )
 
 
 @pytest.mark.skipif(not yaml.__with_libyaml__, reason="libyaml is not available")
-def test_clash_subscriptions_match_pure_yaml_dumper(access_token, monkeypatch):
+def test_clash_subscriptions_match_pure_yaml_dumper(access_token, active_subscription_factory, monkeypatch):
     headers = auth_headers(access_token)
     core = create_core(access_token)
     details = get_inbound_details(access_token)
     group = create_group(access_token, inbound_tags=[detail["tag"] for detail in details])
-    user = create_user(access_token, group_ids=[group["id"]])
+    user = active_subscription_factory(group_ids=[group["id"]])
     host_ids = []
     fast_dumper = filters._FastDumper
 
     try:
         for index, detail in enumerate(details):
             payload = {
-                "remark": f"🇩🇪 {{USERNAME}} {detail['tag']} ✅ {{DATA_LEFT}} 🚀",
+                "remark": f"🇩🇪 {{SUBSCRIPTION_UUID}} {detail['tag']} ✅ {{DATA_LEFT}} 🚀",
                 "address": [f"198.51.100.{index + 1}"],
                 "port": 443,
                 "inbound_tag": detail["tag"],
@@ -50,7 +48,7 @@ def test_clash_subscriptions_match_pure_yaml_dumper(access_token, monkeypatch):
                 config_cache.clear_sub_config_cache()
                 # Reality short ids are picked at random per render
                 random.seed(1052)
-                response = client.get(f"{user['subscription_url']}/{client_type}")
+                response = client.get(f"{user['url']}/{client_type}")
                 assert response.status_code == 200
                 bodies.append(response.content)
 
@@ -60,6 +58,6 @@ def test_clash_subscriptions_match_pure_yaml_dumper(access_token, monkeypatch):
         monkeypatch.setattr(filters, "_FastDumper", fast_dumper)
         for host_id in host_ids:
             client.delete(f"/api/host/{host_id}", headers=headers)
-        delete_user(access_token, user["username"])
+        client.delete(f"/api/subscriptions/{user['uuid']}", headers=auth_headers(access_token))
         delete_group(access_token, group["id"])
         delete_core(access_token, core["id"])

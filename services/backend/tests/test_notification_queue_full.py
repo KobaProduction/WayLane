@@ -4,11 +4,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from nats.js.errors import NotFoundError, ServiceUnavailableError
 
-from app.jobs import review_users
+from app.jobs import review_subscriptions
 from app.models.settings import Webhook, WebhookInfo
 from app.notification import queue_manager, webhook as webhook_notification
 from app.notification.nats_queue import InMemoryNotificationQueue, NatsNotificationQueue
@@ -19,9 +20,8 @@ BYTES_FULL = ServiceUnavailableError(code=503, err_code=10077, description="maxi
 
 @pytest.fixture
 def full_queues(monkeypatch: pytest.MonkeyPatch):
-    """Both notification queues accept a single item; later enqueues find them full."""
-    queues = SimpleNamespace(main=InMemoryNotificationQueue(maxsize=1), webhook=InMemoryNotificationQueue(maxsize=1))
-    monkeypatch.setattr(queue_manager, "queue_instance", queues.main)
+    """The dedicated webhook outbox accepts one item; later events are dropped safely."""
+    queues = SimpleNamespace(webhook=InMemoryNotificationQueue(maxsize=1))
     monkeypatch.setattr(queue_manager, "webhook_queue_instance", queues.webhook)
     logger = MagicMock()
     monkeypatch.setattr(queue_manager, "logger", logger)
@@ -56,16 +56,10 @@ async def test_nats_enqueue_keeps_other_publish_errors(error):
 
 async def test_enqueue_helpers_drop_and_log_when_the_queue_is_full(full_queues):
     await queue_manager.enqueue_webhook({"id": 1})
-    await queue_manager.enqueue_telegram("first", chat_id=1)
-
     await queue_manager.enqueue_webhook({"id": 2})
-    await queue_manager.enqueue_telegram("second", chat_id=1)
-    await queue_manager.enqueue_discord({"content": "third"}, "https://discord.invalid/hook")
 
     assert full_queues.webhook._count == 1
-    assert full_queues.main._count == 1
-    dropped = [call.args[1] for call in full_queues.logger.warning.call_args_list]
-    assert dropped == ["webhook", "telegram", "discord"]
+    full_queues.logger.warning.assert_called_once_with("Webhook queue full; dropping notification")
 
 
 async def test_enqueue_helper_drops_when_the_nats_stream_is_full(full_queues, monkeypatch):
@@ -95,7 +89,7 @@ async def test_bulk_notify_survives_a_full_webhook_queue(full_queues, monkeypatc
 
 
 async def test_days_left_job_records_every_threshold_when_the_queue_is_full(full_queues, monkeypatch):
-    """review_users enqueues right after recording reminders; a full queue must not abort the job."""
+    """review_subscriptions enqueues right after recording reminders; a full queue must not abort the job."""
     settings = Webhook(
         enable=True,
         webhooks=[WebhookInfo(url="http://127.0.0.1:9/h", secret="")],
@@ -103,7 +97,7 @@ async def test_days_left_job_records_every_threshold_when_the_queue_is_full(full
         timeout=1,
         recurrent=1,
     )
-    monkeypatch.setattr(review_users, "webhook_settings", AsyncMock(return_value=settings))
+    monkeypatch.setattr(review_subscriptions, "webhook_settings", AsyncMock(return_value=settings))
     monkeypatch.setattr(webhook_notification, "webhook_settings", AsyncMock(return_value=settings))
 
     @asynccontextmanager
@@ -111,24 +105,21 @@ async def test_days_left_job_records_every_threshold_when_the_queue_is_full(full
         yield AsyncMock()
 
     users = {
-        3: [SimpleNamespace(id=1, days_left=3, expire=None), SimpleNamespace(id=2, days_left=3, expire=None)],
-        1: [SimpleNamespace(id=3, days_left=1, expire=None)],
+        3: [SimpleNamespace(uuid=uuid4(), days_left=3, expire=None), SimpleNamespace(uuid=uuid4(), days_left=3, expire=None)],
+        1: [SimpleNamespace(uuid=uuid4(), days_left=1, expire=None)],
     }
-    monkeypatch.setattr(review_users, "GetDB", fake_db)
+    monkeypatch.setattr(review_subscriptions, "GetDB", fake_db)
     monkeypatch.setattr(
-        review_users, "get_days_left_reached_users", AsyncMock(side_effect=lambda db, days: users[days])
+        review_subscriptions, 'get_days_left_reached_subscriptions', AsyncMock(side_effect=lambda db, days: users[days])
     )
-    monkeypatch.setattr(
-        review_users,
-        "UserNotificationResponse",
-        SimpleNamespace(model_validate=lambda user: SimpleNamespace(username=f"user{user.id}")),
-    )
-    monkeypatch.setattr(review_users.notification.wh, "ReachedDaysLeft", lambda **kwargs: {"user": kwargs["username"]})
     record_reminders = AsyncMock()
-    monkeypatch.setattr(review_users, "bulk_create_notification_reminders", record_reminders)
+    monkeypatch.setattr(review_subscriptions, "bulk_create_notification_reminders", record_reminders)
 
-    await review_users.days_left_notification_job()
+    await review_subscriptions.days_left_notification_job()
 
-    assert [[row["user_id"] for row in call.args[1]] for call in record_reminders.await_args_list] == [[1, 2], [3]]
+    assert [[row["subscription_uuid"] for row in call.args[1]] for call in record_reminders.await_args_list] == [
+        [user.uuid for user in users[3]],
+        [user.uuid for user in users[1]],
+    ]
     assert full_queues.webhook._count == 1
     assert full_queues.logger.warning.call_count == 2

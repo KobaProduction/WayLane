@@ -10,7 +10,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
-from app.db.models import User
+from app.db.models import Subscription
 from app.db.subscription_firewall import subscription_device_events, subscription_firewall_config
 from app.routers.subscription_firewall import get_device_event_summary
 from app.subscription import device_webhook
@@ -49,61 +49,95 @@ async def test_due_worker_backoff_exhaustion_and_expired_leases(tmp_path, monkey
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with sessions() as db:
-            await db.execute(insert(subscription_firewall_config).values(
-                id=1, enabled=False, scenarios=SCENARIOS,
-                webhook_enabled=True, webhook_url=webhook_url,
-            ))
-            db.add(User(username="retry-webhook-device-user"))
-            await db.flush()
-            user_id = await db.scalar(select(User.id).where(User.username == "retry-webhook-device-user"))
-            assert user_id is not None
-            active_id = await device_webhook.enqueue_device_event(
-                db, "device.added", user_id, "synthetic-hwid"
+            await db.execute(
+                insert(subscription_firewall_config).values(
+                    id=1,
+                    enabled=False,
+                    scenarios=SCENARIOS,
+                    webhook_enabled=True,
+                    webhook_url=webhook_url,
+                )
             )
-            await db.execute(insert(subscription_device_events).values(
-                id=old_lease_id, event_type="device.removed", user_id=user_id,
-                hwid="expired", payload={"id": old_lease_id, "type": "device.removed"},
-                status="sending", attempts=9, delivery_token=str(uuid4()),
-                lease_until=now - timedelta(seconds=90),
-            ))
-            await db.execute(insert(subscription_device_events).values(
-                id=exhausted_id, event_type="device.reset", user_id=user_id,
-                hwid=None, payload={"id": exhausted_id, "type": "device.reset"},
-                status="failed", attempts=10,
-            ))
+            subscription_uuid = uuid4()
+            db.add(Subscription(uuid=subscription_uuid))
+            await db.flush()
+            subscription_uuid = await db.scalar(
+                select(Subscription.uuid).where(Subscription.uuid == subscription_uuid)
+            )
+            assert subscription_uuid is not None
+            active_id = await device_webhook.enqueue_device_event(db, "device.added", subscription_uuid, "synthetic-hwid")
+            await db.execute(
+                insert(subscription_device_events).values(
+                    id=old_lease_id,
+                    event_type="device.removed",
+                    subscription_uuid=subscription_uuid,
+                    hwid="expired",
+                    payload={"id": old_lease_id, "type": "device.removed"},
+                    status="sending",
+                    attempts=9,
+                    delivery_token=str(uuid4()),
+                    lease_until=now - timedelta(seconds=90),
+                )
+            )
+            await db.execute(
+                insert(subscription_device_events).values(
+                    id=exhausted_id,
+                    event_type="device.reset",
+                    subscription_uuid=subscription_uuid,
+                    hwid=None,
+                    payload={"id": exhausted_id, "type": "device.reset"},
+                    status="failed",
+                    attempts=10,
+                )
+            )
             await db.commit()
         assert not await device_webhook.deliver_device_event(active_id)
         async with sessions() as db:
-            row = (await db.execute(
-                select(subscription_device_events).where(
-                    subscription_device_events.c.id == active_id
+            row = (
+                (
+                    await db.execute(
+                        select(subscription_device_events).where(subscription_device_events.c.id == active_id)
+                    )
                 )
-            )).mappings().one()
+                .mappings()
+                .one()
+            )
             assert row["status"] == "failed"
             assert row["attempts"] == 1
             assert row["next_attempt_at"] is not None
         # A second scheduled pass before the due time must NOT retry this event.
         worker = await device_webhook.retry_due_device_events()
-        assert worker["selected"] == 1   # expired 10th lease is recovered
+        assert worker["selected"] == 1  # expired 10th lease is recovered
         async with sessions() as db:
-            states = {row.id: row.status for row in (await db.execute(
-                select(subscription_device_events.c.id, subscription_device_events.c.status)
-            )).all()}
+            states = {
+                row.id: row.status
+                for row in (
+                    await db.execute(select(subscription_device_events.c.id, subscription_device_events.c.status))
+                ).all()
+            }
             assert states[old_lease_id] == "exhausted"
             assert states[exhausted_id] == "exhausted"
             assert states[active_id] == "failed"
             # Move only this failed event's due time into the past, simulating
             # downtime beyond its originally recorded backoff.
-            await db.execute(update(subscription_device_events).where(
-                subscription_device_events.c.id == active_id
-            ).values(next_attempt_at=now - timedelta(seconds=1)))
+            await db.execute(
+                update(subscription_device_events)
+                .where(subscription_device_events.c.id == active_id)
+                .values(next_attempt_at=now - timedelta(seconds=1))
+            )
             await db.commit()
         worker = await device_webhook.retry_due_device_events()
         assert worker == {"selected": 1, "delivered": 0, "failed": 1}
         async with sessions() as db:
-            row = (await db.execute(select(subscription_device_events).where(
-                subscription_device_events.c.id == active_id
-            ))).mappings().one()
+            row = (
+                (
+                    await db.execute(
+                        select(subscription_device_events).where(subscription_device_events.c.id == active_id)
+                    )
+                )
+                .mappings()
+                .one()
+            )
             assert row["attempts"] == 2
             assert row["status"] == "failed"
             assert row["last_error"] == "ConnectError"
@@ -117,9 +151,15 @@ async def test_due_worker_backoff_exhaustion_and_expired_leases(tmp_path, monkey
         worker = await device_webhook.retry_due_device_events()
         assert worker == {"selected": 1, "delivered": 0, "failed": 1}
         async with sessions() as db:
-            row = (await db.execute(select(subscription_device_events).where(
-                subscription_device_events.c.id == exhausted_id
-            ))).mappings().one()
+            row = (
+                (
+                    await db.execute(
+                        select(subscription_device_events).where(subscription_device_events.c.id == exhausted_id)
+                    )
+                )
+                .mappings()
+                .one()
+            )
             assert row["attempts"] == 1
             assert row["status"] == "failed"
     finally:
@@ -129,10 +169,12 @@ async def test_due_worker_backoff_exhaustion_and_expired_leases(tmp_path, monkey
 def test_scheduler_job_registration_uses_existing_scheduler():
     from app.jobs import device_webhook_retry
     from config import runtime_settings
+
     if runtime_settings.role.runs_scheduler:
         # Collection of unrelated tests can clear the shared test scheduler.
         reload(device_webhook_retry)
         from app.scheduler import scheduler
+
         job = scheduler.get_job("retry_device_webhooks")
         assert job is not None
         assert job.max_instances == 1

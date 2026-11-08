@@ -44,11 +44,11 @@ def test_system_resource_stats_excludes_user_metrics(access_token, monkeypatch: 
     body = response.json()
     assert body["uptime_seconds"] == 123
     assert body["disk_total"] == 100_000
-    assert "total_user" not in body
-    assert "online_users" not in body
+    assert "total_subscriptions" not in body
+    assert "online_subscriptions" not in body
 
 
-def test_system_users_stats_requires_users_read_not_system_read():
+def test_system_subscription_stats_require_subscription_read_not_system_read():
     username = unique_name("system_users_admin")
     password = "SystemUsers#123"
     role_name = unique_name("system_users_role")
@@ -57,7 +57,7 @@ def test_system_users_stats_requires_users_read_not_system_read():
         async with TestSession() as session:
             role = AdminRole(
                 name=role_name,
-                permissions={"users": {"read": True}},
+                permissions={"subscriptions": {"read": True}},
                 limits={},
                 features={},
                 access={},
@@ -89,10 +89,10 @@ def test_system_users_stats_requires_users_read_not_system_read():
         assert token_response.status_code == status.HTTP_200_OK
         headers = auth_headers(token_response.json()["access_token"])
 
-        users_response = client.get("/api/system/users", headers=headers)
-        assert users_response.status_code == status.HTTP_200_OK
-        assert "total_user" in users_response.json()
-        assert "uptime_seconds" not in users_response.json()
+        subscriptions_response = client.get("/api/system/subscriptions", headers=headers)
+        assert subscriptions_response.status_code == status.HTTP_200_OK
+        assert "total_subscriptions" in subscriptions_response.json()
+        assert "uptime_seconds" not in subscriptions_response.json()
 
         resources_response = client.get("/api/system/resources", headers=headers)
         assert resources_response.status_code == status.HTTP_403_FORBIDDEN
