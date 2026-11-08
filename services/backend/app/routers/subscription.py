@@ -3,11 +3,11 @@ from fastapi.responses import JSONResponse
 
 from app.db import AsyncSession, get_db
 from app.models.settings import Application, ConfigFormat
-from app.models.stats import UserUsageStatsList
-from app.models.user import SubscriptionUserResponse
-from app.subscription.firewall import response_for_failure
+from app.models.stats import SubscriptionUsageStatsList
+from app.models.subscription_models import SubscriptionAccessResponse
 from app.operation import OperatorType
 from app.operation.subscription import SubscriptionOperation
+from app.subscription.firewall import response_for_failure
 from config import subscription_env_settings
 
 from .dependencies import get_subscription_headers, get_subscription_usage_query
@@ -40,8 +40,11 @@ async def user_subscription(
         # Legacy client adapters require HTTP 200 with informational proxy
         # links, but only for explicit HWID clients and enabled templates.
         fallback = await response_for_failure(
-            db, exc, client_accept=request.headers.get("Accept", ""),
-            hwid=headers.x_hwid, user_agent=user_agent,
+            db,
+            exc,
+            client_accept=request.headers.get("Accept", ""),
+            hwid=headers.x_hwid,
+            user_agent=user_agent,
         )
         if fallback is not None:
             return fallback
@@ -67,10 +70,10 @@ async def user_subscription_headers(
     return Response(headers=response_headers)
 
 
-@router.get("/{token}/info", response_model=SubscriptionUserResponse)
-async def user_subscription_info(request: Request, token: str, db: AsyncSession = Depends(get_db)):
+@router.get("/{token}/info", response_model=SubscriptionAccessResponse)
+async def get_subscription_info(request: Request, token: str, db: AsyncSession = Depends(get_db)):
     """Retrieves detailed information about the user's subscription."""
-    user_data, response_headers = await subscription_operator.user_subscription_info(
+    user_data, response_headers = await subscription_operator.get_subscription_info(
         db, token=token, ip=request.client.host if request.client else None
     )
     return JSONResponse(content=user_data.model_dump(mode="json"), headers=response_headers)
@@ -82,21 +85,21 @@ async def user_subscription_raw(request: Request, token: str, db: AsyncSession =
 
 
 @router.get("/{token}/apps", response_model=list[Application])
-async def user_subscription_apps(token: str, db: AsyncSession = Depends(get_db)):
+async def get_subscription_apps(token: str, db: AsyncSession = Depends(get_db)):
     """
     Get applications available for user's subscription.
     """
-    return await subscription_operator.user_subscription_apps(db, token)
+    return await subscription_operator.get_subscription_apps(db, token)
 
 
-@router.get("/{token}/usage", response_model=UserUsageStatsList)
+@router.get("/{token}/usage", response_model=SubscriptionUsageStatsList)
 async def get_sub_user_usage(
     token: str,
     query=Depends(get_subscription_usage_query),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetches the usage statistics for the user within a specified date range."""
-    return await subscription_operator.get_user_usage(db, token=token, query=query)
+    return await subscription_operator.get_subscription_usage(db, token=token, query=query)
 
 
 @router.get("/{token}/{client_type}")

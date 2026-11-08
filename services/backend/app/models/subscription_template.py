@@ -3,10 +3,10 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.db.models import DataLimitResetStrategy, UserStatusCreate
+from app.db.models import DataLimitResetStrategy, SubscriptionStatusCreate
 from app.models.proxy import ShadowsocksMethods
 
-from .validators import MAX_ON_HOLD_EXPIRE_DURATION_SECONDS, ListValidator, UserValidator
+from .validators import MAX_ON_HOLD_EXPIRE_DURATION_SECONDS, ListValidator, SubscriptionValidator
 
 
 class ExtraSettings(BaseModel):
@@ -18,7 +18,7 @@ class ExtraSettings(BaseModel):
         return super().model_dump(**kwargs)
 
 
-class UserTemplate(BaseModel):
+class SubscriptionTemplate(BaseModel):
     name: str | None = None
     data_limit: int | None = Field(ge=0, default=None, description="data_limit can be 0 or greater")
     hwid_limit: int | None = Field(default=None)
@@ -28,37 +28,32 @@ class UserTemplate(BaseModel):
         default=None,
         description="expire_duration can be 0 or greater in seconds",
     )
-    username_prefix: str | None = Field(max_length=20, default=None)
-    username_suffix: str | None = Field(max_length=20, default=None)
     group_ids: list[int]
     extra_settings: ExtraSettings | None = None
-    status: UserStatusCreate | None = None
+    status: SubscriptionStatusCreate | None = None
     reset_usages: bool | None = None
     on_hold_timeout: int | None = None
     data_limit_reset_strategy: DataLimitResetStrategy = Field(default=DataLimitResetStrategy.no_reset)
     is_disabled: bool | None = None
 
 
-class UserTemplateWithValidator(UserTemplate):
+class SubscriptionTemplateWithValidator(SubscriptionTemplate):
     @field_validator("status", mode="before", check_fields=False)
     def validate_status(cls, status, values):
-        return UserValidator.validate_status(status, {UserStatusCreate.active, UserStatusCreate.on_hold}, values)
-
-    @field_validator("username_prefix", "username_suffix", check_fields=False)
-    @classmethod
-    def validate_username(cls, v):
-        return UserValidator.validate_username(v, False, True)
+        return SubscriptionValidator.validate_status(
+            status, {SubscriptionStatusCreate.active, SubscriptionStatusCreate.on_hold}, values
+        )
 
     @field_validator("on_hold_timeout", check_fields=False)
     @classmethod
     def validate_on_hold_timeout(cls, v):
-        # Bound on input only, like next_plan expire: UserTemplateResponse must still load stored rows.
+        # Bound on input only, like next_plan expire: SubscriptionTemplateResponse must still load stored rows.
         if v is not None and not 0 <= v <= MAX_ON_HOLD_EXPIRE_DURATION_SECONDS:
             raise ValueError(f"on_hold_timeout must be between 0 and {MAX_ON_HOLD_EXPIRE_DURATION_SECONDS} seconds")
         return v
 
 
-class UserTemplateCreate(UserTemplateWithValidator):
+class SubscriptionTemplateCreate(SubscriptionTemplateWithValidator):
     @field_validator("group_ids", mode="after")
     @classmethod
     def group_ids_validator(cls, v):
@@ -72,7 +67,7 @@ class UserTemplateCreate(UserTemplateWithValidator):
         raise ValueError("name can't be empty")
 
 
-class UserTemplateModify(UserTemplateWithValidator):
+class SubscriptionTemplateModify(SubscriptionTemplateWithValidator):
     group_ids: list[int] | None = None
 
     @field_validator("group_ids", mode="after")
@@ -88,13 +83,13 @@ class UserTemplateModify(UserTemplateWithValidator):
         return v
 
 
-class UserTemplateResponse(UserTemplate):
+class SubscriptionTemplateResponse(SubscriptionTemplate):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserTemplateSimple(BaseModel):
+class SubscriptionTemplateSimple(BaseModel):
     """Lightweight user template model with only id and name for performance."""
 
     id: int
@@ -102,14 +97,14 @@ class UserTemplateSimple(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserTemplatesSimpleResponse(BaseModel):
+class SubscriptionTemplatesSimpleResponse(BaseModel):
     """Response model for lightweight user template list."""
 
-    templates: list[UserTemplateSimple]
+    templates: list[SubscriptionTemplateSimple]
     total: int
 
 
-class UserTemplateSimpleSortField(str, Enum):
+class SubscriptionTemplateSimpleSortField(str, Enum):
     id = "id"
     template_name = "name"
 
@@ -119,42 +114,42 @@ class SortDirection(str, Enum):
     desc = "desc"
 
 
-class UserTemplateSimpleSortOption(str, Enum):
+class SubscriptionTemplateSimpleSortOption(str, Enum):
     id = "id"
     template_name = "name"
     desc_id = "-id"
     desc_template_name = "-name"
 
     @property
-    def field(self) -> UserTemplateSimpleSortField:
-        return UserTemplateSimpleSortField(self.value.lstrip("-"))
+    def field(self) -> SubscriptionTemplateSimpleSortField:
+        return SubscriptionTemplateSimpleSortField(self.value.lstrip("-"))
 
     @property
     def direction(self) -> SortDirection:
         return SortDirection.desc if self.value.startswith("-") else SortDirection.asc
 
 
-class UserTemplateListQuery(BaseModel):
+class SubscriptionTemplateListQuery(BaseModel):
     ids: list[int] | None = None
     offset: int | None = None
     limit: int | None = None
 
 
-class UserTemplateSimpleListQuery(BaseModel):
+class SubscriptionTemplateSimpleListQuery(BaseModel):
     ids: list[int] | None = None
     offset: int | None = None
     limit: int | None = None
     search: str | None = None
-    sort: list[UserTemplateSimpleSortOption] = Field(default_factory=list)
+    sort: list[SubscriptionTemplateSimpleSortOption] = Field(default_factory=list)
     all: bool = False
 
     @field_validator("sort", mode="before")
     @classmethod
     def validate_sort(cls, value):
-        return ListValidator.normalize_enum_list_input(value, UserTemplateSimpleSortOption)
+        return ListValidator.normalize_enum_list_input(value, SubscriptionTemplateSimpleSortOption)
 
 
-class BulkUserTemplateSelection(BaseModel):
+class BulkSubscriptionTemplateSelection(BaseModel):
     """Model for bulk user template selection by IDs"""
 
     ids: set[int] = Field(default_factory=set)
@@ -165,14 +160,14 @@ class BulkUserTemplateSelection(BaseModel):
         return ListValidator.not_null_list(list(v), "template")
 
 
-class RemoveUserTemplatesResponse(BaseModel):
+class RemoveSubscriptionTemplatesResponse(BaseModel):
     """Response model for bulk user template deletion"""
 
     templates: list[str]
     count: int
 
 
-class BulkUserTemplatesActionResponse(BaseModel):
+class BulkSubscriptionTemplatesActionResponse(BaseModel):
     """Response model for bulk user template actions."""
 
     templates: list[str]

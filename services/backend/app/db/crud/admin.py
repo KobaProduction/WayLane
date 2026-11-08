@@ -19,10 +19,10 @@ from app.db.models import (
     AdminRole,
     AdminUsageLogs,
     APIKey,
-    NodeUserUsage,
+    NodeSubscriptionUsage,
     PasskeyChallenge,
     ReminderType,
-    User,
+    Subscription,
 )
 from app.models.admin import (
     AdminCreate,
@@ -39,7 +39,7 @@ from app.models.admin import (
     hash_password,
 )
 from app.models.admin_role import RoleLimits
-from app.models.stats import Period, UserUsageStat, UserUsageStatsList
+from app.models.stats import Period, SubscriptionUsageStat, SubscriptionUsageStatsList
 from app.utils.logger import get_logger
 
 logger = get_logger("admin-crud")
@@ -53,7 +53,7 @@ async def _load_admin_non_role_attrs(
 ):
     try:
         if load_users:
-            await admin.awaitable_attrs.users
+            await admin.awaitable_attrs.subscriptions
         if load_usage_logs:
             await admin.awaitable_attrs.usage_logs
     except AttributeError:
@@ -78,7 +78,7 @@ def build_admin_details(
     if "role" in getattr(db_admin, "__dict__", {}):
         try:
             role = AdminRoleData.model_validate(db_admin.role) if db_admin.role is not None else None
-        except (DetachedInstanceError, InvalidRequestError):
+        except DetachedInstanceError, InvalidRequestError:
             role = None
 
     return AdminDetails(
@@ -88,8 +88,6 @@ def build_admin_details(
         used_traffic=used_traffic,
         data_limit=db_admin.data_limit,
         status=db_admin.status,
-        telegram_id=db_admin.telegram_id,
-        discord_webhook=db_admin.discord_webhook,
         sub_domain=db_admin.sub_domain,
         profile_title=db_admin.profile_title,
         support_url=db_admin.support_url,
@@ -113,7 +111,7 @@ async def load_admin_attrs(
 ):
     try:
         if load_users:
-            await admin.awaitable_attrs.users
+            await admin.awaitable_attrs.subscriptions
         if load_usage_logs:
             await admin.awaitable_attrs.usage_logs
         if load_role:
@@ -215,10 +213,6 @@ async def update_admin(db: AsyncSession, db_admin: Admin, modified_admin: AdminM
         db_admin.role_id = modified_admin.role_id
     if modified_admin.permission_overrides is not None:
         db_admin.permission_overrides = modified_admin.permission_overrides.model_dump()
-    if modified_admin.telegram_id is not None:
-        db_admin.telegram_id = modified_admin.telegram_id
-    if modified_admin.discord_webhook is not None:
-        db_admin.discord_webhook = modified_admin.discord_webhook
     if modified_admin.sub_template is not None:
         db_admin.sub_template = modified_admin.sub_template
     if modified_admin.sub_domain is not None:
@@ -271,44 +265,6 @@ async def get_admin_by_id(
     return admin
 
 
-async def get_admin_by_telegram_id(
-    db: AsyncSession,
-    telegram_id: int,
-    *,
-    load_users: bool = True,
-    load_usage_logs: bool = True,
-    load_role: bool = True,
-) -> Admin:
-    stmt = select(Admin).where(Admin.telegram_id == telegram_id).order_by(Admin.id.asc()).limit(2)
-    if load_role:
-        stmt = stmt.options(selectinload(Admin.role))
-    admins = (await db.execute(stmt)).scalars().all()
-    if len(admins) > 1:
-        logger.error(
-            "Duplicate telegram_id found for admins; using earliest record",
-            extra={"telegram_id": telegram_id, "admin_ids": [admin.id for admin in admins]},
-        )
-    admin = admins[0] if admins else None
-    if admin:
-        await _load_admin_non_role_attrs(admin, load_users=load_users, load_usage_logs=load_usage_logs)
-    return admin
-
-
-async def find_admins_by_telegram_id(
-    db: AsyncSession,
-    telegram_id: int,
-    *,
-    exclude_admin_id: int | None = None,
-    limit: int | None = None,
-) -> list[Admin]:
-    stmt = select(Admin).where(Admin.telegram_id == telegram_id).order_by(Admin.id.asc())
-    if exclude_admin_id is not None:
-        stmt = stmt.where(Admin.id != exclude_admin_id)
-    if limit is not None:
-        stmt = stmt.limit(limit)
-    return (await db.execute(stmt)).scalars().all()
-
-
 async def get_admins(
     db: AsyncSession,
     query: AdminListQuery,
@@ -359,8 +315,8 @@ async def get_admins(
 
     if compact:
         users_count_subq = (
-            select(User.admin_id.label("admin_id"), func.count(User.id).label("total_users"))
-            .group_by(User.admin_id)
+            select(Subscription.admin_id.label("admin_id"), func.count(Subscription.uuid).label("total_users"))
+            .group_by(Subscription.admin_id)
             .subquery()
         )
         reset_usage_subq = (
@@ -388,7 +344,7 @@ async def get_admins(
     # For non-compact path, eagerly load users and usage_logs to avoid N+1 queries
     if not compact:
         stmt = stmt.options(
-            selectinload(Admin.users),
+            selectinload(Admin.subscriptions),
             selectinload(Admin.usage_logs),
         )
 
@@ -708,7 +664,7 @@ async def get_admin_usages(
     period: Period,
     node_id: int | None = None,
     group_by_node: bool = False,
-) -> UserUsageStatsList:
+) -> SubscriptionUsageStatsList:
     """
     Retrieves aggregated usage data for an admin's users within a specified time range,
     grouped by the specified time period.
@@ -723,24 +679,24 @@ async def get_admin_usages(
         node_id (Optional[int]): Filter results by specific node ID if provided.
 
     Returns:
-        UserUsageStatsList: Aggregated usage data for each period.
+        SubscriptionUsageStatsList: Aggregated usage data for each period.
     """
     # Build truncation expression with timezone support
-    trunc_expr = _build_trunc_expression(db, period, NodeUserUsage.created_at, start=start)
+    trunc_expr = _build_trunc_expression(db, period, NodeSubscriptionUsage.created_at, start=start)
 
     # Filter using UTC timestamps (DB stores naive UTC) from first complete bucket
     start_utc = get_complete_period_start_for_filter(start, period)
     end_utc = to_utc_for_filter(end)
     conditions = [
-        NodeUserUsage.created_at >= start_utc,
-        NodeUserUsage.created_at < end_utc,
+        NodeSubscriptionUsage.created_at >= start_utc,
+        NodeSubscriptionUsage.created_at < end_utc,
     ]
 
     if admin_id is not None:
-        conditions.append(User.admin_id == admin_id)
+        conditions.append(Subscription.admin_id == admin_id)
 
     if node_id is not None:
-        conditions.append(NodeUserUsage.node_id == node_id)
+        conditions.append(NodeSubscriptionUsage.node_id == node_id)
     else:
         node_id = -1
 
@@ -750,23 +706,23 @@ async def get_admin_usages(
         stmt = (
             select(
                 trunc_expr.label("period_start"),
-                func.coalesce(NodeUserUsage.node_id, 0).label("node_id"),
-                func.sum(NodeUserUsage.used_traffic).label("total_traffic"),
+                func.coalesce(NodeSubscriptionUsage.node_id, 0).label("node_id"),
+                func.sum(NodeSubscriptionUsage.used_traffic).label("total_traffic"),
             )
-            .select_from(NodeUserUsage)
-            .join(User, User.id == NodeUserUsage.user_id)
+            .select_from(NodeSubscriptionUsage)
+            .join(Subscription, Subscription.uuid == NodeSubscriptionUsage.subscription_uuid)
             .where(and_(*conditions))
-            .group_by(trunc_expr, NodeUserUsage.node_id)
+            .group_by(trunc_expr, NodeSubscriptionUsage.node_id)
             .order_by(trunc_expr)
         )
     else:
         stmt = (
             select(
                 trunc_expr.label("period_start"),
-                func.sum(NodeUserUsage.used_traffic).label("total_traffic"),
+                func.sum(NodeSubscriptionUsage.used_traffic).label("total_traffic"),
             )
-            .select_from(NodeUserUsage)
-            .join(User, User.id == NodeUserUsage.user_id)
+            .select_from(NodeSubscriptionUsage)
+            .join(Subscription, Subscription.uuid == NodeSubscriptionUsage.subscription_uuid)
             .where(and_(*conditions))
             .group_by(trunc_expr)
             .order_by(trunc_expr)
@@ -782,9 +738,9 @@ async def get_admin_usages(
         attach_timezone_to_period_start(row_dict, start.tzinfo, dialect)
         if node_id_val not in stats:
             stats[node_id_val] = []
-        stats[node_id_val].append(UserUsageStat(**row_dict))
+        stats[node_id_val].append(SubscriptionUsageStat(**row_dict))
 
-    return UserUsageStatsList(period=period, start=start, end=end, stats=stats)
+    return SubscriptionUsageStatsList(period=period, start=start, end=end, stats=stats)
 
 
 async def update_owner_password(db: AsyncSession, owner: Admin, new_password: str) -> Admin:
@@ -854,7 +810,7 @@ async def remove_admins(db: AsyncSession, admin_ids: list[int]) -> None:
     # SQLite runs without foreign key enforcement, so ON DELETE CASCADE never fires there, and it can hand
     # a freed id to the next admin. Delete every admin-owned row here, or a leftover passkey signs in as
     # whoever gets the id next.
-    await db.execute(update(User).where(User.admin_id.in_(admin_ids)).values(admin_id=None))
+    await db.execute(update(Subscription).where(Subscription.admin_id.in_(admin_ids)).values(admin_id=None))
     await db.execute(delete(APIKey).where(APIKey.admin_id.in_(admin_ids)))
     await db.execute(delete(AdminPasskey).where(AdminPasskey.admin_id.in_(admin_ids)))
     await db.execute(delete(PasskeyChallenge).where(PasskeyChallenge.admin_id.in_(admin_ids)))

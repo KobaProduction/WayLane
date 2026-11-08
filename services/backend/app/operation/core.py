@@ -6,7 +6,6 @@ from app.core.hosts import host_manager
 from app.core.live_update import node_facing, only_live_parts_changed
 from app.core.manager import core_manager
 from app.db import AsyncSession
-from app.db.models import CoreType
 from app.db.crud.core import (
     create_core_config,
     get_core_configs,
@@ -17,7 +16,7 @@ from app.db.crud.core import (
     reorder_core_configs,
 )
 from app.db.crud.host import get_hosts
-from app.db.crud.user import get_users_by_ids
+from app.db.crud.subscription import get_subscriptions_by_uuid_batch
 from app.db.crud.wireguard import (
     ensure_wireguard_subnet_pools,
     get_wg_cores,
@@ -25,6 +24,7 @@ from app.db.crud.wireguard import (
     wg_core_interfaces,
     wg_core_subnets,
 )
+from app.db.models import CoreType
 from app.models.admin import AdminDetails
 from app.models.core import (
     BulkCoreSelection,
@@ -38,7 +38,7 @@ from app.models.core import (
     RemoveCoresResponse,
 )
 from app.models.reality_scan import RealityScanRequest, RealityScanResult
-from app.node.sync import sync_users
+from app.node.sync import sync_subscriptions
 from app.operation import BaseOperation
 from app.utils.logger import get_logger
 from app.utils.reality_scan import RealityScanError, scan_reality_target
@@ -112,8 +112,8 @@ class CoreOperation(BaseOperation):
         changed_ids = await reconcile_wireguard_subnets(db)
         await db.commit()
         if changed_ids:
-            users = await get_users_by_ids(db, changed_ids, load_admin_role=True)
-            await sync_users(users)
+            users = await get_subscriptions_by_uuid_batch(db, changed_ids, load_admin_role=True)
+            await sync_subscriptions(users)
 
     async def scan_reality_target(self, request: RealityScanRequest) -> RealityScanResult:
         try:
@@ -175,15 +175,16 @@ class CoreOperation(BaseOperation):
 
             from app.db.core_presets import core_preset_bindings
 
-            bound = (await db.execute(
-                select(core_preset_bindings.c.id).where(
-                    core_preset_bindings.c.core_id == core_id
-                ).limit(1)
-            )).first()
+            bound = (
+                await db.execute(
+                    select(core_preset_bindings.c.id).where(core_preset_bindings.c.core_id == core_id).limit(1)
+                )
+            ).first()
             if bound:
                 await self.raise_error(
                     "Cannot change core backend type while managed Xray presets are attached",
-                    409, db=db,
+                    409,
+                    db=db,
                 )
         # Managed core presets always own their target fields. Admin edits
         # cannot accidentally put REALITY/VLESS secrets back into core JSON.
@@ -191,9 +192,9 @@ class CoreOperation(BaseOperation):
             from app.operation.core_presets import project_bound_core_config
 
             try:
-                modified_core = modified_core.model_copy(update={
-                    "config": await project_bound_core_config(db, core_id, modified_core.config)
-                })
+                modified_core = modified_core.model_copy(
+                    update={"config": await project_bound_core_config(db, core_id, modified_core.config)}
+                )
             except ValueError as exc:
                 await self.raise_error(message=str(exc), code=422, db=db)
         # What nodes run now, read before update_core replaces it.

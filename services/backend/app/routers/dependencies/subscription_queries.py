@@ -1,25 +1,24 @@
 from fastapi import Query
 
 from app.models.stats import Period
-from app.models.user import (
-    ExpiredUsersQuery,
-    UserListQuery,
-    UserSimpleListQuery,
-    UsersUsageBreakdownQuery,
-    UsersUsageQuery,
-    UserUsageQuery,
+from app.models.subscription_models import (
+    ExpiredSubscriptionsQuery,
+    SubscriptionListQuery,
+    SubscriptionSimpleListQuery,
+    SubscriptionsUsageBreakdownQuery,
+    SubscriptionsUsageQuery,
+    SubscriptionUsageQuery,
 )
 
 from ._common import make_query_dependency, query_param
 
-get_user_list_query = make_query_dependency(
-    UserListQuery,
+get_subscription_list_query = make_query_dependency(
+    SubscriptionListQuery,
     field_overrides={
         "offset": Query(None),
         "limit": Query(None),
         "ids": Query(None),
-        "username": Query(None),
-        "usernames": Query(None),
+        "uuids": Query(None),
         "owner": Query(None, alias="admin"),
         "admin_ids": Query(None, alias="admin_ids"),
         "group_ids": Query(None, alias="group"),
@@ -40,11 +39,11 @@ get_user_list_query = make_query_dependency(
         "load_sub": Query(False),
     },
 )
-get_user_simple_list_query = make_query_dependency(
-    UserSimpleListQuery,
+get_subscription_simple_list_query = make_query_dependency(
+    SubscriptionSimpleListQuery,
     field_overrides={
         "ids": Query(None),
-        "usernames": Query(None),
+        "uuids": Query(None),
         "offset": Query(None),
         "limit": Query(None),
         "search": Query(None),
@@ -52,8 +51,8 @@ get_user_simple_list_query = make_query_dependency(
         "all": Query(False),
     },
 )
-get_user_usage_query = make_query_dependency(
-    UserUsageQuery,
+get_subscription_traffic_usage_query = make_query_dependency(
+    SubscriptionUsageQuery,
     field_overrides={
         "period": Query(Period.hour),
         "node_id": Query(None),
@@ -62,8 +61,8 @@ get_user_usage_query = make_query_dependency(
         "end": Query(None, examples=["2024-01-31T23:59:59+03:30"]),
     },
 )
-get_users_usage_query = make_query_dependency(
-    UsersUsageQuery,
+get_subscriptions_usage_query = make_query_dependency(
+    SubscriptionsUsageQuery,
     field_overrides={
         "period": Query(Period.hour),
         "node_id": Query(None),
@@ -73,8 +72,8 @@ get_users_usage_query = make_query_dependency(
         "owner": Query(None, alias="admin"),
     },
 )
-get_users_usage_breakdown_query = make_query_dependency(
-    UsersUsageBreakdownQuery,
+get_subscriptions_usage_breakdown_query = make_query_dependency(
+    SubscriptionsUsageBreakdownQuery,
     field_overrides={
         "period": Query(Period.hour),
         "node_id": Query(None),
@@ -86,8 +85,8 @@ get_users_usage_breakdown_query = make_query_dependency(
         "group_by_admin": Query(False),
     },
 )
-get_expired_users_query = make_query_dependency(
-    ExpiredUsersQuery,
+get_expired_subscriptions_query = make_query_dependency(
+    ExpiredSubscriptionsQuery,
     field_overrides={
         "admin_username": Query(None),
         "target": Query("expired"),

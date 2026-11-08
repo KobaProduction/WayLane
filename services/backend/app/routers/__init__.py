@@ -1,32 +1,31 @@
 from fastapi import APIRouter
 
 from . import (
-    admin,
     acme,
+    admin,
     admin_role,
     api_key,
+    browser_telemetry,
+    business_analytics,
     client_template,
     core,
     core_presets,
-    business_analytics,
-    browser_telemetry,
     group,
     home,
     host,
     host_balancer,
-    hwid,
     node,
-    node_registry,
     node_control_ws,
+    node_registry,
     passkey,
     settings,
-    tls_presets,
     setup,
     subscription,
     subscription_firewall,
+    subscription_template,
+    subscriptions,
     system,
-    user,
-    user_template,
+    tls_presets,
 )
 
 api_router = APIRouter()
@@ -53,11 +52,10 @@ routers = [
     node_registry.node_registry_router,
     node_registry.node_control_router,
     node_control_ws.router,
-    user.router,
     subscription.router,
     subscription_firewall.router,
-    user_template.router,
-    hwid.router,
+    subscriptions.router,
+    subscription_template.router,
     passkey.router,
 ]
 

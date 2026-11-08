@@ -22,7 +22,7 @@ SECONDS_IN_YEAR = 31536000  # 365 days
 
 
 class UsageTable(str, Enum):
-    node_user_usages = "node_user_usages"
+    node_subscription_usages = "node_subscription_usages"
     node_usages = "node_usages"
 
 
@@ -330,16 +330,16 @@ class NodeNotification(BaseModel):
         return self.xray_version
 
 
-class UserIPList(BaseModel):
-    """User IP list - mapping of IP addresses to connection counts"""
+class SubscriptionIPList(BaseModel):
+    """Subscription IP list - mapping of IP addresses to connection counts"""
 
     ips: dict[str, int]  # {ip_address: connection_count}
 
 
-class UserIPListAll(BaseModel):
-    """User IP lists for all nodes"""
+class SubscriptionIPListAll(BaseModel):
+    """Subscription IP lists for all nodes"""
 
-    nodes: dict[int, UserIPList | None]  # {node_id: UserIPList | None}
+    nodes: dict[int, SubscriptionIPList | None]  # {node_id: SubscriptionIPList | None}
 
 
 class NodeCoreUpdate(BaseModel):

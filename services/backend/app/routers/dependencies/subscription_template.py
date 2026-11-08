@@ -1,19 +1,19 @@
 from fastapi import Query
 
-from app.models.user_template import UserTemplateListQuery, UserTemplateSimpleListQuery
+from app.models.subscription_template import SubscriptionTemplateListQuery, SubscriptionTemplateSimpleListQuery
 
 from ._common import make_query_dependency, query_param
 
-get_user_template_list_query = make_query_dependency(
-    UserTemplateListQuery,
+get_subscription_template_list_query = make_query_dependency(
+    SubscriptionTemplateListQuery,
     field_overrides={
         "ids": Query(None),
         "offset": Query(None),
         "limit": Query(None),
     },
 )
-get_user_template_simple_list_query = make_query_dependency(
-    UserTemplateSimpleListQuery,
+get_subscription_template_simple_list_query = make_query_dependency(
+    SubscriptionTemplateSimpleListQuery,
     field_overrides={
         "ids": Query(None),
         "offset": Query(None),

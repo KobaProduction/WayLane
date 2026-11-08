@@ -1,13 +1,12 @@
 import asyncio
 
-from waylane_node_bridge import WayLaneNode
-
 from app import scheduler
 from app.db import GetDB
 from app.db.models import NodeStat
 from app.node import node_manager
 from app.utils.logger import get_logger
 from config import job_settings, runtime_settings, usage_settings
+from waylane_node_bridge import WayLaneNode
 
 logger = get_logger("jobs")
 

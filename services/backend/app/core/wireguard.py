@@ -9,9 +9,10 @@ from pathlib import PosixPath
 import commentjson
 
 from app.models.core import CoreType
-from .amneziawg import AmneziaWG31
 from app.models.protocol import ProxyProtocol
 from app.utils.crypto import get_wireguard_public_key, validate_wireguard_key
+
+from .amneziawg import AmneziaWG31
 
 _WIREGUARD_PROTOCOLS = frozenset((ProxyProtocol.wireguard,))
 _WIREGUARD_INTERFACE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")

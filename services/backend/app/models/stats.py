@@ -22,7 +22,7 @@ class PeriodStartStat(BaseModel):
     period_start: AwareDatetime
 
 
-class UserUsageStat(PeriodStartStat):
+class SubscriptionUsageStat(PeriodStartStat):
     total_traffic: int
 
     @field_validator("total_traffic", mode="before")
@@ -30,24 +30,24 @@ class UserUsageStat(PeriodStartStat):
         return NumericValidatorMixin.cast_to_int(v)
 
 
-class UserUsageStatsList(StatList):
-    stats: dict[int, list[UserUsageStat]]
+class SubscriptionUsageStatsList(StatList):
+    stats: dict[int, list[SubscriptionUsageStat]]
 
 
-class UserCountMetric(str, Enum):
+class SubscriptionCountMetric(str, Enum):
     online = "online"
     expired = "expired"
     limited = "limited"
 
 
 def validate_user_count_metric_scope(
-    metric: UserCountMetric, node_id: int | None = None, group_by_node: bool = False
+    metric: SubscriptionCountMetric, node_id: int | None = None, group_by_node: bool = False
 ) -> None:
-    if metric != UserCountMetric.online and (node_id is not None or group_by_node):
-        raise ValueError("Only online user counts support node_id or group_by_node")
+    if metric != SubscriptionCountMetric.online and (node_id is not None or group_by_node):
+        raise ValueError("Only online subscription counts support node_id or group_by_node")
 
 
-class UserCountMetricStat(PeriodStartStat):
+class SubscriptionCountMetricStat(PeriodStartStat):
     count: int
 
     @field_validator("count", mode="before")
@@ -55,10 +55,10 @@ class UserCountMetricStat(PeriodStartStat):
         return NumericValidatorMixin.cast_to_int(v)
 
 
-class UserCountMetricStatsList(StatList):
-    metric: UserCountMetric
+class SubscriptionCountMetricStatsList(StatList):
+    metric: SubscriptionCountMetric
     count_during_period: int = Field(default=0)
-    stats: dict[int, list[UserCountMetricStat]]
+    stats: dict[int, list[SubscriptionCountMetricStat]]
 
 
 class NodeUsageStat(PeriodStartStat):

@@ -238,7 +238,6 @@ def _register_scheduler_hooks():
     )
     from app.scheduler import scheduler
 
-    started_notifications = {"value": False}
     reclaim_task: dict[str, asyncio.Task | None] = {"task": None}
 
     async def _resume_jobs_on_leadership_gained():
@@ -246,12 +245,6 @@ def _register_scheduler_hooks():
             scheduler.resume()
         elif not scheduler.running:
             scheduler.start()
-
-        if runtime_settings.role.runs_scheduler and not started_notifications["value"]:
-            from app.notification.client import start_notification_dispatcher
-
-            await start_notification_dispatcher()
-            started_notifications["value"] = True
 
     async def _reclaim_leadership_loop():
         # start_job_leader = try_become_leader + heartbeat restart
@@ -279,11 +272,6 @@ def _register_scheduler_hooks():
             await task
 
     async def _pause_jobs_on_leadership_lost():
-        if started_notifications["value"]:
-            from app.notification.client import stop_notification_dispatcher
-
-            await stop_notification_dispatcher()
-            started_notifications["value"] = False
         if scheduler.running:
             scheduler.pause()
         _ensure_reclaim_task()
@@ -297,23 +285,6 @@ def _register_scheduler_hooks():
             _ensure_reclaim_task()
 
     on_startup(_start_scheduler_if_leader)
-
-    # Notification dispatcher (consumer loop) is only needed by scheduler role + leader
-    if runtime_settings.role.runs_scheduler:
-        from app.notification.client import start_notification_dispatcher, stop_notification_dispatcher
-
-        async def _start_notification_dispatcher_if_leader():
-            if is_job_leader():
-                await start_notification_dispatcher()
-                started_notifications["value"] = True
-
-        async def _stop_notification_dispatcher_if_started():
-            if started_notifications["value"]:
-                await stop_notification_dispatcher()
-                started_notifications["value"] = False
-
-        on_startup(_start_notification_dispatcher_if_leader)
-        on_shutdown(_stop_notification_dispatcher_if_started)
 
     async def _stop_scheduler_and_leader():
         await _cancel_reclaim_task()
@@ -409,7 +380,6 @@ def create_app() -> FastAPI:
 
     if runtime_settings.role.runs_panel:
         import dashboard
-        from app import telegram  # noqa: F401
         from app.routers import api_router
 
         dashboard.setup_dashboard(app)

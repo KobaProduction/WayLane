@@ -1,7 +1,10 @@
 import os
+import sys
 from datetime import UTC, datetime as dt
 from enum import Enum
+from secrets import token_bytes
 from typing import Any
+from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
@@ -13,10 +16,12 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Table,
     Text,
     UniqueConstraint,
+    Uuid,
     and_,
     case,
     event,
@@ -54,6 +59,16 @@ def fk_id_table_column(name: str, target: str, **column_kwargs: Any):
     return Column(name, SqliteCompatibleBigInteger, ForeignKey(target, **fk_kwargs), **column_kwargs)
 
 
+def fk_uuid_column(target: str, **column_kwargs: Any):
+    fk_kwargs = {key: column_kwargs.pop(key) for key in ("ondelete", "onupdate") if key in column_kwargs}
+    return mapped_column(Uuid(as_uuid=True), ForeignKey(target, **fk_kwargs), **column_kwargs)
+
+
+def fk_uuid_table_column(name: str, target: str, **column_kwargs: Any):
+    fk_kwargs = {key: column_kwargs.pop(key) for key in ("ondelete", "onupdate") if key in column_kwargs}
+    return Column(name, Uuid(as_uuid=True), ForeignKey(target, **fk_kwargs), **column_kwargs)
+
+
 inbounds_groups_association = Table(
     "inbounds_groups_association",
     Base.metadata,
@@ -61,10 +76,10 @@ inbounds_groups_association = Table(
     fk_id_table_column("group_id", "groups.id", primary_key=True),
 )
 
-users_groups_association = Table(
-    "users_groups_association",
+subscriptions_groups_association = Table(
+    "subscriptions_groups_association",
     Base.metadata,
-    fk_id_table_column("user_id", "users.id", primary_key=True),
+    fk_uuid_table_column("subscription_uuid", "subscriptions.uuid", primary_key=True),
     fk_id_table_column("groups_id", "groups.id", primary_key=True),
 )
 
@@ -77,9 +92,9 @@ Index(
     inbounds_groups_association.c.inbound_id,
 )
 Index(
-    "ix_users_groups_association_groups_id_user_id",
-    users_groups_association.c.groups_id,
-    users_groups_association.c.user_id,
+    "ix_subscriptions_groups_association_groups_id_subscription_uuid",
+    subscriptions_groups_association.c.groups_id,
+    subscriptions_groups_association.c.subscription_uuid,
 )
 
 
@@ -93,15 +108,21 @@ class IdMixin(MappedAsDataclass):
     id: Mapped[int] = mapped_column(SqliteCompatibleBigInteger, primary_key=True, init=False, autoincrement=True)
 
 
-class CreatedAtUTCMixin(IdMixin):
+class CreatedAtOnlyMixin(MappedAsDataclass):
+    """Timestamp-only inheritance for UUID-primary-key subscriptions."""
+
     created_at: Mapped[dt] = mapped_column(DateTime(timezone=True), default_factory=lambda: dt.now(UTC), init=False)
+
+
+class CreatedAtUTCMixin(IdMixin, CreatedAtOnlyMixin):
+    """Legacy integer-key entities keep their existing schema unchanged."""
 
 
 class Admin(Base, CreatedAtUTCMixin):
     __tablename__ = "admins"
     username: Mapped[str] = mapped_column(String(34), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(128))
-    users: Mapped[list[User]] = relationship(back_populates="admin", init=False, default_factory=list)
+    subscriptions: Mapped[list[Subscription]] = relationship(back_populates="admin", init=False, default_factory=list)
     usage_logs: Mapped[list[AdminUsageLogs]] = relationship(
         back_populates="admin", init=False, default_factory=list, cascade="all, delete-orphan"
     )
@@ -116,8 +137,6 @@ class Admin(Base, CreatedAtUTCMixin):
     )
 
     password_reset_at: Mapped[dt | None] = mapped_column(DateTime(timezone=True), default=None)
-    telegram_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
-    discord_webhook: Mapped[str | None] = mapped_column(String(1024), default=None)
     used_traffic: Mapped[int] = mapped_column(BigInteger, default=0)
     data_limit: Mapped[int | None] = mapped_column(BigInteger, default=None)
     status: Mapped[AdminStatus] = mapped_column(
@@ -180,7 +199,7 @@ class Admin(Base, CreatedAtUTCMixin):
 
     @property
     def total_users(self) -> int:
-        return len(self.users)
+        return len(self.subscriptions)
 
     @property
     def has_api_keys(self) -> bool:
@@ -220,7 +239,7 @@ class ReminderType(str, Enum):
     data_usage = "data_usage"
 
 
-class UserStatus(str, Enum):
+class SubscriptionStatus(str, Enum):
     active = "active"
     disabled = "disabled"
     limited = "limited"
@@ -236,37 +255,52 @@ class DataLimitResetStrategy(str, Enum):
     year = "year"
 
 
-class User(Base, CreatedAtUTCMixin):
-    __tablename__ = "users"
+class Subscription(Base, CreatedAtOnlyMixin):
+    __tablename__ = "subscriptions"
     __table_args__ = (
-        Index("idx_users_created_at_id", "created_at", "id"),
-        Index("idx_users_admin_online", "admin_id", "online_at"),
-        Index("idx_users_admin_status", "admin_id", "status"),
-        Index("idx_users_admin_created", "admin_id", "created_at"),
+        Index("idx_subscriptions_created_at_uuid", "created_at", "uuid"),
+        Index("idx_subscriptions_admin_online", "admin_id", "online_at"),
+        Index("idx_subscriptions_admin_status", "admin_id", "status"),
+        Index("idx_subscriptions_admin_created", "admin_id", "created_at"),
     )
-    username: Mapped[str] = mapped_column(CaseSensitiveString(128), unique=True, index=True)
-    node_usages: Mapped[list[NodeUserUsage]] = relationship(
-        back_populates="user",
+    # Sole persisted and Python-level subscription identity: canonical UUIDv4.
+    uuid: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default_factory=uuid4, insert_default=uuid4, unique=True, index=True
+    )
+    # Never expose newly provisioned VPN credentials before Core activates them.
+    entitlement: Mapped[str] = mapped_column(String(24), default="payment_required")
+    entitlement_revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    policy_revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    access_generation: Mapped[int] = mapped_column(BigInteger, default=1)
+    access_nonce: Mapped[bytes] = mapped_column(
+        LargeBinary(16), default_factory=lambda: token_bytes(16), insert_default=lambda: token_bytes(16)
+    )
+    node_usages: Mapped[list[NodeSubscriptionUsage]] = relationship(
+        back_populates="subscription",
         cascade="all, delete-orphan",
         init=False,
     )
     notification_reminders: Mapped[list[NotificationReminder]] = relationship(
-        back_populates="user", cascade="all, delete-orphan", init=False
+        back_populates="subscription", cascade="all, delete-orphan", init=False
     )
-    subscription_updates: Mapped[list[UserSubscriptionUpdate]] = relationship(
-        back_populates="user", cascade="all, delete-orphan", init=False
+    subscription_updates: Mapped[list[SubscriptionUpdate]] = relationship(
+        back_populates="subscription", cascade="all, delete-orphan", init=False
     )
-    usage_logs: Mapped[list[UserUsageResetLogs]] = relationship(back_populates="user", init=False)
-    admin: Mapped[Admin] = relationship(back_populates="users", init=False)
+    usage_logs: Mapped[list[SubscriptionUsageResetLogs]] = relationship(back_populates="subscription", init=False)
+    admin: Mapped[Admin] = relationship(back_populates="subscriptions", init=False)
     next_plan: Mapped[NextPlan | None] = relationship(
-        uselist=False, back_populates="user", cascade="all, delete-orphan", init=False
+        uselist=False, back_populates="subscription", cascade="all, delete-orphan", init=False
     )
-    hwids: Mapped[list[UserHWID]] = relationship(back_populates="user", cascade="all, delete-orphan", init=False)
-    groups: Mapped[list[Group]] = relationship(secondary=users_groups_association, back_populates="users", init=False)
+    hwids: Mapped[list[SubscriptionHWID]] = relationship(
+        back_populates="subscription", cascade="all, delete-orphan", init=False
+    )
+    groups: Mapped[list[Group]] = relationship(
+        secondary=subscriptions_groups_association, back_populates="subscriptions", init=False
+    )
     proxy_settings: Mapped[dict[str, Any]] = mapped_column(
         JSON(True), server_default=text("'{}'"), default_factory=dict
     )
-    status: Mapped[UserStatus] = mapped_column(SQLEnum(UserStatus), default=UserStatus.active)
+    status: Mapped[SubscriptionStatus] = mapped_column(SQLEnum(SubscriptionStatus), default=SubscriptionStatus.active)
     used_traffic: Mapped[int] = mapped_column(BigInteger, default=0)
     data_limit: Mapped[int | None] = mapped_column(BigInteger, default=None)
     data_limit_reset_strategy: Mapped[DataLimitResetStrategy] = mapped_column(
@@ -322,8 +356,8 @@ class User(Base, CreatedAtUTCMixin):
     @reseted_usage.expression
     def reseted_usage(cls):
         return (
-            select(func.sum(UserUsageResetLogs.used_traffic_at_reset))
-            .where(UserUsageResetLogs.user_id == cls.id)
+            select(func.sum(SubscriptionUsageResetLogs.used_traffic_at_reset))
+            .where(SubscriptionUsageResetLogs.subscription_uuid == cls.uuid)
             .label("reseted_usage")
         )
 
@@ -358,11 +392,11 @@ class User(Base, CreatedAtUTCMixin):
         if session is not None:
             stmt = (
                 select(ProxyInbound.tag)
-                .select_from(users_groups_association)
-                .join(Group, users_groups_association.c.groups_id == Group.id)
+                .select_from(subscriptions_groups_association)
+                .join(Group, subscriptions_groups_association.c.groups_id == Group.id)
                 .join(inbounds_groups_association, Group.id == inbounds_groups_association.c.group_id)
                 .join(ProxyInbound, inbounds_groups_association.c.inbound_id == ProxyInbound.id)
-                .where(users_groups_association.c.user_id == self.id, Group.is_disabled.is_(False))
+                .where(subscriptions_groups_association.c.subscription_uuid == self.uuid, Group.is_disabled.is_(False))
                 .distinct()
             )
             result = await session.execute(stmt)
@@ -464,31 +498,31 @@ class User(Base, CreatedAtUTCMixin):
         return case((cls.expire.isnot(None), func.floor(DaysDiff(cls.expire))), else_=0)
 
 
-class UserSubscriptionUpdate(Base, CreatedAtUTCMixin):
-    __tablename__ = "user_subscription_updates"
+class SubscriptionUpdate(Base, CreatedAtUTCMixin):
+    __tablename__ = "subscription_updates"
     __table_args__ = (
-        Index("idx_user_subscription_updates_user_id", "user_id"),
-        Index("idx_user_subscription_updates_user_created", "user_id", "created_at"),
-        Index("idx_user_subscription_updates_created_at", "created_at"),
+        Index("idx_subscription_updates_subscription_uuid", "subscription_uuid"),
+        Index("idx_subscription_updates_subscription_created", "subscription_uuid", "created_at"),
+        Index("idx_subscription_updates_created_at", "created_at"),
     )
-    user_id: Mapped[int] = fk_id_column("users.id", ondelete="CASCADE")
-    user: Mapped[User] = relationship(back_populates="subscription_updates", init=False)
+    subscription_uuid: Mapped[UUID] = fk_uuid_column("subscriptions.uuid", ondelete="CASCADE")
+    subscription: Mapped[Subscription] = relationship(back_populates="subscription_updates", init=False)
     user_agent: Mapped[str] = mapped_column(String(512))
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     hwid: Mapped[str | None] = mapped_column(String(256), nullable=True, default=None)
 
 
-class UserHWID(Base, CreatedAtUTCMixin):
-    __tablename__ = "user_hwids"
+class SubscriptionHWID(Base, CreatedAtUTCMixin):
+    __tablename__ = "subscription_hwids"
     __table_args__ = (
-        UniqueConstraint("user_id", "hwid"),
-        Index("ix_user_hwids_user_id", "user_id"),
-        Index("ix_user_hwids_hwid", "hwid"),
-        Index("ix_user_hwids_created_at", "created_at"),
-        Index("ix_user_hwids_last_used_at", "last_used_at"),
+        UniqueConstraint("subscription_uuid", "hwid"),
+        Index("ix_subscription_hwids_subscription_uuid", "subscription_uuid"),
+        Index("ix_subscription_hwids_hwid", "hwid"),
+        Index("ix_subscription_hwids_created_at", "created_at"),
+        Index("ix_subscription_hwids_last_used_at", "last_used_at"),
     )
-    user_id: Mapped[int] = fk_id_column("users.id", ondelete="CASCADE")
-    user: Mapped[User] = relationship(back_populates="hwids", init=False)
+    subscription_uuid: Mapped[UUID] = fk_uuid_column("subscriptions.uuid", ondelete="CASCADE")
+    subscription: Mapped[Subscription] = relationship(back_populates="hwids", init=False)
     hwid: Mapped[str] = mapped_column(String(256), nullable=False)
     device_os: Mapped[str | None] = mapped_column(String(256), default=None)
     os_version: Mapped[str | None] = mapped_column(String(128), default=None)
@@ -499,7 +533,7 @@ class UserHWID(Base, CreatedAtUTCMixin):
 template_group_association = Table(
     "template_group_association",
     Base.metadata,
-    fk_id_table_column("user_template_id", "user_templates.id"),
+    fk_id_table_column("subscription_template_id", "subscription_templates.id"),
     fk_id_table_column("group_id", "groups.id"),
 )
 
@@ -507,39 +541,39 @@ template_group_association = Table(
 class NextPlan(Base, IdMixin):
     __tablename__ = "next_plans"
     __table_args__ = (
-        # user_id will already have an index from the FK
+        # The subscription UUID is indexed through its foreign key
         # Add if you frequently query by template
-        Index("ix_next_plans_user_template_id", "user_template_id"),
+        Index("ix_next_plans_subscription_template_id", "subscription_template_id"),
     )
-    user_id: Mapped[int] = fk_id_column("users.id", ondelete="CASCADE")
-    user_template_id: Mapped[int | None] = fk_id_column("user_templates.id", ondelete="SET NULL")
-    user: Mapped[User] = relationship(back_populates="next_plan", init=False)
-    user_template: Mapped[UserTemplate | None] = relationship(back_populates="next_plans", init=False)
+    subscription_uuid: Mapped[UUID] = fk_uuid_column("subscriptions.uuid", ondelete="CASCADE")
+    subscription_template_id: Mapped[int | None] = fk_id_column("subscription_templates.id", ondelete="SET NULL")
+    subscription: Mapped[Subscription] = relationship(back_populates="next_plan", init=False)
+    subscription_template: Mapped[SubscriptionTemplate | None] = relationship(back_populates="next_plans", init=False)
     data_limit: Mapped[int] = mapped_column(BigInteger, default=0)
     expire: Mapped[int | None] = mapped_column(default=None)
     add_remaining_traffic: Mapped[bool] = mapped_column(default=False, server_default="0")
 
 
-class UserStatusCreate(str, Enum):
+class SubscriptionStatusCreate(str, Enum):
     active = "active"
     on_hold = "on_hold"
 
 
-class UserTemplate(Base, IdMixin):
-    __tablename__ = "user_templates"
+class SubscriptionTemplate(Base, IdMixin):
+    __tablename__ = "subscription_templates"
     name: Mapped[str] = mapped_column(String(64), unique=True)
-    username_prefix: Mapped[str | None] = mapped_column(String(20))
-    username_suffix: Mapped[str | None] = mapped_column(String(20))
     extra_settings: Mapped[dict | None] = mapped_column(JSON(True))
     next_plans: Mapped[list[NextPlan]] = relationship(
-        back_populates="user_template", cascade="all, delete-orphan", init=False
+        back_populates="subscription_template", cascade="all, delete-orphan", init=False
     )
     groups: Mapped[list[Group]] = relationship(secondary=template_group_association, back_populates="templates")
     data_limit: Mapped[int] = mapped_column(BigInteger, default=0)
     hwid_limit: Mapped[int | None] = mapped_column(BigInteger, default=None)
     expire_duration: Mapped[int] = mapped_column(BigInteger, default=0)  # in seconds
     on_hold_timeout: Mapped[int | None] = mapped_column(default=None)
-    status: Mapped[UserStatusCreate] = mapped_column(SQLEnum(UserStatusCreate), default=UserStatusCreate.active)
+    status: Mapped[SubscriptionStatusCreate] = mapped_column(
+        SQLEnum(SubscriptionStatusCreate), default=SubscriptionStatusCreate.active
+    )
     reset_usages: Mapped[bool] = mapped_column(default=False, server_default="0")
     data_limit_reset_strategy: Mapped[DataLimitResetStrategy] = mapped_column(
         SQLEnum(DataLimitResetStrategy),
@@ -553,14 +587,14 @@ class UserTemplate(Base, IdMixin):
         return [group.id for group in self.groups]
 
 
-class UserUsageResetLogs(Base, IdMixin):
-    __tablename__ = "user_usage_logs"
+class SubscriptionUsageResetLogs(Base, IdMixin):
+    __tablename__ = "subscription_usage_logs"
     __table_args__ = (
         # Index for user-specific queries sorted by time
-        Index("ix_user_usage_logs_user_id_reset_at", "user_id", "reset_at"),
+        Index("ix_subscription_usage_logs_subscription_uuid_reset_at", "subscription_uuid", "reset_at"),
     )
-    user_id: Mapped[int | None] = fk_id_column("users.id", ondelete="CASCADE", nullable=True)
-    user: Mapped[User] = relationship(back_populates="usage_logs", init=False)
+    subscription_uuid: Mapped[UUID | None] = fk_uuid_column("subscriptions.uuid", ondelete="CASCADE", nullable=True)
+    subscription: Mapped[Subscription] = relationship(back_populates="usage_logs", init=False)
     used_traffic_at_reset: Mapped[int] = mapped_column(BigInteger, nullable=False)
     reset_at: Mapped[dt] = mapped_column(DateTime(timezone=True), default=lambda: dt.now(UTC), init=False)
 
@@ -647,7 +681,9 @@ class ProxyHost(Base, IdMixin):
     http_headers: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), default=None)
     transport_settings: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), default=None)
     mux_settings: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), default=None)
-    status: Mapped[list[UserStatus] | None] = mapped_column(EnumArray(UserStatus, 60), default=list, server_default="")
+    status: Mapped[list[SubscriptionStatus] | None] = mapped_column(
+        EnumArray(SubscriptionStatus, 60), default=list, server_default=""
+    )
     ech: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), default=None)
     vless_route: Mapped[str | None] = mapped_column(String(4), default=None)
     pinned_peer_cert_sha256: Mapped[str | None] = mapped_column(String(128), default=None)
@@ -687,7 +723,8 @@ class NodeStatus(str, Enum):
 
 # Additive WayLane Agent identity; no mutation of the existing Node model.
 node_discovery_invitations = Table(
-    "node_discovery_invitations", Base.metadata,
+    "node_discovery_invitations",
+    Base.metadata,
     Column("id", SqliteCompatibleBigInteger, primary_key=True, autoincrement=True),
     Column("token_hash", String(64), unique=True, nullable=False),
     Column("label", String(120), nullable=False),
@@ -698,11 +735,16 @@ node_discovery_invitations = Table(
 )
 
 node_agent_registrations = Table(
-    "node_agent_registrations", Base.metadata,
+    "node_agent_registrations",
+    Base.metadata,
     Column("node_uuid", String(36), primary_key=True),
     Column("secret_hash", String(64), nullable=False),
-    Column("invitation_id", SqliteCompatibleBigInteger,
-           ForeignKey("node_discovery_invitations.id", ondelete="RESTRICT"), nullable=True),
+    Column(
+        "invitation_id",
+        SqliteCompatibleBigInteger,
+        ForeignKey("node_discovery_invitations.id", ondelete="RESTRICT"),
+        nullable=True,
+    ),
     Column("legacy_node_id", SqliteCompatibleBigInteger, ForeignKey("nodes.id", ondelete="SET NULL"), unique=True),
     Column("display_name", String(128), nullable=False),
     Column("status", String(16), nullable=False),
@@ -720,9 +762,11 @@ Index("ix_node_agent_registrations_status", node_agent_registrations.c.status)
 # Desired Xray state is separate from legacy Node/Core records.
 # Only the authenticated Agent may reconcile this on its private Docker.
 node_agent_xray_desired = Table(
-    "node_agent_xray_desired", Base.metadata,
-    Column("node_uuid", String(36),
-           ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    "node_agent_xray_desired",
+    Base.metadata,
+    Column(
+        "node_uuid", String(36), ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True
+    ),
     Column("generation", Integer, nullable=False),
     Column("action", String(16), nullable=False),
     Column("image_version", String(32), nullable=False),
@@ -734,7 +778,6 @@ node_agent_xray_desired = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("reported_at", DateTime(timezone=True), nullable=True),
 )
-
 
 
 class Node(Base, CreatedAtUTCMixin):
@@ -749,7 +792,7 @@ class Node(Base, CreatedAtUTCMixin):
     api_key: Mapped[str | None] = mapped_column(String(36))
     node_version: Mapped[str | None] = mapped_column(String(32), nullable=True, init=False)
     core_config_id: Mapped[int | None] = fk_id_column("core_configs.id", ondelete="SET NULL", nullable=True)
-    user_usages: Mapped[list[NodeUserUsage]] = relationship(
+    user_usages: Mapped[list[NodeSubscriptionUsage]] = relationship(
         back_populates="node", cascade="all, delete-orphan", init=False
     )
     usages: Mapped[list[NodeUsage]] = relationship(back_populates="node", cascade="all, delete-orphan", init=False)
@@ -840,22 +883,22 @@ class Node(Base, CreatedAtUTCMixin):
         return cls.downlink + cls.uplink
 
 
-class NodeUserUsage(Base, IdMixin):
-    __tablename__ = "node_user_usages"
+class NodeSubscriptionUsage(Base, IdMixin):
+    __tablename__ = "node_subscription_usages"
     __table_args__ = (
-        UniqueConstraint("created_at", "user_id", "node_id"),
+        UniqueConstraint("created_at", "subscription_uuid", "node_id"),
         # Indexes for common queries
         Index(
-            "ix_node_user_usages_user_id_created_at", "user_id", "created_at"
-        ),  # User-specific queries with time range
+            "ix_node_subscription_usages_subscription_uuid_created_at", "subscription_uuid", "created_at"
+        ),  # Subscription-specific queries with time range
         Index(
-            "ix_node_user_usages_node_id_created_at", "node_id", "created_at"
+            "ix_node_subscription_usages_node_id_created_at", "node_id", "created_at"
         ),  # Node-specific queries with time range
-        Index("ix_node_user_usages_created_at", "created_at"),  # Time-based cleanup/aggregation
+        Index("ix_node_subscription_usages_created_at", "created_at"),  # Time-based cleanup/aggregation
     )
     created_at: Mapped[dt] = mapped_column(DateTime(timezone=True), unique=False)  # 10 minute per record
-    user_id: Mapped[int] = fk_id_column("users.id", ondelete="CASCADE")
-    user: Mapped[User] = relationship(back_populates="node_usages", init=False)
+    subscription_uuid: Mapped[UUID] = fk_uuid_column("subscriptions.uuid", ondelete="CASCADE")
+    subscription: Mapped[Subscription] = relationship(back_populates="node_usages", init=False)
     node_id: Mapped[int | None] = fk_id_column("nodes.id", ondelete="CASCADE")
     node: Mapped[Node] = relationship(back_populates="user_usages", init=False)
     used_traffic: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -890,8 +933,8 @@ class NodeUsageResetLogs(Base, CreatedAtUTCMixin):
 
 class NotificationReminder(Base, CreatedAtUTCMixin):
     __tablename__ = "notification_reminders"
-    user_id: Mapped[int] = fk_id_column("users.id", ondelete="CASCADE")
-    user: Mapped[User] = relationship(back_populates="notification_reminders", init=False)
+    subscription_uuid: Mapped[UUID] = fk_uuid_column("subscriptions.uuid", ondelete="CASCADE")
+    subscription: Mapped[Subscription] = relationship(back_populates="notification_reminders", init=False)
     type: Mapped[ReminderType] = mapped_column(SQLEnum(ReminderType))
     threshold: Mapped[int | None] = mapped_column(default=None)
     expires_at: Mapped[dt | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -914,9 +957,11 @@ class AdminNotificationReminder(Base, CreatedAtUTCMixin):
 class Group(Base, IdMixin):
     __tablename__ = "groups"
     name: Mapped[str] = mapped_column(String(64))
-    users: Mapped[list[User]] = relationship(secondary=users_groups_association, back_populates="groups", init=False)
+    subscriptions: Mapped[list[Subscription]] = relationship(
+        secondary=subscriptions_groups_association, back_populates="groups", init=False
+    )
     inbounds: Mapped[list[ProxyInbound]] = relationship(secondary=inbounds_groups_association, back_populates="groups")
-    templates: Mapped[list[UserTemplate]] = relationship(
+    templates: Mapped[list[SubscriptionTemplate]] = relationship(
         secondary=template_group_association, back_populates="groups", init=False
     )
     is_disabled: Mapped[bool] = mapped_column(server_default="0", default=False)
@@ -958,13 +1003,13 @@ class Group(Base, IdMixin):
         # summaries never have to hydrate every member.
         if self._total_users_query is not None:
             return int(self._total_users_query)
-        return len(self.users)
+        return len(self.subscriptions)
 
     @total_users.expression
     def total_users(cls):
         return (
-            select(func.count(users_groups_association.c.user_id))
-            .where(users_groups_association.c.groups_id == cls.id)
+            select(func.count(subscriptions_groups_association.c.subscription_uuid))
+            .where(subscriptions_groups_association.c.groups_id == cls.id)
             .scalar_subquery()
             .label("total_users")
         )
@@ -1029,9 +1074,7 @@ class NodeStat(Base, CreatedAtUTCMixin):
 
 class Settings(Base, IdMixin):
     __tablename__ = "settings"
-    telegram: Mapped[dict] = mapped_column(JSON())
     webhook: Mapped[dict] = mapped_column(JSON())
-    notification_settings: Mapped[dict] = mapped_column(JSON())
     notification_enable: Mapped[dict] = mapped_column(JSON())
     subscription: Mapped[dict] = mapped_column(JSON())
     hwid: Mapped[dict] = mapped_column(JSON())
@@ -1123,3 +1166,33 @@ class TempKey(Base):
     expires_at: Mapped[dt] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[dt | None] = mapped_column(DateTime(timezone=True), default=None)
     used_by_ip: Mapped[str | None] = mapped_column(String(45), default=None)
+
+
+# Two immutable Alembic revisions predate the rename from User to Subscription.
+# Revision-map commands (``alembic heads/history``) load revision modules *before*
+# env.py has a chance to register the frozen historical mapping.  Resolve this
+# name only for those exact revision files, keeping all ordinary API imports
+# free of a product User class, compatibility model, or extra ORM identity.
+_FROZEN_HISTORIC_USER_REVISIONS = frozenset({
+    "16e19723febc_migrate_to_groups.py",
+    "db68f8d3d40b_move_data_from_proxies_table_to_users_.py",
+})
+
+
+def __getattr__(name: str):
+    if name != "User":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    frozen_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "migrations", "versions"))
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
+        if os.path.basename(filename) in _FROZEN_HISTORIC_USER_REVISIONS and os.path.realpath(
+            os.path.dirname(filename)
+        ) == frozen_dir:
+            from app.db.migrations._historic_user import HistoricalUserForAlembic
+
+            return HistoricalUserForAlembic
+        frame = frame.f_back
+
+    raise AttributeError("Product User ORM was removed; only frozen Alembic revisions may import it")

@@ -38,7 +38,7 @@ def deserialize_proto_message(message_dict: dict, message_type: type[Message]) -
     Convert a dictionary back to a Protocol Buffer message.
 
     Uses the standard protobuf ParseDict function to handle any proto message type.
-    Generic implementation allows reuse for any proto message, not just User.
+    Generic implementation allows reuse for any proto message, not just Subscription.
 
     Args:
         message_dict: A dictionary representation of a proto message

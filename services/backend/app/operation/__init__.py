@@ -2,6 +2,7 @@ import re
 from datetime import UTC, datetime as dt, timedelta as td
 from enum import IntEnum
 from typing import Any
+from uuid import UUID
 
 from fastapi import HTTPException
 
@@ -14,12 +15,11 @@ from app.db.crud import (
     get_group_by_id,
     get_host_by_id,
     get_node_by_id,
-    get_user,
-    get_user_template,
+    get_subscription_template,
 )
 from app.db.crud.admin import get_admin_by_id
 from app.db.crud.group import get_groups_by_ids
-from app.db.crud.user import get_user_by_id, get_wireguard_subscription_user
+from app.db.crud.subscription import get_subscription_by_uuid, get_wireguard_subscription_node_identity
 from app.db.models import (
     Admin as DBAdmin,
     ClientTemplate,
@@ -27,17 +27,16 @@ from app.db.models import (
     Group,
     Node,
     ProxyHost,
-    User,
-    UserStatus,
-    UserTemplate,
+    Subscription,
+    SubscriptionStatus,
+    SubscriptionTemplate,
 )
 from app.models.admin import AdminDetails
-from app.models.group import BulkGroup
-from app.models.user import UserCreate, UserModify
-from app.models.user_template import UserTemplateCreate, UserTemplateModify
+from app.models.subscription_models import SubscriptionCreate, SubscriptionModify
+from app.models.subscription_template import SubscriptionTemplateCreate, SubscriptionTemplateModify
 from app.operation.permissions import apply_group_access, get_scope_admin_id
+from app.subscription.identity import subscription_from_token
 from app.utils.helpers import ensure_datetime_timezone
-from app.utils.jwt import get_subscription_payload
 
 
 class OperatorType(IntEnum):
@@ -45,8 +44,6 @@ class OperatorType(IntEnum):
     API = 1
     WEB = 2
     CLI = 3
-    TELEGRAM = 4
-    DISCORD = 5
 
 
 class BaseOperation:
@@ -161,53 +158,50 @@ class BaseOperation:
         load_groups: bool = True,
         load_lifetime_used_traffic: bool = False,
         wireguard_fast: bool = False,
-    ) -> User:
-        sub = await get_subscription_payload(token)
+    ) -> Subscription:
+        subscription = await subscription_from_token(db, token)
+        if subscription is None:
+            await self.raise_error(message="Subscription not found", code=404)
+        if subscription.entitlement != "active":
+            await self.raise_error(message="Subscription access denied", code=403)
 
         db_user = None
-        if sub:
-            load_kwargs = {
-                "load_admin": load_admin,
-                "load_admin_role": load_admin_role,
-                "load_next_plan": load_next_plan,
-                "load_usage_logs": load_usage_logs,
-                "load_groups": load_groups,
-                "load_lifetime_used_traffic": load_lifetime_used_traffic,
-            }
-            if sub.get("user_id") and wireguard_fast:
-                db_user = await get_wireguard_subscription_user(db, sub["user_id"], load_admin_role=load_admin_role)
-            elif sub.get("user_id"):
-                db_user = await get_user_by_id(db, sub["user_id"], **load_kwargs)
-            elif sub.get("username"):
-                if wireguard_fast:
-                    load_kwargs.update(
-                        load_next_plan=False,
-                        load_usage_logs=False,
-                        load_groups=False,
-                        load_lifetime_used_traffic=False,
-                    )
-                db_user = await get_user(db, sub["username"], **load_kwargs)
+        if wireguard_fast:
+            db_user = await get_wireguard_subscription_node_identity(
+                db, subscription.uuid, load_admin_role=load_admin_role
+            )
+        else:
+            db_user = await get_subscription_by_uuid(
+                db,
+                subscription.uuid,
+                load_admin=load_admin,
+                load_admin_role=load_admin_role,
+                load_next_plan=load_next_plan,
+                load_usage_logs=load_usage_logs,
+                load_groups=load_groups,
+                load_lifetime_used_traffic=load_lifetime_used_traffic,
+            )
 
-        if (
-            not db_user
-            or db_user.created_at.astimezone(UTC) > sub["created_at"]
-            or (db_user.sub_revoked_at and db_user.sub_revoked_at.astimezone(UTC) > sub["created_at"])
-        ):
+        if not db_user:
             await self.raise_error(message="Not Found", code=404)
 
         # Subscription links must reflect provider-owned access immediately,
         # not only after the background status-review loop has run. This guard
         # applies to direct /sub requests as well as management-independent
         # subscription formats and cannot be bypassed by a valid signed token.
-        if db_user.status not in (UserStatus.active, UserStatus.on_hold) or db_user.is_expired or db_user.is_limited:
+        if (
+            db_user.status not in (SubscriptionStatus.active, SubscriptionStatus.on_hold)
+            or db_user.is_expired
+            or db_user.is_limited
+        ):
             await self.raise_error(message="Subscription access denied", code=403)
 
         return db_user
 
-    async def get_validated_user(
+    async def get_validated_subscription_by_uuid(
         self,
         db: AsyncSession,
-        username: str,
+        subscription_uuid: UUID,
         admin: AdminDetails,
         *,
         load_admin: bool = True,
@@ -216,12 +210,12 @@ class BaseOperation:
         load_groups: bool = True,
         join_groups: bool = False,
         load_lifetime_used_traffic: bool = False,
-        scope_resource: str = "users",
+        scope_resource: str = "subscriptions",
         scope_action: str = "read",
-    ) -> User:
-        db_user = await get_user(
+    ) -> Subscription:
+        db_user = await get_subscription_by_uuid(
             db,
-            username,
+            subscription_uuid,
             load_admin=load_admin,
             load_next_plan=load_next_plan,
             load_usage_logs=load_usage_logs,
@@ -231,37 +225,7 @@ class BaseOperation:
             admin_id=get_scope_admin_id(admin, scope_resource, scope_action),
         )
         if not db_user:
-            await self.raise_error(message="User not found", code=404)
-        return db_user
-
-    async def get_validated_user_by_id(
-        self,
-        db: AsyncSession,
-        user_id: int,
-        admin: AdminDetails,
-        *,
-        load_admin: bool = True,
-        load_next_plan: bool = True,
-        load_usage_logs: bool = True,
-        load_groups: bool = True,
-        join_groups: bool = False,
-        load_lifetime_used_traffic: bool = False,
-        scope_resource: str = "users",
-        scope_action: str = "read",
-    ) -> User:
-        db_user = await get_user_by_id(
-            db,
-            user_id,
-            load_admin=load_admin,
-            load_next_plan=load_next_plan,
-            load_usage_logs=load_usage_logs,
-            load_groups=load_groups,
-            join_groups=join_groups,
-            load_lifetime_used_traffic=load_lifetime_used_traffic,
-            admin_id=get_scope_admin_id(admin, scope_resource, scope_action),
-        )
-        if not db_user:
-            await self.raise_error(message="User not found", code=404)
+            await self.raise_error(message="Subscription not found", code=404)
         return db_user
 
     async def get_validated_admin(self, db: AsyncSession, username: str) -> DBAdmin:
@@ -285,7 +249,11 @@ class BaseOperation:
     async def validate_all_groups(
         self,
         db,
-        model: UserCreate | UserModify | UserTemplate | UserTemplateCreate | UserTemplateModify | BulkGroup,
+        model: SubscriptionCreate
+        | SubscriptionModify
+        | SubscriptionTemplate
+        | SubscriptionTemplateCreate
+        | SubscriptionTemplateModify,
         admin: AdminDetails | None = None,
         *,
         existing_group_ids: set[int] | list[int] | None = None,
@@ -293,8 +261,6 @@ class BaseOperation:
         requested_group_ids: list[int] = []
         if model.group_ids:
             requested_group_ids.extend(model.group_ids)
-        if hasattr(model, "has_group_ids") and model.has_group_ids:
-            requested_group_ids.extend(model.has_group_ids)
 
         if not requested_group_ids:
             return []
@@ -320,10 +286,10 @@ class BaseOperation:
         # Preserve the requested order and duplicate semantics.
         return [groups_by_id[group_id] for group_id in requested_group_ids]
 
-    async def get_validated_user_template(self, db: AsyncSession, template_id: int) -> UserTemplate:
-        dbuser_template = await get_user_template(db, template_id)
+    async def get_validated_subscription_template(self, db: AsyncSession, template_id: int) -> SubscriptionTemplate:
+        dbuser_template = await get_subscription_template(db, template_id)
         if not dbuser_template:
-            await self.raise_error("User Template not found", 404)
+            await self.raise_error("Subscription Template not found", 404)
         return dbuser_template
 
     async def get_validated_node(self, db: AsyncSession, node_id, *, load_usage_logs: bool = True) -> Node:

@@ -1,10 +1,11 @@
 from datetime import datetime as dt
 from enum import Enum
 from typing import Literal
+from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.db.models import DataLimitResetStrategy, UserStatus
+from app.db.models import DataLimitResetStrategy, SubscriptionStatus
 from app.models.admin import AdminBase, AdminContactInfo
 from app.models.proxy import ProxyTable, ShadowsocksMethods
 from app.models.stats import Period, PeriodStartStat, StatList
@@ -16,25 +17,25 @@ from .validators import (
     ListValidator,
     NumericValidatorMixin,
     OptionalAwareDatetime,
-    UserValidator,
+    SubscriptionValidator,
 )
 
 
-class UserStatusModify(str, Enum):
+class SubscriptionStatusModify(str, Enum):
     active = "active"
     disabled = "disabled"
     on_hold = "on_hold"
 
 
 class NextPlanModel(BaseModel):
-    user_template_id: int | None = Field(default=None)
+    subscription_template_id: int | None = Field(default=None)
     data_limit: int | None = Field(default=None)
     expire: int | None = Field(default=None)
     add_remaining_traffic: bool = False
     model_config = ConfigDict(from_attributes=True)
 
 
-class User(BaseModel):
+class Subscription(BaseModel):
     proxy_settings: ProxyTable = Field(default_factory=ProxyTable)
     expire: dt | int | None = Field(default=None)
     data_limit: int | None = Field(ge=0, default=None, description="data_limit can be 0 or greater")
@@ -53,7 +54,7 @@ class User(BaseModel):
     next_plan: NextPlanModel | None = Field(default=None)
 
 
-class UserWithValidator(User):
+class SubscriptionWithValidator(Subscription):
     @field_validator("on_hold_expire_duration")
     @classmethod
     def validate_timeout(cls, v):
@@ -65,7 +66,7 @@ class UserWithValidator(User):
     @field_validator("on_hold_timeout", check_fields=False)
     @classmethod
     def validator_on_hold_timeout(cls, value):
-        return UserValidator.validator_on_hold_timeout(value)
+        return SubscriptionValidator.validator_on_hold_timeout(value)
 
     @field_validator("expire", check_fields=False)
     @classmethod
@@ -92,18 +93,15 @@ class UserWithValidator(User):
         return value
 
 
-class UserCreate(UserWithValidator):
-    username: str
-    status: UserStatus | None = Field(default=None)
-
-    @field_validator("username", check_fields=False)
-    @classmethod
-    def validate_username(cls, v):
-        return UserValidator.validate_username(v)
+class SubscriptionCreate(SubscriptionWithValidator):
+    uuid: UUID
+    status: SubscriptionStatus | None = Field(default=None)
 
     @field_validator("status", mode="before", check_fields=False)
     def validate_status(cls, status, values):
-        return UserValidator.validate_status(status, {UserStatus.active, UserStatus.on_hold}, values)
+        return SubscriptionValidator.validate_status(
+            status, {SubscriptionStatus.active, SubscriptionStatus.on_hold}, values
+        )
 
     @field_validator("group_ids", mode="after")
     @classmethod
@@ -111,15 +109,15 @@ class UserCreate(UserWithValidator):
         return ListValidator.not_null_list(v, "group")
 
 
-class UserModify(UserWithValidator):
-    status: UserStatus | None = Field(default=None)
+class SubscriptionModify(SubscriptionWithValidator):
+    status: SubscriptionStatus | None = Field(default=None)
     proxy_settings: ProxyTable | None = Field(default=None)
     group_ids: list[int] | None = Field(default=None)
 
     @field_validator("status", mode="before", check_fields=False)
     def validate_status(cls, status, values):
-        return UserValidator.validate_status(
-            status, {UserStatus.active, UserStatus.on_hold, UserStatus.disabled}, values
+        return SubscriptionValidator.validate_status(
+            status, {SubscriptionStatus.active, SubscriptionStatus.on_hold, SubscriptionStatus.disabled}, values
         )
 
     @field_validator("group_ids", mode="after")
@@ -128,14 +126,13 @@ class UserModify(UserWithValidator):
         return ListValidator.nullable_list(v, "group")
 
 
-class UserStatusToggle(BaseModel):
+class SubscriptionStatusToggle(BaseModel):
     disabled: bool
 
 
-class UserNotificationResponse(User):
-    id: int
-    username: str
-    status: UserStatus
+class SubscriptionNotificationResponse(Subscription):
+    uuid: UUID
+    status: SubscriptionStatus
     used_traffic: int
     lifetime_used_traffic: int = Field(default=0)
     created_at: AwareDatetime
@@ -152,12 +149,15 @@ class UserNotificationResponse(User):
         return NumericValidatorMixin.cast_to_int(v)
 
 
-class UserResponse(UserNotificationResponse):
+class SubscriptionResponse(SubscriptionNotificationResponse):
     admin: AdminBase | None = Field(default=None)
     group_names: list[str] | None = Field(default=None, exclude=True)
 
 
-class SubscriptionUserResponse(UserResponse):
+class SubscriptionAccessResponse(SubscriptionResponse):
+    # Public links expose a canonical UUID, never account credentials or an administrator.
+    uuid: UUID = Field(exclude=True)
+    subscription_uuid: UUID | None = Field(default=None)
     # A shareable subscription token must not expose connection credentials in metadata.
     proxy_settings: ProxyTable = Field(default_factory=ProxyTable, exclude=True)
     admin: AdminContactInfo | None = Field(default=None, exclude=True)
@@ -168,40 +168,39 @@ class SubscriptionUserResponse(UserResponse):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UsersResponseWithInbounds(SubscriptionUserResponse):
+class SubscriptionWithInbounds(SubscriptionAccessResponse):
     inbounds: list[str] | None = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserListItem(UserResponse):
+class SubscriptionListItem(SubscriptionResponse):
     # None when the device count was not loaded, for example without hwids.read
     hwid_count: int | None = Field(default=None, ge=0)
 
 
-class UsersResponse(BaseModel):
-    users: list[UserListItem]
+class SubscriptionsResponse(BaseModel):
+    subscriptions: list[SubscriptionListItem]
     total: int
 
 
-class UserSimple(BaseModel):
-    """Lightweight user model with only id and username for performance."""
+class SubscriptionSimple(BaseModel):
+    """Lightweight subscription identified only by UUID."""
 
-    id: int
-    username: str
+    uuid: UUID
     model_config = ConfigDict(from_attributes=True)
 
 
-class UsersSimpleResponse(BaseModel):
-    """Response model for lightweight user list."""
+class SubscriptionsSimpleResponse(BaseModel):
+    """Lightweight subscription list without numeric database identifiers."""
 
-    users: list[UserSimple]
+    subscriptions: list[SubscriptionSimple]
     total: int
 
 
-class UserSortField(str, Enum):
+class SubscriptionSortField(str, Enum):
     hwid_count = "hwid_count"
-    username = "username"
+    uuid = "uuid"
     used_traffic = "used_traffic"
     data_limit = "data_limit"
     expire = "expire"
@@ -210,9 +209,8 @@ class UserSortField(str, Enum):
     online_at = "online_at"
 
 
-class UserSimpleSortField(str, Enum):
-    id = "id"
-    username = "username"
+class SubscriptionSimpleSortField(str, Enum):
+    uuid = "uuid"
 
 
 class SortDirection(str, Enum):
@@ -220,17 +218,17 @@ class SortDirection(str, Enum):
     desc = "desc"
 
 
-class UserSortOption(str, Enum):
+class SubscriptionSortOption(str, Enum):
     hwid_count = "hwid_count"
     desc_hwid_count = "-hwid_count"
-    username = "username"
+    uuid = "uuid"
     used_traffic = "used_traffic"
     data_limit = "data_limit"
     expire = "expire"
     created_at = "created_at"
     edit_at = "edit_at"
     online_at = "online_at"
-    desc_username = "-username"
+    desc_uuid = "-uuid"
     desc_used_traffic = "-used_traffic"
     desc_data_limit = "-data_limit"
     desc_expire = "-expire"
@@ -239,42 +237,38 @@ class UserSortOption(str, Enum):
     desc_online_at = "-online_at"
 
     @property
-    def field(self) -> UserSortField:
-        return UserSortField(self.value.lstrip("-"))
+    def field(self) -> SubscriptionSortField:
+        return SubscriptionSortField(self.value.lstrip("-"))
 
     @property
     def direction(self) -> SortDirection:
         return SortDirection.desc if self.value.startswith("-") else SortDirection.asc
 
 
-class UserSimpleSortOption(str, Enum):
-    id = "id"
-    username = "username"
-    desc_id = "-id"
-    desc_username = "-username"
+class SubscriptionSimpleSortOption(str, Enum):
+    uuid = "uuid"
+    desc_uuid = "-uuid"
 
     @property
-    def field(self) -> UserSimpleSortField:
-        return UserSimpleSortField(self.value.lstrip("-"))
+    def field(self) -> SubscriptionSimpleSortField:
+        return SubscriptionSimpleSortField(self.value.lstrip("-"))
 
     @property
     def direction(self) -> SortDirection:
         return SortDirection.desc if self.value.startswith("-") else SortDirection.asc
 
 
-class UserListQuery(BaseModel):
+class SubscriptionListQuery(BaseModel):
     offset: int | None = Field(default=None)
     limit: int | None = Field(default=None)
-    ids: list[int] | None = Field(default=None)
-    username: list[str] | None = Field(default=None)
-    usernames: list[str] | None = Field(default=None)
+    uuids: list[UUID] | None = Field(default=None)
     owner: list[str] | None = Field(default=None, alias="admin")
     admin_ids: list[int] | None = Field(default=None, validation_alias=AliasChoices("admin_ids", "admin_id"))
     group_ids: list[int] | None = Field(default=None, alias="group")
     no_group: bool = Field(default=False)
     search: str | None = Field(default=None)
-    status: UserStatus | list[UserStatus] | None = Field(default=None)
-    sort: list[UserSortOption] = Field(default_factory=list)
+    status: SubscriptionStatus | list[SubscriptionStatus] | None = Field(default=None)
+    sort: list[SubscriptionSortOption] = Field(default_factory=list)
     proxy_id: str | None = Field(default=None)
     data_limit_reset_strategy: DataLimitResetStrategy | list[DataLimitResetStrategy] | None = Field(
         default=None, validation_alias=AliasChoices("data_limit_reset_strategy", "reset_strategy")
@@ -294,25 +288,24 @@ class UserListQuery(BaseModel):
     @field_validator("sort", mode="before")
     @classmethod
     def validate_sort(cls, value):
-        return ListValidator.normalize_enum_list_input(value, UserSortOption)
+        return ListValidator.normalize_enum_list_input(value, SubscriptionSortOption)
 
 
-class UserSimpleListQuery(BaseModel):
-    ids: list[int] | None = Field(default=None)
-    usernames: list[str] | None = Field(default=None)
+class SubscriptionSimpleListQuery(BaseModel):
+    uuids: list[UUID] | None = Field(default=None)
     offset: int | None = Field(default=None)
     limit: int | None = Field(default=None)
     search: str | None = Field(default=None)
-    sort: list[UserSimpleSortOption] = Field(default_factory=list)
+    sort: list[SubscriptionSimpleSortOption] = Field(default_factory=list)
     all: bool = Field(default=False)
 
     @field_validator("sort", mode="before")
     @classmethod
     def validate_sort(cls, value):
-        return ListValidator.normalize_enum_list_input(value, UserSimpleSortOption)
+        return ListValidator.normalize_enum_list_input(value, SubscriptionSimpleSortOption)
 
 
-class UserUsageQuery(BaseModel):
+class SubscriptionUsageQuery(BaseModel):
     period: Period = Field(default=Period.hour)
     node_id: int | None = Field(default=None)
     group_by_node: bool = Field(default=False)
@@ -320,17 +313,17 @@ class UserUsageQuery(BaseModel):
     end: OptionalAwareDatetime = Field(default=None, examples=["2024-01-31T23:59:59+03:30"])
 
 
-class UsersUsageQuery(UserUsageQuery):
+class SubscriptionsUsageQuery(SubscriptionUsageQuery):
     owner: list[str] | None = Field(default=None, alias="admin")
     model_config = ConfigDict(populate_by_name=True)
 
 
-class UsersUsageBreakdownQuery(UsersUsageQuery):
+class SubscriptionsUsageBreakdownQuery(SubscriptionsUsageQuery):
     core_id: int | None = Field(default=None)
     group_by_admin: bool = Field(default=False)
 
 
-class ExpiredUsersQuery(BaseModel):
+class ExpiredSubscriptionsQuery(BaseModel):
     admin_username: str | None = Field(default=None)
     target: Literal["expired", "limited", "on_hold", "disabled", "inactive"] = Field(default="expired")
     expired_after: OptionalAwareDatetime = Field(default=None, examples=["2024-01-01T00:00:00+03:30"])
@@ -347,7 +340,7 @@ class ExpiredUsersQuery(BaseModel):
         return self
 
 
-class UserSubscriptionUpdateSchema(BaseModel):
+class SubscriptionUpdateSchema(BaseModel):
     created_at: AwareDatetime
     user_agent: str
     ip: str | None = Field(default=None)
@@ -356,18 +349,18 @@ class UserSubscriptionUpdateSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserSubscriptionUpdateList(BaseModel):
-    updates: list[UserSubscriptionUpdateSchema] = Field(default_factory=list)
+class SubscriptionUpdateList(BaseModel):
+    updates: list[SubscriptionUpdateSchema] = Field(default_factory=list)
     count: int
 
 
-class UserSubscriptionUpdateChartSegment(BaseModel):
+class SubscriptionUpdateChartSegment(BaseModel):
     name: str
     count: int
     percentage: float
 
 
-class UserSubscriptionUpdateChartStat(PeriodStartStat):
+class SubscriptionUpdateChartStat(PeriodStartStat):
     agent: str
     count: int
 
@@ -377,13 +370,13 @@ class UserSubscriptionUpdateChartStat(PeriodStartStat):
         return NumericValidatorMixin.cast_to_int(v)
 
 
-class UserSubscriptionUpdateChart(StatList):
+class SubscriptionUpdateChart(StatList):
     total: int
-    segments: list[UserSubscriptionUpdateChartSegment] = Field(default_factory=list)
-    stats: list[UserSubscriptionUpdateChartStat] = Field(default_factory=list)
+    segments: list[SubscriptionUpdateChartSegment] = Field(default_factory=list)
+    stats: list[SubscriptionUpdateChartStat] = Field(default_factory=list)
 
 
-class UserHWIDResponse(BaseModel):
+class SubscriptionHWIDResponse(BaseModel):
     id: int
     hwid: str
     device_os: str | None = None
@@ -394,63 +387,54 @@ class UserHWIDResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserHWIDListResponse(BaseModel):
-    hwids: list[UserHWIDResponse]
+class SubscriptionHWIDListResponse(BaseModel):
+    hwids: list[SubscriptionHWIDResponse]
     count: int
 
 
-class RemoveUsersResponse(BaseModel):
-    users: list[str]
+class RemoveSubscriptionsResponse(BaseModel):
+    uuids: list[UUID]
     count: int
 
 
-class BulkUsersActionResponse(BaseModel):
-    users: list[str]
+class BulkSubscriptionsActionResponse(BaseModel):
+    uuids: list[UUID]
     count: int
 
 
-class BulkUsersSelection(BaseModel):
-    ids: set[int] = Field(default_factory=set)
+class BulkSubscriptionsSelection(BaseModel):
+    uuids: set[UUID] = Field(default_factory=set)
 
-    @field_validator("ids", mode="after")
+    @field_validator("uuids", mode="after")
     @classmethod
-    def ids_validator(cls, v):
-        return ListValidator.not_null_list(v, "user")
+    def uuids_validator(cls, v):
+        return ListValidator.not_null_list(v, "subscription")
 
 
-class BulkUsersSetOwner(BulkUsersSelection):
+class BulkSubscriptionsSetOwner(BulkSubscriptionsSelection):
     admin_username: str
 
     @field_validator("admin_username", check_fields=False)
     @classmethod
     def validate_admin_username(cls, v):
-        return UserValidator.validate_username(v)
+        return SubscriptionValidator.validate_username(v)
 
 
-class ModifyUserByTemplate(BaseModel):
-    user_template_id: int
+class ModifySubscriptionByTemplate(BaseModel):
+    subscription_template_id: int
     note: str | None = Field(max_length=500, default=None)
 
 
-class BulkUsersApplyTemplate(BulkUsersSelection, ModifyUserByTemplate):
-    """Apply a user template to a selection of existing users (by ID)."""
+class BulkSubscriptionsApplyTemplate(BulkSubscriptionsSelection, ModifySubscriptionByTemplate):
+    """Apply a subscription template to the selected subscription UUIDs."""
 
 
-class CreateUserFromTemplate(ModifyUserByTemplate):
-    username: str
-
-    @field_validator("username", check_fields=False)
-    @classmethod
-    def validate_username(cls, v):
-        return UserValidator.validate_username(v)
-
-
-class BulkUserFilter(BaseModel):
+class BulkSubscriptionFilter(BaseModel):
     dry_run: bool = False
     group_ids: set[int] = Field(default_factory=set)
     admins: set[int] = Field(default_factory=set)
-    users: set[int] = Field(default_factory=set)
-    status: set[UserStatus] = Field(default_factory=set)
+    subscriptions: set[UUID] = Field(default_factory=set)
+    status: set[SubscriptionStatus] = Field(default_factory=set)
     expire_after: OptionalAwareDatetime = Field(
         default=None, validation_alias=AliasChoices("expire_after", "expired_after")
     )
@@ -459,59 +443,16 @@ class BulkUserFilter(BaseModel):
     )
 
 
-class BulkUser(BulkUserFilter):
+class BulkSubscription(BulkSubscriptionFilter):
     amount: int
 
 
-class BulkUsersProxy(BulkUserFilter):
+class BulkSubscriptionsProxy(BulkSubscriptionFilter):
     method: ShadowsocksMethods | None = Field(default=None)
 
 
 class BulkOperationDryRunResponse(BaseModel):
-    """Preview for bulk user/group operations (no DB writes)."""
+    """Preview for scoped subscription operations (no DB writes)."""
 
     dry_run: bool = True
-    affected_users: int
-
-
-class UsernameGenerationStrategy(str, Enum):
-    random = "random"
-    sequence = "sequence"
-
-
-class BulkCreationBase(BaseModel):
-    count: int = Field(gt=0, le=500)
-    strategy: UsernameGenerationStrategy = Field(default=UsernameGenerationStrategy.random)
-
-
-class BulkUsersFromTemplate(BulkCreationBase, CreateUserFromTemplate):
-    username: str | None = Field(default=None)
-    start_number: int | None = Field(
-        default=None,
-        ge=0,
-        description="Starting suffix for sequence strategy (defaults to 1; base username digits are ignored)",
-    )
-
-    @field_validator("username")
-    @classmethod
-    def validate_username(cls, v):
-        # Skip validation if username is None (for random strategy)
-        if v is None:
-            return v
-        return UserValidator.validate_username(username=v, len_check=False)
-
-    @model_validator(mode="after")
-    def validate_username_strategy(self):
-        if self.strategy == UsernameGenerationStrategy.random:
-            if self.username not in (None, ""):
-                raise ValueError("username must be null when strategy is 'random'")
-            if self.start_number is not None:
-                raise ValueError("start_number is only valid when strategy is 'sequence'")
-        if self.strategy == UsernameGenerationStrategy.sequence and not self.username:
-            raise ValueError("username is required when strategy is 'sequence'")
-        return self
-
-
-class BulkUsersCreateResponse(BaseModel):
-    subscription_urls: list[str] = Field(default_factory=list)
-    created: int = Field(default=0)
+    affected_subscriptions: int

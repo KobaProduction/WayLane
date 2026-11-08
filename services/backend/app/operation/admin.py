@@ -2,6 +2,7 @@ import asyncio
 import warnings
 from datetime import datetime as dt
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app import notification
@@ -9,7 +10,6 @@ from app.db import AsyncSession
 from app.db.crud.admin import (
     build_admin_details,
     create_admin,
-    find_admins_by_telegram_id,
     get_admin_usages,
     get_admins,
     get_admins_count,
@@ -20,8 +20,8 @@ from app.db.crud.admin import (
     update_admin,
 )
 from app.db.crud.bulk import activate_all_disabled_users, disable_all_active_users
-from app.db.crud.user import get_admin_users_for_node_sync, get_users, remove_users
-from app.db.models import Admin, AdminStatus
+from app.db.crud.subscription import get_admin_subscriptions_for_node_sync, get_subscriptions, remove_subscriptions
+from app.db.models import Admin, AdminStatus, Subscription
 from app.models.admin import (
     AdminCreate,
     AdminDetails,
@@ -36,19 +36,43 @@ from app.models.admin import (
     BulkAdminSelection,
     RemoveAdminsResponse,
 )
-from app.models.stats import Period, UserUsageStatsList
-from app.models.user import UserListQuery
-from app.node.sync import remove_user as sync_remove_user, sync_users
+from app.models.stats import Period, SubscriptionUsageStatsList
+from app.models.subscription_models import SubscriptionListQuery
+from app.node.sync import remove_subscription as sync_remove_subscription, sync_subscriptions
 from app.operation import BaseOperation
 from app.operation.admin_sync import admin_users_sync_blocked, sync_admin_users_for_block_transition
 from app.operation.permissions import PermissionDenied, enforce_permission
-from app.operation.user import UserOperation
+from app.operation.subscription_management import SubscriptionManagementOperation
 from app.utils.logger import get_logger
 
 logger = get_logger("admin-operation")
 
 
 class AdminOperation(BaseOperation):
+    async def _reject_core_subscription_lifecycle(self, db: AsyncSession, admin_ids: list[int]) -> None:
+        """Legacy admin bulk actions cannot rewrite or delete Core-owned subscriptions."""
+        if not admin_ids:
+            return
+        # Serialize provider-owned subscription creation (which references the
+        # owning Admin) with destructive admin-wide operations on PostgreSQL.
+        # SQLite ignores FOR UPDATE and still benefits from the subsequent guard.
+        await db.execute(
+            select(Admin.id).where(Admin.id.in_(sorted(set(admin_ids)))).order_by(Admin.id).with_for_update(of=Admin)
+        )
+        found = (
+            await db.execute(
+                select(Subscription.uuid)
+                .where(
+                    Subscription.admin_id.in_(admin_ids),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if found is not None:
+            await self.raise_error(
+                message="Core-managed subscription lifecycle must be changed through VPN Core", code=409
+            )
+
     @staticmethod
     def _is_owner_admin(db_admin: Admin) -> bool:
         return db_admin.role_id == 1
@@ -63,11 +87,6 @@ class AdminOperation(BaseOperation):
             await self.raise_error(
                 message="Owner role cannot be assigned via this endpoint. Use the setup flow.", code=403
             )
-
-        if new_admin.telegram_id is not None:
-            existing_admins = await find_admins_by_telegram_id(db, new_admin.telegram_id, limit=1)
-            if existing_admins:
-                await self.raise_error(message="Telegram ID is already assigned to another admin.", code=409, db=db)
 
         try:
             db_admin = await create_admin(db, new_admin)
@@ -128,13 +147,6 @@ class AdminOperation(BaseOperation):
         ):
             await self.raise_error(message="You're not allowed to disable your own account.", code=403)
 
-        if modified_admin.telegram_id:
-            existing_admins = await find_admins_by_telegram_id(
-                db, modified_admin.telegram_id, exclude_admin_id=db_admin.id, limit=1
-            )
-            if existing_admins:
-                await self.raise_error(message="Telegram ID is already assigned to another admin.", code=409, db=db)
-
         old_users_sync_blocked = await admin_users_sync_blocked(db_admin)
         db_admin = await update_admin(db, db_admin, modified_admin)
 
@@ -169,6 +181,7 @@ class AdminOperation(BaseOperation):
         """Remove an admin from the database."""
         if db_admin.role_id == 1:
             await self.raise_error(message="Owner cannot be deleted via this endpoint. Use the setup flow.", code=403)
+        await self._reject_core_subscription_lifecycle(db, [db_admin.id])
 
         await remove_admin(db, db_admin)
         if current_admin:
@@ -217,9 +230,10 @@ class AdminOperation(BaseOperation):
 
     async def _disable_all_active_users_for_admin(self, db: AsyncSession, db_admin: Admin, admin: AdminDetails):
         """Disable all active users under a specific admin."""
+        await self._reject_core_subscription_lifecycle(db, [db_admin.id])
         await disable_all_active_users(db=db, admin=db_admin)
-        users = await get_admin_users_for_node_sync(db, db_admin.id)
-        await sync_users(users)
+        users = await get_admin_subscriptions_for_node_sync(db, db_admin.id)
+        await sync_subscriptions(users)
         logger.info(f'Admin "{db_admin.username}" users has been disabled by admin "{admin.username}"')
 
     async def disable_all_active_users_by_id(self, db: AsyncSession, admin_id: int, admin: AdminDetails):
@@ -239,9 +253,10 @@ class AdminOperation(BaseOperation):
 
     async def _activate_all_disabled_users_for_admin(self, db: AsyncSession, db_admin: Admin, admin: AdminDetails):
         """Activate all disabled users under a specific admin."""
+        await self._reject_core_subscription_lifecycle(db, [db_admin.id])
         await activate_all_disabled_users(db=db, admin=db_admin)
-        users = await get_admin_users_for_node_sync(db, db_admin.id)
-        await sync_users(users)
+        users = await get_admin_subscriptions_for_node_sync(db, db_admin.id)
+        await sync_subscriptions(users)
         logger.info(f'Admin "{db_admin.username}" users has been activated by admin "{admin.username}"')
 
     async def activate_all_disabled_users_by_id(self, db: AsyncSession, admin_id: int, admin: AdminDetails):
@@ -261,18 +276,19 @@ class AdminOperation(BaseOperation):
 
     async def _remove_all_users_for_admin(self, db: AsyncSession, db_admin: Admin, admin: AdminDetails) -> int:
         """Delete all users that belong to the specified admin."""
-        users = await get_users(db, query=UserListQuery(), admin=db_admin, load_admin_role=True)
+        await self._reject_core_subscription_lifecycle(db, [db_admin.id])
+        users = await get_subscriptions(db, query=SubscriptionListQuery(), admin=db_admin, load_admin_role=True)
         if not users:
             return 0
 
-        user_operation = UserOperation(self.operator_type)
-        serialized_users = [await user_operation.validate_user(user) for user in users]
+        user_operation = SubscriptionManagementOperation(self.operator_type)
+        serialized_users = [await user_operation.validate_subscription(user) for user in users]
 
-        await remove_users(db, users)
+        await remove_subscriptions(db, users)
         for user in serialized_users:
-            await sync_remove_user(user)
+            await sync_remove_subscription(user)
         for user in serialized_users:
-            asyncio.create_task(notification.remove_user(user, admin))
+            asyncio.create_task(notification.remove_subscription(user, admin))
 
         logger.info(
             f'Admin "{admin.username}" deleted {len(serialized_users)} users belonging to admin "{db_admin.username}"'
@@ -315,7 +331,7 @@ class AdminOperation(BaseOperation):
 
     async def get_admin_usage(
         self, db: AsyncSession, username: str, admin: AdminDetails, query: AdminUsageQuery
-    ) -> UserUsageStatsList:
+    ) -> SubscriptionUsageStatsList:
         warnings.warn(
             "get_admin_usage(username, ...) is deprecated. Use get_admin_usage_by_id(admin_id, ...).",
             DeprecationWarning,
@@ -344,7 +360,7 @@ class AdminOperation(BaseOperation):
         period: Period = Period.hour,
         node_id: int | None = None,
         group_by_node: bool = False,
-    ) -> UserUsageStatsList:
+    ) -> SubscriptionUsageStatsList:
         """Get aggregated usage for an admin's users."""
         start, end = await self.validate_dates(start, end, True)
 
@@ -372,7 +388,7 @@ class AdminOperation(BaseOperation):
 
     async def get_admin_usage_by_id(
         self, db: AsyncSession, admin_id: int, admin: AdminDetails, query: AdminUsageQuery
-    ) -> UserUsageStatsList:
+    ) -> SubscriptionUsageStatsList:
         db_admin = await self.get_validated_admin_by_id(db, admin_id)
         await self._ensure_owner_target_access(db_admin, admin)
         return await self._get_admin_usage(
@@ -396,6 +412,7 @@ class AdminOperation(BaseOperation):
 
         usernames = [a.username for a in db_admins]
         admin_ids = [a.id for a in db_admins]
+        await self._reject_core_subscription_lifecycle(db, admin_ids)
         await remove_admins(db, admin_ids)
 
         for username in usernames:
@@ -476,6 +493,9 @@ class AdminOperation(BaseOperation):
     ) -> BulkAdminsActionResponse:
         """Disable all active users under selected admins."""
         db_admins = await self._get_validated_bulk_admins(db, bulk_admins.ids, admin)
+        # Preflight the ENTIRE selection: no earlier admin may be modified if a
+        # later admin owns a Core-managed subscription.
+        await self._reject_core_subscription_lifecycle(db, [item.id for item in db_admins])
         for db_admin in db_admins:
             await self._disable_all_active_users_for_admin(db, db_admin, admin)
         return self._build_bulk_action_response(db_admins)
@@ -485,6 +505,9 @@ class AdminOperation(BaseOperation):
     ) -> BulkAdminsActionResponse:
         """Activate all disabled users under selected admins."""
         db_admins = await self._get_validated_bulk_admins(db, bulk_admins.ids, admin)
+        # Preflight the ENTIRE selection: no earlier admin may be modified if a
+        # later admin owns a Core-managed subscription.
+        await self._reject_core_subscription_lifecycle(db, [item.id for item in db_admins])
         for db_admin in db_admins:
             await self._activate_all_disabled_users_for_admin(db, db_admin, admin)
         return self._build_bulk_action_response(db_admins)
@@ -494,6 +517,9 @@ class AdminOperation(BaseOperation):
     ) -> BulkAdminsActionResponse:
         """Remove all users under selected admins."""
         db_admins = await self._get_validated_bulk_admins(db, bulk_admins.ids, admin)
+        # Preflight the ENTIRE selection: no earlier admin may be modified if a
+        # later admin owns a Core-managed subscription.
+        await self._reject_core_subscription_lifecycle(db, [item.id for item in db_admins])
         for db_admin in db_admins:
             await self._remove_all_users_for_admin(db, db_admin, admin)
         return self._build_bulk_action_response(db_admins)

@@ -3,15 +3,15 @@ from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any
 
 from aiorwlock import RWLock
-from waylane_node_bridge import Health, NodeType, WayLaneNode
-from waylane_node_bridge.common.service_pb2 import User as ProtoUser
 
 from app.db.models import Node, NodeConnectionType
 from app.node.bridge import create_node
 from app.node.nats_memory import ensure_bridge_memory, get_bridge_memory
-from app.node.user import core_users
+from app.node.subscription import core_subscriptions
 from app.utils.logger import get_logger
 from config import nats_settings
+from waylane_node_bridge import Health, NodeType, WayLaneNode
+from waylane_node_bridge.common.service_pb2 import Subscription as ProtoSubscription
 
 type_map = {
     NodeConnectionType.rest: NodeType.rest,
@@ -19,7 +19,7 @@ type_map = {
 }
 
 
-class UserSyncPreemptedError(RuntimeError):
+class SubscriptionSyncPreemptedError(RuntimeError):
     """A connection change or removal of the node cancelled an in-flight user sync."""
 
 
@@ -233,10 +233,12 @@ class NodeManager:
             return list(self._nodes.items())
 
     @staticmethod
-    def _chunk_users(users: list[ProtoUser], size: int) -> list[list[ProtoUser]]:
+    def _chunk_users(users: list[ProtoSubscription], size: int) -> list[list[ProtoSubscription]]:
         return [users[start : start + size] for start in range(0, len(users), size)]
 
-    async def _sync_user_batch_to_node(self, node: WayLaneNode, batch: list[ProtoUser]) -> list[ProtoUser]:
+    async def _sync_user_batch_to_node(
+        self, node: WayLaneNode, batch: list[ProtoSubscription]
+    ) -> list[ProtoSubscription]:
         """Deliver one bounded batch directly; returns the users that failed."""
         users_to_sync = batch
         supports_chunked = True
@@ -260,7 +262,7 @@ class NodeManager:
         return list(users_to_sync)
 
     async def _sync_user_batches(
-        self, node_id: int, node: WayLaneNode, users: list[ProtoUser], *, batch_size: int | None = None
+        self, node_id: int, node: WayLaneNode, users: list[ProtoSubscription], *, batch_size: int | None = None
     ) -> None:
         batch_size = max(1, batch_size or nats_settings.node_update_users_batch_size)
         failed_count = 0
@@ -271,7 +273,7 @@ class NodeManager:
         if failed_count:
             raise RuntimeError(f"failed to sync {failed_count}/{len(users)} users to node {node_id}")
 
-    async def _sync_users_to_node(self, node_id: int, node: WayLaneNode | None, users: list[ProtoUser]):
+    async def _sync_users_to_node(self, node_id: int, node: WayLaneNode | None, users: list[ProtoSubscription]):
         batch_size = max(1, nats_settings.node_update_users_batch_size)
         lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
         failed_count = 0
@@ -315,7 +317,7 @@ class NodeManager:
 
         A connection change or removal of the node cancels only that task, never the
         caller (for example the admin's HTTP request); the caller gets
-        ``UserSyncPreemptedError`` instead. Cancelling the caller still cancels the sync.
+        ``SubscriptionSyncPreemptedError`` instead. Cancelling the caller still cancels the sync.
         """
         task = asyncio.create_task(sync)
         self._track_user_sync(node_id, task)
@@ -324,7 +326,7 @@ class NodeManager:
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if task.cancelled() and (current is None or not current.cancelling()):
-                raise UserSyncPreemptedError(
+                raise SubscriptionSyncPreemptedError(
                     f"user sync to node {node_id} was cancelled by a connection change or removal of the node"
                 ) from None
             raise
@@ -332,7 +334,7 @@ class NodeManager:
             self._untrack_user_sync(node_id, task)
 
     async def sync_users_batched(
-        self, node_id: int, node: WayLaneNode, users: list[ProtoUser], *, batch_size: int | None = None
+        self, node_id: int, node: WayLaneNode, users: list[ProtoSubscription], *, batch_size: int | None = None
     ) -> WayLaneNode | None:
         """Apply a large initial user set through bounded delta batches.
 
@@ -344,7 +346,7 @@ class NodeManager:
         )
 
     async def _sync_users_batched(
-        self, node_id: int, node: WayLaneNode, users: list[ProtoUser], *, batch_size: int | None
+        self, node_id: int, node: WayLaneNode, users: list[ProtoSubscription], *, batch_size: int | None
     ) -> WayLaneNode | None:
         lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
         async with lock:
@@ -369,7 +371,7 @@ class NodeManager:
     async def sync_full(
         self,
         node_id: int,
-        users: list[ProtoUser] | Callable[[], Awaitable[list[ProtoUser]]],
+        users: list[ProtoSubscription] | Callable[[], Awaitable[list[ProtoSubscription]]],
         *,
         flush_pending: bool = False,
     ) -> WayLaneNode | None:
@@ -389,7 +391,7 @@ class NodeManager:
 
         The sync runs in its own tracked task, so preemption cancels only that task and
         never the caller (in single-process mode the caller is the admin's HTTP request);
-        the caller gets ``UserSyncPreemptedError`` instead. Cancelling the caller still
+        the caller gets ``SubscriptionSyncPreemptedError`` instead. Cancelling the caller still
         cancels the sync.
         """
         return await self._run_preemptible_sync(node_id, self._sync_full(node_id, users, flush_pending=flush_pending))
@@ -397,7 +399,7 @@ class NodeManager:
     async def _sync_full(
         self,
         node_id: int,
-        users: list[ProtoUser] | Callable[[], Awaitable[list[ProtoUser]]],
+        users: list[ProtoSubscription] | Callable[[], Awaitable[list[ProtoSubscription]]],
         *,
         flush_pending: bool,
     ) -> WayLaneNode | None:
@@ -436,7 +438,7 @@ class NodeManager:
                     await node.release_queued_work(captured)
             return node
 
-    async def _update_users(self, users: list[ProtoUser]):
+    async def _update_users(self, users: list[ProtoSubscription]):
         nodes = await self._snapshot_node_items()
         if not nodes:
             return
@@ -447,11 +449,11 @@ class NodeManager:
         for (node_id, _node), result in zip(nodes, results, strict=True):
             if isinstance(result, asyncio.CancelledError):
                 # A connection change or removal of the node preempted this delivery.
-                self.logger.debug("User sync to node %s was cancelled by a node lifecycle change", node_id)
+                self.logger.debug("Subscription sync to node %s was cancelled by a node lifecycle change", node_id)
             elif isinstance(result, Exception):
                 self.logger.error("Failed to sync users to node %s: %s", node_id, result)
 
-    async def update_users(self, users: list[ProtoUser], *, await_dispatch: bool = False) -> None:
+    async def update_users(self, users: list[ProtoSubscription], *, await_dispatch: bool = False) -> None:
         """Queue a batch, optionally waiting so a producer cannot outrun node dispatch.
 
         Per-node failures are logged, never raised: a node that misses a batch gets a
@@ -462,7 +464,7 @@ class NodeManager:
         else:
             asyncio.create_task(self._update_users(users))
 
-    async def update_user(self, user: ProtoUser) -> None:
+    async def update_user(self, user: ProtoSubscription) -> None:
         nodes = await self._snapshot_nodes()
         if not nodes:
             return
@@ -476,4 +478,4 @@ class NodeManager:
 node_manager: NodeManager = NodeManager()
 
 
-__all__ = ["UserSyncPreemptedError", "core_users", "node_manager"]
+__all__ = ["SubscriptionSyncPreemptedError", "core_subscriptions", "node_manager"]

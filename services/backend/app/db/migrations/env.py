@@ -1,14 +1,14 @@
 import asyncio
 import os
+from contextlib import contextmanager
 from logging.config import fileConfig
-from sqlalchemy import JSON
-from sqlalchemy import BigInteger
-from sqlalchemy import pool
-from sqlalchemy.dialects.postgresql import JSONB
+
+from alembic import context
+from sqlalchemy import JSON, BigInteger, pool
 from sqlalchemy.dialects import mysql
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-from alembic import context
 
 from app.db.base import Base
 from app.db.compiles_types import SqliteCompatibleBigInteger, WebAuthnBinary, WebAuthnChallenge, WebAuthnCredentialId
@@ -49,25 +49,35 @@ def _compare_type(context, inspected_column, metadata_column, inspected_type, me
     """
     if context.dialect.name == "sqlite":
         sqlite_bigint_equivalent = (
-            (isinstance(inspected_type, BigInteger) and isinstance(metadata_type, SqliteCompatibleBigInteger))
-            or (isinstance(inspected_type, SqliteCompatibleBigInteger) and isinstance(metadata_type, BigInteger))
-        )
+            isinstance(inspected_type, BigInteger) and isinstance(metadata_type, SqliteCompatibleBigInteger)
+        ) or (isinstance(inspected_type, SqliteCompatibleBigInteger) and isinstance(metadata_type, BigInteger))
         if sqlite_bigint_equivalent:
             return False
 
     # MySQL reflects WebAuthnBinary as TINYBLOB for challenges and BLOB for
     # credential/public-key data. Both are intentional size-specific mappings.
-    if context.dialect.name == "mysql" and isinstance(metadata_type, WebAuthnBinary):
-        if isinstance(inspected_type, (mysql.TINYBLOB, mysql.BLOB)):
-            return False
+    if (
+        context.dialect.name == "mysql"
+        and isinstance(metadata_type, WebAuthnBinary)
+        and isinstance(inspected_type, (mysql.TINYBLOB, mysql.BLOB))
+    ):
+        return False
 
-    if context.dialect.name == "mysql" and isinstance(metadata_type, WebAuthnCredentialId):
-        if isinstance(inspected_type, mysql.VARBINARY) and inspected_type.length == metadata_type.length:
-            return False
+    if (
+        context.dialect.name == "mysql"
+        and isinstance(metadata_type, WebAuthnCredentialId)
+        and isinstance(inspected_type, mysql.VARBINARY)
+        and inspected_type.length == metadata_type.length
+    ):
+        return False
 
-    if context.dialect.name == "mysql" and isinstance(metadata_type, WebAuthnChallenge):
-        if isinstance(inspected_type, mysql.VARBINARY) and inspected_type.length == metadata_type.length:
-            return False
+    if (
+        context.dialect.name == "mysql"
+        and isinstance(metadata_type, WebAuthnChallenge)
+        and isinstance(inspected_type, mysql.VARBINARY)
+        and inspected_type.length == metadata_type.length
+    ):
+        return False
 
     # PostgreSQL reflection can report JSON with explicit astext_type while
     # metadata often renders as bare JSON(), which is not a schema change.
@@ -83,6 +93,26 @@ def _compare_type(context, inspected_column, metadata_column, inspected_type, me
             return False
 
     return None
+
+
+@contextmanager
+def _frozen_legacy_user_mapping():
+    """Expose the old migration row model only while Alembic replays frozen revisions.
+
+    The 160 upstream migration checksums must not change. The application ORM
+    must not export a product User or any compatibility alias during normal API
+    operations. Keep this shim confined to the historical Alembic execution.
+    """
+    from app.db import models
+    from app.db.migrations._historic_user import HistoricalUserForAlembic
+
+    if "User" in vars(models):
+        raise RuntimeError("Historical User mapping already registered outside Alembic")
+    models.User = HistoricalUserForAlembic
+    try:
+        yield
+    finally:
+        del models.User
 
 
 def run_migrations_offline() -> None:
@@ -109,8 +139,10 @@ def run_migrations_offline() -> None:
         transactional_ddl=True,
     )
 
-    with context.begin_transaction():
+    with _frozen_legacy_user_mapping(), context.begin_transaction():
         context.run_migrations()
+
+
 def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
@@ -121,7 +153,7 @@ def do_run_migrations(connection: Connection) -> None:
         transactional_ddl=True,
     )
 
-    with context.begin_transaction():
+    with _frozen_legacy_user_mapping(), context.begin_transaction():
         context.run_migrations()
 
 

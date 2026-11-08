@@ -33,10 +33,17 @@ tls_bindings = sa.Table(
 # Autonomous Agent bindings are separate from legacy node/core bindings.
 # Secret material stays in tls_presets; never copy it into desired Xray JSON.
 agent_tls_bindings = sa.Table(
-    "node_agent_tls_bindings", Base.metadata,
-    sa.Column("node_uuid", sa.String(36), sa.ForeignKey(
-        "node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    "node_agent_tls_bindings",
+    Base.metadata,
+    sa.Column(
+        "node_uuid",
+        sa.String(36),
+        sa.ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
     sa.Column("inbound_tag", sa.String(256), primary_key=True),
-    sa.Column("preset_id", sa.String(36), sa.ForeignKey(
-        "tls_presets.id", ondelete="RESTRICT"), nullable=False),
+    sa.Column("preset_id", sa.String(36), sa.ForeignKey("tls_presets.id", ondelete="RESTRICT"), nullable=False),
 )
+
+# Match the index created by the immutable e81b29c40d72 Alembic revision.
+sa.Index("ix_agent_tls_bindings_preset", agent_tls_bindings.c.preset_id)

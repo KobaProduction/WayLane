@@ -2,11 +2,10 @@ import asyncio
 import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import ClassVar
+from uuid import UUID
 
 from fastapi import HTTPException
-from waylane_node_bridge import Health, NodeAPIError, WayLaneNode
-from waylane_node_bridge.common import service_pb2 as service
-from waylane_node_bridge.storage import LifecycleStatus
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app import notification
@@ -29,8 +28,8 @@ from app.db.crud.node import (
     reset_node_usage,
     update_node_status,
 )
-from app.db.crud.user import get_user_by_id, get_user_count_metric_stats
-from app.db.models import Node, NodeStatus
+from app.db.crud.subscription import get_subscription_by_uuid, get_subscription_count_metric_stats
+from app.db.models import Node, NodeStatus, Subscription
 from app.models.admin import AdminDetails
 from app.models.core import CoreType
 from app.models.node import (
@@ -51,23 +50,23 @@ from app.models.node import (
     NodeStatsPeriodQuery,
     NodeUsageQuery,
     RemoveNodesResponse,
+    SubscriptionIPList,
+    SubscriptionIPListAll,
     UsageTable,
-    UserIPList,
-    UserIPListAll,
 )
 from app.models.stats import (
     NodeOutboundsLatencyResponse,
     NodeRealtimeStats,
     NodeStatsList,
     NodeUsageStatsList,
-    UserCountMetric,
-    UserCountMetricStatsList,
+    SubscriptionCountMetric,
+    SubscriptionCountMetricStatsList,
     validate_user_count_metric_scope,
 )
 from app.nats import needs_shared_bridge_memory
 from app.nats.leader import needs_job_leader
 from app.nats.node_rpc import node_nats_client
-from app.node import UserSyncPreemptedError, core_users, node_manager
+from app.node import SubscriptionSyncPreemptedError, core_subscriptions, node_manager
 from app.node.bridge import FullSyncConflictError
 from app.node.heartbeat import heartbeat_interval, keep_alive_too_short, shortest_safe_keep_alive
 from app.node.manager_sync import publish_node_sync
@@ -75,6 +74,9 @@ from app.node.nats_memory import clear_bridge_memory_for_node
 from app.operation import BaseOperation, OperatorType
 from app.utils.logger import get_logger
 from config import runtime_settings
+from waylane_node_bridge import Health, NodeAPIError, WayLaneNode
+from waylane_node_bridge.common import service_pb2 as service
+from waylane_node_bridge.storage import LifecycleStatus
 
 MAX_MESSAGE_LENGTH = 128
 # Cap parallel start/attach so ~100 nodes don't stampede NATS lifecycle KV.
@@ -93,7 +95,8 @@ def require_amnezia_node_version(version: str | None) -> None:
     ordinary WireGuard, which cannot serve obfuscated AmneziaWG clients.
     """
     if not isinstance(version, str):
-        raise ValueError("AmneziaWG requires node >=0.6.0")
+        # Unknown provider versions are a domain validation failure, not an API caller type error.
+        raise ValueError("AmneziaWG requires node >=0.6.0")  # noqa: TRY004
     parts = version.removeprefix("v").split(".")
     if len(parts) != 3 or any(not part.isdecimal() for part in parts):
         raise ValueError("AmneziaWG requires a versioned node >=0.6.0")
@@ -294,7 +297,7 @@ class NodeOperation(BaseOperation):
                 # the same snapshot for nodes that actually need a Start RPC.
                 async with load_lock:
                     if core_id not in loaded_users:
-                        loaded_users[core_id] = await core_users(
+                        loaded_users[core_id] = await core_subscriptions(
                             db=db, inbound_tags=core.inbounds, allowed_protocols=core.protocols
                         )
                     return loaded_users[core_id]
@@ -401,8 +404,8 @@ class NodeOperation(BaseOperation):
             )
             core_payload = core.to_str()
             if core.type == CoreType.xray:
-                from app.operation.tls_presets import hydrate_tls_config
                 from app.operation.core_presets import hydrate_core_preset_config
+                from app.operation.tls_presets import hydrate_tls_config
 
                 # Resolve encrypted presets exclusively at the node-facing RPC
                 # boundary. Never save private key material in core_configs.
@@ -410,9 +413,7 @@ class NodeOperation(BaseOperation):
                     core_payload = await hydrate_tls_config(
                         tls_db, core_payload, db_node.id, db_node.core_config_id or 1
                     )
-                    core_payload = await hydrate_core_preset_config(
-                        tls_db, core_payload, db_node.core_config_id or 1
-                    )
+                    core_payload = await hydrate_core_preset_config(tls_db, core_payload, db_node.core_config_id or 1)
             start_kwargs = {
                 "config": core_payload,
                 "backend_type": backend_type,
@@ -453,7 +454,7 @@ class NodeOperation(BaseOperation):
                 except asyncio.CancelledError:
                     await NodeOperation._cleanup_cancelled_batched_start(db_node.id, pg_node)
                     raise
-                except UserSyncPreemptedError as exc:
+                except SubscriptionSyncPreemptedError as exc:
                     # A connection change or removal of the node won. That operation decides
                     # whether the old backend is stopped and reconnects the node itself, so this
                     # start neither stops it nor reports an error (-4 makes connect_node skip).
@@ -804,16 +805,16 @@ class NodeOperation(BaseOperation):
     async def get_user_count_metric(
         self,
         db: AsyncSession,
-        metric: UserCountMetric,
+        metric: SubscriptionCountMetric,
         query: NodeUsageQuery,
-    ) -> UserCountMetricStatsList:
+    ) -> SubscriptionCountMetricStatsList:
         start, end = await self.validate_dates(query.start, query.end, True)
         try:
             validate_user_count_metric_scope(metric, node_id=query.node_id, group_by_node=query.group_by_node)
         except ValueError as exc:
             await self.raise_error(message=str(exc), code=400)
 
-        return await get_user_count_metric_stats(
+        return await get_subscription_count_metric_stats(
             db,
             admins=None,
             start=start,
@@ -853,14 +854,18 @@ class NodeOperation(BaseOperation):
             logger.error(f"Error getting system stats for node {node_id}: {e}")
             return None
 
-    async def get_user_online_stats_by_node(self, db: AsyncSession, node_id: int, user_id: int) -> dict[int, int]:
-        return await self._get_user_online_stats_impl(db, node_id, user_id)
+    async def get_subscription_online_stats_by_node(
+        self, db: AsyncSession, node_id: int, subscription_uuid: UUID
+    ) -> dict[int, int]:
+        return await self._get_user_online_stats_impl(db, node_id, subscription_uuid)
 
-    async def get_user_ip_list_by_node(self, db: AsyncSession, node_id: int, user_id: int) -> UserIPList:
-        return await self._get_user_ip_list_impl(db, node_id, user_id)
+    async def get_user_ip_list_by_node(
+        self, db: AsyncSession, node_id: int, subscription_uuid: UUID
+    ) -> SubscriptionIPList:
+        return await self._get_user_ip_list_impl(db, node_id, subscription_uuid)
 
-    async def get_user_ip_list_all_nodes(self, db: AsyncSession, user_id: int) -> UserIPListAll:
-        return await self._get_user_ip_list_all_impl(db, user_id)
+    async def get_user_ip_list_all_nodes(self, db: AsyncSession, subscription_uuid: UUID) -> SubscriptionIPListAll:
+        return await self._get_user_ip_list_all_impl(db, subscription_uuid)
 
     async def _get_node_user_ip_list_safe(self, node_id: int, email: str) -> dict[str, int] | None:
         """Wrapper method that returns None instead of raising exceptions"""
@@ -869,7 +874,7 @@ class NodeOperation(BaseOperation):
             if node is None:
                 return None
 
-            stats = await node.get_user_online_ip_list(email=email)
+            stats = await node.get_subscription_online_ip_list(subscription_uuid=email)
             if stats is None:
                 return None
 
@@ -1249,10 +1254,12 @@ class NodeOperation(BaseOperation):
         except RuntimeError as exc:
             await self.handle_rpc_error(exc)
 
-    async def _get_user_online_stats_local(self, db: AsyncSession, node_id: int, user_id: int) -> dict[int, int]:
-        db_user = await get_user_by_id(db, user_id)
+    async def _get_user_online_stats_local(
+        self, db: AsyncSession, node_id: int, subscription_uuid: UUID
+    ) -> dict[int, int]:
+        db_user = await get_subscription_by_uuid(db, subscription_uuid)
         if db_user is None:
-            await self.raise_error(message="User not found", code=404)
+            await self.raise_error(message="Subscription not found", code=404)
 
         node = await node_manager.get_node(node_id)
 
@@ -1260,7 +1267,7 @@ class NodeOperation(BaseOperation):
             await self.raise_error(message="Node not found", code=404)
 
         try:
-            stats = await node.get_user_online_stats(email=f"{db_user.id}")
+            stats = await node.get_subscription_online_stats(subscription_uuid=f"{db_user.uuid}")
         except NodeAPIError as e:
             await self.raise_error(message=e.detail, code=e.code)
 
@@ -1269,39 +1276,58 @@ class NodeOperation(BaseOperation):
 
         return {node_id: stats.value}
 
-    async def _get_user_online_stats_remote(self, db: AsyncSession, node_id: int, user_id: int) -> dict[int, int]:
+    async def _rpc_subscription_uuid(self, db: AsyncSession, subscription_uuid: UUID) -> str:
+        """Resolve the public UUID before crossing the internal node-RPC boundary."""
+        sid = await db.scalar(select(Subscription.uuid).where(Subscription.uuid == subscription_uuid))
+        if sid is None:
+            await self.raise_error(message="Subscription not found", code=404)
+        return str(sid)
+
+    async def _get_user_online_stats_remote(
+        self, db: AsyncSession, node_id: int, subscription_uuid: UUID
+    ) -> dict[int, int]:
+        subscription_uuid = await self._rpc_subscription_uuid(db, subscription_uuid)
         try:
-            return await node_nats_client.request("get_user_online_stats", {"node_id": node_id, "user_id": user_id})
+            return await node_nats_client.request(
+                "get_subscription_online_stats", {"node_id": node_id, "subscription_uuid": subscription_uuid}
+            )
         except RuntimeError as exc:
             await self.handle_rpc_error(exc)
 
-    async def _get_user_ip_list_local(self, db: AsyncSession, node_id: int, user_id: int) -> UserIPList:
-        db_user = await get_user_by_id(db, user_id)
+    async def _get_user_ip_list_local(
+        self, db: AsyncSession, node_id: int, subscription_uuid: UUID
+    ) -> SubscriptionIPList:
+        db_user = await get_subscription_by_uuid(db, subscription_uuid)
         if db_user is None:
-            await self.raise_error(message="User not found", code=404)
+            await self.raise_error(message="Subscription not found", code=404)
 
-        email = f"{db_user.id}"
+        email = f"{db_user.uuid}"
         ips = await self._get_node_user_ip_list_safe(node_id, email)
 
         if ips is None:
             await self.raise_error(message="Node unavailable or user not found", code=404)
 
-        return UserIPList(ips=ips)
+        return SubscriptionIPList(ips=ips)
 
-    async def _get_user_ip_list_remote(self, db: AsyncSession, node_id: int, user_id: int) -> UserIPList:
+    async def _get_user_ip_list_remote(
+        self, db: AsyncSession, node_id: int, subscription_uuid: UUID
+    ) -> SubscriptionIPList:
+        subscription_uuid = await self._rpc_subscription_uuid(db, subscription_uuid)
         try:
-            data = await node_nats_client.request("get_user_ip_list", {"node_id": node_id, "user_id": user_id})
-            return UserIPList.model_validate(data)
+            data = await node_nats_client.request(
+                "get_subscription_ip_list", {"node_id": node_id, "subscription_uuid": subscription_uuid}
+            )
+            return SubscriptionIPList.model_validate(data)
         except RuntimeError as exc:
             await self.handle_rpc_error(exc)
 
-    async def _get_user_ip_list_all_local(self, db: AsyncSession, user_id: int) -> UserIPListAll:
-        db_user = await get_user_by_id(db, user_id)
+    async def _get_user_ip_list_all_local(self, db: AsyncSession, subscription_uuid: UUID) -> SubscriptionIPListAll:
+        db_user = await get_subscription_by_uuid(db, subscription_uuid)
         if db_user is None:
-            await self.raise_error(message="User not found", code=404)
+            await self.raise_error(message="Subscription not found", code=404)
 
         nodes = await node_manager.get_healthy_nodes()
-        email = f"{db_user.id}"
+        email = f"{db_user.uuid}"
 
         ip_list_tasks = {id: asyncio.create_task(self._get_node_user_ip_list_safe(id, email)) for id, _ in nodes}
 
@@ -1312,14 +1338,17 @@ class NodeOperation(BaseOperation):
             if task.exception() or task.result() is None:
                 continue
             else:
-                results[node_id] = UserIPList(ips=task.result())
+                results[node_id] = SubscriptionIPList(ips=task.result())
 
-        return UserIPListAll(nodes=results)
+        return SubscriptionIPListAll(nodes=results)
 
-    async def _get_user_ip_list_all_remote(self, db: AsyncSession, user_id: int) -> UserIPListAll:
+    async def _get_user_ip_list_all_remote(self, db: AsyncSession, subscription_uuid: UUID) -> SubscriptionIPListAll:
+        subscription_uuid = await self._rpc_subscription_uuid(db, subscription_uuid)
         try:
-            data = await node_nats_client.request("get_user_ip_list_all", {"user_id": user_id})
-            return UserIPListAll.model_validate(data)
+            data = await node_nats_client.request(
+                "get_subscription_ip_list_all", {"subscription_uuid": subscription_uuid}
+            )
+            return SubscriptionIPListAll.model_validate(data)
         except RuntimeError as exc:
             await self.handle_rpc_error(exc)
 
@@ -1342,11 +1371,11 @@ class NodeOperation(BaseOperation):
             users = users_by_core.get(core_id, [])
             if await node_manager.sync_full(node_id, users, flush_pending=flush_users) is None:
                 await self.raise_error(message="Node is not connected", code=409)
-        except UserSyncPreemptedError:
+        except SubscriptionSyncPreemptedError:
             # An edit of the node's connection or its removal won; this is not a node fault,
             # so the node status is left alone and the admin can simply retry.
             await self.raise_error(
-                message="User sync was interrupted by a change to the node's connection or its removal, retry",
+                message="Subscription sync was interrupted by a change to the node's connection or its removal, retry",
                 code=409,
             )
         except FullSyncConflictError as e:

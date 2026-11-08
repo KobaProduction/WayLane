@@ -7,29 +7,11 @@ from app.subscription.config_cache import clear_sub_config_cache
 
 
 @cached()
-async def telegram_settings() -> settings.Telegram:
-    async with GetDB() as db:
-        db_settings = await get_settings(db)
-
-    validated_settings = settings.Telegram.model_validate(db_settings.telegram)
-    return validated_settings
-
-
-@cached()
 async def webhook_settings() -> settings.Webhook:
     async with GetDB() as db:
         db_settings = await get_settings(db)
 
     validated_settings = settings.Webhook.model_validate(db_settings.webhook)
-    return validated_settings
-
-
-@cached()
-async def notification_settings() -> settings.NotificationSettings:
-    async with GetDB() as db:
-        db_settings = await get_settings(db)
-
-    validated_settings = settings.NotificationSettings.model_validate(db_settings.notification_settings)
     return validated_settings
 
 
@@ -70,9 +52,7 @@ async def general_settings() -> settings.General:
 
 
 async def refresh_caches() -> None:
-    await telegram_settings.cache.clear()
     await webhook_settings.cache.clear()
-    await notification_settings.cache.clear()
     await notification_enable.cache.clear()
     await subscription_settings.cache.clear()
     await hwid_settings.cache.clear()
@@ -83,8 +63,3 @@ async def refresh_caches() -> None:
 async def handle_settings_message(_: dict):
     """Handle settings update message from NATS router."""
     await refresh_caches()
-    try:
-        from app.telegram import telegram_bot_manager
-    except Exception:
-        return
-    await telegram_bot_manager.sync_from_settings()

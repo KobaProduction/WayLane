@@ -18,14 +18,6 @@ import nats
 import nats.js.errors as nats_js_errors
 from nats.js.client import JetStreamContext
 from nats.js.kv import KeyValue
-from waylane_node_bridge.common.service_pb2 import User
-from waylane_node_bridge.storage import (
-    ClaimedUser,
-    LifecycleLease,
-    LifecycleOperation,
-    LifecycleStatus,
-    NodeLifecycleState,
-)
 
 from app.nats import needs_shared_bridge_memory
 from app.nats.client import create_nats_client, get_jetstream_context, get_or_create_kv_bucket
@@ -34,6 +26,14 @@ from app.nats.kv_index import KvKeyIndex
 from app.nats.kv_watch import watch_kv
 from app.utils.logger import get_logger
 from config import nats_settings
+from waylane_node_bridge.common.service_pb2 import Subscription as WireSubscription
+from waylane_node_bridge.storage import (
+    ClaimedUser,
+    LifecycleLease,
+    LifecycleOperation,
+    LifecycleStatus,
+    NodeLifecycleState,
+)
 
 logger = get_logger("node-nats-memory")
 
@@ -44,17 +44,17 @@ _MAX_USER_SYNC_VALUE_BYTES = min(900_000, nats_settings.node_command_max_payload
 _nc: nats.NATS | None = None
 _user_sync_kv: KeyValue | None = None
 _lifecycle_kv: KeyValue | None = None
-_user_sync_store: NatsUserSyncStore | None = None
+_user_sync_store: NatsSubscriptionSyncStore | None = None
 _lifecycle_coordinator: NatsNodeLifecycleCoordinator | None = None
 _init_lock = asyncio.Lock()
 
 
-def _b64_user(user: User) -> str:
+def _b64_user(user: WireSubscription) -> str:
     return base64.b64encode(user.SerializeToString()).decode("ascii")
 
 
-def _user_from_b64(data: str) -> User:
-    user = User()
+def _user_from_b64(data: str) -> WireSubscription:
+    user = WireSubscription()
     user.ParseFromString(base64.b64decode(data.encode("ascii")))
     return user
 
@@ -96,10 +96,10 @@ def _state_to_dict(state: NodeLifecycleState) -> dict[str, Any]:
     }
 
 
-RefreshResolver = Callable[[str, list[str]], Awaitable[list[User]]]
+RefreshResolver = Callable[[str, list[str]], Awaitable[list[WireSubscription]]]
 
 
-class NatsUserSyncStore:
+class NatsSubscriptionSyncStore:
     """One CAS-guarded KV document per (node, user) for the shared delta queue.
 
     Key ``p.<node>.<digest(email)>`` holds ``{"email", "user"}`` plus an optional
@@ -179,12 +179,12 @@ class NatsUserSyncStore:
     def _unb64(text: str) -> str:
         try:
             return base64.urlsafe_b64decode(text.encode("ascii")).decode("utf-8")
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             return ""
 
     @classmethod
     def _token(cls, key: str, revision: int, email: str, claim_id: str) -> str:
-        # digest.revision.email(base64url).claim_id: opaque to the bridge, and
+        # digest.revision.subscription_uuid(base64url).claim_id: opaque to the bridge, and
         # self-describing for acknowledgements, requeues, and claim releases.
         return f"{key.rpartition('.')[2]}.{revision}.{cls._b64(email)}.{claim_id}"
 
@@ -208,7 +208,7 @@ class NatsUserSyncStore:
 
     # --- enqueue / restore ---------------------------------------------------
 
-    async def _enqueue_one(self, node_id: str, email: str, user: User) -> None:
+    async def _enqueue_one(self, node_id: str, email: str, user: WireSubscription) -> None:
         key = self._pending_key(node_id, email)
         value = {"email": email, "user": _b64_user(user)}
         self._ensure_value_size(key, value)
@@ -261,12 +261,12 @@ class NatsUserSyncStore:
             self._claims_seen[key] = (revision, 0.0)
             return
 
-    async def enqueue_users(self, node_id: str, users: list[User]) -> None:
+    async def enqueue_users(self, node_id: str, users: list[WireSubscription]) -> None:
         if not users:
             return
         # Latest payload per email wins (dedupe across the batch first).
-        by_email = {user.email: user for user in users}
-        await self._run_bounded(lambda user: self._enqueue_one(node_id, user.email, user), by_email.values())
+        by_email = {user.subscription_uuid: user for user in users}
+        await self._run_bounded(lambda user: self._enqueue_one(node_id, user.subscription_uuid, user), by_email.values())
 
     async def _create_if_absent(self, key: str, value: dict[str, Any]) -> bool:
         """Create-only write. Only a demonstrated CAS conflict counts as "newer present".
@@ -282,9 +282,9 @@ class NatsUserSyncStore:
         self._key_index.observe_put(key, revision)
         return True
 
-    async def _restore_one(self, node_id: str, user: User) -> None:
+    async def _restore_one(self, node_id: str, user: WireSubscription) -> None:
         await self._create_if_absent(
-            self._pending_key(node_id, user.email), {"email": user.email, "user": _b64_user(user)}
+            self._pending_key(node_id, user.subscription_uuid), {"email": user.subscription_uuid, "user": _b64_user(user)}
         )
 
     async def _request_refresh_one(self, node_id: str, email: str) -> bool:
@@ -369,7 +369,7 @@ class NatsUserSyncStore:
             logger.warning("No refresh resolver installed; %s user(s) on node %s stay queued", len(markers), node_id)
             return []
         try:
-            payloads = {user.email: user for user in await self.refresh_resolver(node_id, list(markers))}
+            payloads = {user.subscription_uuid: user for user in await self.refresh_resolver(node_id, list(markers))}
         except Exception as exc:
             logger.warning("Refresh of %s user(s) for node %s failed; retrying later: %s", len(markers), node_id, exc)
             return []
@@ -410,7 +410,7 @@ class NatsUserSyncStore:
                 markers[doc["email"]] = (key, rev)
         if not markers:
             return 0, 0
-        payloads = {user.email: user for user in await self.refresh_resolver(node_id, list(markers))}
+        payloads = {user.subscription_uuid: user for user in await self.refresh_resolver(node_id, list(markers))}
         resolved = 0
         for email, (key, revision) in markers.items():
             user = payloads.get(email)
@@ -518,7 +518,7 @@ class NatsUserSyncStore:
         if parts is None:
             return
         key, revision, _, claim_id = parts
-        value = {"email": item.user.email, "user": _b64_user(item.user)}
+        value = {"email": item.user.subscription_uuid, "user": _b64_user(item.user)}
         self._ensure_value_size(key, value)
         try:
             new_revision = await self._kv.update(key, self._encode(value), last=revision)
@@ -527,7 +527,7 @@ class NatsUserSyncStore:
             # stale copy must not come back. Report it so the caller can repair
             # from the source of truth when needed.
             logger.debug("Requeue skipped for key=%s revision=%s: %s", key, revision, exc)
-            failed.append(item.user.email)
+            failed.append(item.user.subscription_uuid)
             await self._release_claim(key, claim_id)
             return
         self._key_index.observe_put(key, new_revision)
@@ -546,7 +546,7 @@ class NatsUserSyncStore:
         if parts is None:
             return
         key, revision, email, claim_id = parts
-        marker = {"email": email or item.user.email, "refresh": True}
+        marker = {"email": email or item.user.subscription_uuid, "refresh": True}
         try:
             new_revision = await self._kv.update(key, self._encode(marker), last=revision)
         except nats_js_errors.KeyWrongLastSequenceError:
@@ -913,7 +913,7 @@ async def clear_bridge_memory_for_node(node_id: int | str) -> None:
         await coordinator.clear(nid)
 
 
-async def ensure_bridge_memory() -> tuple[NatsUserSyncStore | None, NatsNodeLifecycleCoordinator | None]:
+async def ensure_bridge_memory() -> tuple[NatsSubscriptionSyncStore | None, NatsNodeLifecycleCoordinator | None]:
     """Initialize NATS KV bridge memory for multi-uvicorn workers. Idempotent.
 
     Split-role / single-worker deployments keep the bridge's in-process defaults.
@@ -947,13 +947,13 @@ async def ensure_bridge_memory() -> tuple[NatsUserSyncStore | None, NatsNodeLife
             _lifecycle_kv = None
             return None, None
 
-        _user_sync_store = NatsUserSyncStore(_user_sync_kv)
+        _user_sync_store = NatsSubscriptionSyncStore(_user_sync_kv)
         _lifecycle_coordinator = NatsNodeLifecycleCoordinator(_lifecycle_kv)
         logger.info("Node bridge NATS memory ready (worker_id=%s)", WORKER_ID)
         return _user_sync_store, _lifecycle_coordinator
 
 
-def get_bridge_memory() -> tuple[NatsUserSyncStore | None, NatsNodeLifecycleCoordinator | None, str]:
+def get_bridge_memory() -> tuple[NatsSubscriptionSyncStore | None, NatsNodeLifecycleCoordinator | None, str]:
     return _user_sync_store, _lifecycle_coordinator, WORKER_ID
 
 

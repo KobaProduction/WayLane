@@ -18,19 +18,19 @@ class SystemResourceStats(BaseModel):
     cpu_usage: float | None = None
 
 
-class SystemUsersStats(BaseModel):
-    total_user: int
-    online_users: int
-    active_users: int
-    on_hold_users: int
-    disabled_users: int
-    expired_users: int
-    limited_users: int
+class SystemSubscriptionsStats(BaseModel):
+    total_subscriptions: int
+    online_subscriptions: int
+    active_subscriptions: int
+    on_hold_subscriptions: int
+    disabled_subscriptions: int
+    expired_subscriptions: int
+    limited_subscriptions: int
     incoming_bandwidth: int
     outgoing_bandwidth: int
 
 
-class SystemStats(SystemResourceStats, SystemUsersStats):
+class SystemStats(SystemResourceStats, SystemSubscriptionsStats):
     pass
 
 

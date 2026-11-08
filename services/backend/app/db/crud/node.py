@@ -13,9 +13,9 @@ from app.db.models import (
     Node,
     NodeStat,
     NodeStatus,
+    NodeSubscriptionUsage,
     NodeUsage,
     NodeUsageResetLogs,
-    NodeUserUsage,
 )
 from app.models.node import (
     NodeCreate,
@@ -473,7 +473,7 @@ async def remove_node(db: AsyncSession, db_node: Node) -> None:
     node_id = db_node.id
 
     # Remove dependent rows explicitly to avoid ORM cascading overhead on large tables.
-    await db.execute(delete(NodeUserUsage).where(NodeUserUsage.node_id == node_id))
+    await db.execute(delete(NodeSubscriptionUsage).where(NodeSubscriptionUsage.node_id == node_id))
     await db.execute(delete(NodeUsage).where(NodeUsage.node_id == node_id))
     await db.execute(delete(NodeUsageResetLogs).where(NodeUsageResetLogs.node_id == node_id))
     await db.execute(delete(NodeStat).where(NodeStat.node_id == node_id))
@@ -568,8 +568,8 @@ async def update_node_status(
 
 
 def _table_model(table: UsageTable):
-    if table == UsageTable.node_user_usages:
-        return NodeUserUsage
+    if table == UsageTable.node_subscription_usages:
+        return NodeSubscriptionUsage
     if table == UsageTable.node_usages:
         return NodeUsage
     raise ValueError("Invalid table enum")
@@ -883,7 +883,7 @@ async def remove_nodes(db: AsyncSession, node_ids: list[int]) -> None:
     if not node_ids:
         return
 
-    await db.execute(delete(NodeUserUsage).where(NodeUserUsage.node_id.in_(node_ids)))
+    await db.execute(delete(NodeSubscriptionUsage).where(NodeSubscriptionUsage.node_id.in_(node_ids)))
     await db.execute(delete(NodeUsage).where(NodeUsage.node_id.in_(node_ids)))
     await db.execute(delete(NodeUsageResetLogs).where(NodeUsageResetLogs.node_id.in_(node_ids)))
     await db.execute(delete(NodeStat).where(NodeStat.node_id.in_(node_ids)))

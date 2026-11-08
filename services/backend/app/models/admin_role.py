@@ -52,7 +52,9 @@ class CRUDPermissions(_ResourcePermissions):
     delete: RoleActionValue | None = None
 
 
-class UsersPermissions(CRUDPermissions):
+class SubscriptionsPermissions(CRUDPermissions):
+    # Reserved for the scoped VPN Core API key, never browser admin sessions.
+    set_entitlement: RoleActionValue | None = None
     reset_usage: RoleActionValue | None = None
     revoke_sub: RoleActionValue | None = None
     set_owner: RoleActionValue | None = None
@@ -131,7 +133,7 @@ class RolePermissions(BaseModel):
     Each action value is True (allowed), {"scope": N} (scoped), or None (denied).
     """
 
-    users: UsersPermissions | None = None
+    subscriptions: SubscriptionsPermissions | None = None
     admins: AdminsPermissions | None = None
     nodes: NodesPermissions | None = None
     groups: CRUDPermissions | None = None
@@ -148,7 +150,7 @@ class RolePermissions(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     def get(self, resource: str, default: Any = None) -> _ResourcePermissions | None:
-        """Dict-like access so permissions.py can call permissions.get('users')."""
+        """Dict-like access so permissions.py can call permissions.get('subscriptions')."""
         return getattr(self, resource, default)
 
 

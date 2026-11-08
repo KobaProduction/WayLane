@@ -5,7 +5,8 @@ import sqlalchemy as sa
 from app.db.base import Base
 
 subscription_firewall_config = sa.Table(
-    "subscription_firewall_config", Base.metadata,
+    "subscription_firewall_config",
+    Base.metadata,
     sa.Column("id", sa.Integer, primary_key=True),
     sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.false()),
     sa.Column("scenarios", sa.JSON, nullable=False),
@@ -15,10 +16,11 @@ subscription_firewall_config = sa.Table(
 )
 
 subscription_device_events = sa.Table(
-    "subscription_device_events", Base.metadata,
+    "subscription_device_events",
+    Base.metadata,
     sa.Column("id", sa.String(36), primary_key=True),
     sa.Column("event_type", sa.String(64), nullable=False),
-    sa.Column("user_id", sa.BigInteger, nullable=False),
+    sa.Column("subscription_uuid", sa.Uuid(as_uuid=True), nullable=False),
     sa.Column("hwid", sa.String(256), nullable=True),
     sa.Column("payload", sa.JSON, nullable=False),
     sa.Column("status", sa.String(16), nullable=False, server_default="pending"),

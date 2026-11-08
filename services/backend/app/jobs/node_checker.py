@@ -2,9 +2,6 @@ import asyncio
 import time
 from dataclasses import dataclass
 
-from waylane_node_bridge import Health, NodeAPIError, WayLaneNode
-from waylane_node_bridge.storage import LifecycleStatus
-
 from app import notification, on_shutdown, on_startup, scheduler
 from app.db import GetDB
 from app.db.crud.node import get_limited_nodes, get_nodes
@@ -19,6 +16,8 @@ from app.operation import OperatorType
 from app.operation.node import NodeOperation
 from app.utils.logger import get_logger
 from config import feature_settings, job_settings, runtime_settings, server_settings
+from waylane_node_bridge import Health, NodeAPIError, WayLaneNode
+from waylane_node_bridge.storage import LifecycleStatus
 
 node_operator = NodeOperation(operator_type=OperatorType.SYSTEM)
 logger = get_logger("node-checker")

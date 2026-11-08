@@ -1,13 +1,15 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from waylane_node_bridge import NodeAPIError
+from pydantic import UUID4
+from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from app.db import AsyncSession, GetDB, get_db
-from app.db.models import NodeStatus
+from app.db.models import NodeStatus, Subscription
 from app.models.admin import AdminDetails
 from app.models.node import (
     BulkNodesActionResponse,
@@ -26,9 +28,9 @@ from app.models.node import (
     NodeStatsPeriodQuery,
     NodeUsageQuery,
     RemoveNodesResponse,
+    SubscriptionIPList,
+    SubscriptionIPListAll,
     UsageTable,
-    UserIPList,
-    UserIPListAll,
 )
 from app.models.ordering import ReorderRequest
 from app.models.stats import (
@@ -36,16 +38,18 @@ from app.models.stats import (
     NodeRealtimeStats,
     NodeStatsList,
     NodeUsageStatsList,
-    UserCountMetric,
-    UserCountMetricStatsList,
+    SubscriptionCountMetric,
+    SubscriptionCountMetricStatsList,
     validate_user_count_metric_scope,
 )
 from app.nats.node_rpc import node_nats_client
 from app.operation import OperatorType
 from app.operation.node import NodeOperation
+from app.operation.permissions import is_scope_all
 from app.utils import responses
 from app.utils.logger import get_logger
 from config import runtime_settings
+from waylane_node_bridge import NodeAPIError
 
 from .authentication import oauth2_scheme, require_permission, require_permission_for_request
 from .dependencies import (
@@ -150,9 +154,9 @@ async def get_usage(
     return await node_operator.get_usage(db=db, query=query)
 
 
-@router.get("/user_counts/{metric}", response_model=UserCountMetricStatsList)
-async def get_user_count_metric(
-    metric: UserCountMetric,
+@router.get("/subscription_counts/{metric}", response_model=SubscriptionCountMetricStatsList)
+async def get_subscription_count_metric(
+    metric: SubscriptionCountMetric,
     query: Annotated[NodeUsageQuery, Depends(get_node_usage_query)],
     db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("nodes", "stats")),
@@ -368,34 +372,50 @@ async def realtime_nodes_stats(_: AdminDetails = Depends(require_permission("nod
     return await node_operator.get_nodes_system_stats()
 
 
-@router.get("/online_stats/{user_id}/ip", response_model=UserIPListAll)
-async def user_online_ip_list_all_nodes(
-    user_id: int, db: AsyncSession = Depends(get_db), _: AdminDetails = Depends(require_permission("nodes", "stats"))
-):
-    """Retrieve user ips from all nodes."""
-    return await node_operator.get_user_ip_list_all_nodes(db=db, user_id=user_id)
+async def _subscription_node_id(db: AsyncSession, subscription_uuid: UUID, admin: AdminDetails) -> int:
+    """Resolve UUID under subscription-read scope; do not expose provider node IDs."""
+    statement = select(Subscription.uuid).where(Subscription.uuid == subscription_uuid)
+    if not is_scope_all(admin, "subscriptions", "read"):
+        statement = statement.where(Subscription.admin_id == admin.id)
+    subscription_uuid = (await db.execute(statement)).scalar_one_or_none()
+    if subscription_uuid is None:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    return subscription_uuid
 
 
-@router.get("/{node_id}/online_stats/{user_id}", response_model=dict[int, int])
-async def user_online_stats(
-    node_id: int,
-    user_id: int,
+@router.get("/subscriptions/{subscription_uuid}/online-ips", response_model=SubscriptionIPListAll)
+async def subscription_ips_all_nodes(
+    subscription_uuid: UUID4,
     db: AsyncSession = Depends(get_db),
-    _: AdminDetails = Depends(require_permission("nodes", "stats")),
+    admin: AdminDetails = Depends(require_permission("nodes", "stats")),
+    _: AdminDetails = Depends(require_permission("subscriptions", "read")),
 ):
-    """Retrieve user online stats by node."""
-    return await node_operator.get_user_online_stats_by_node(db=db, node_id=node_id, user_id=user_id)
+    subscription_uuid = await _subscription_node_id(db, subscription_uuid, admin)
+    return await node_operator.get_user_ip_list_all_nodes(db=db, subscription_uuid=subscription_uuid)
 
 
-@router.get("/{node_id}/online_stats/{user_id}/ip", response_model=UserIPList)
-async def user_online_ip_list(
+@router.get("/{node_id}/subscriptions/{subscription_uuid}/online-stats", response_model=dict[int, int])
+async def subscription_online_stats(
     node_id: int,
-    user_id: int,
+    subscription_uuid: UUID4,
     db: AsyncSession = Depends(get_db),
-    _: AdminDetails = Depends(require_permission("nodes", "stats")),
+    admin: AdminDetails = Depends(require_permission("nodes", "stats")),
+    _: AdminDetails = Depends(require_permission("subscriptions", "read")),
 ):
-    """Retrieve user ips by node."""
-    return await node_operator.get_user_ip_list_by_node(db=db, node_id=node_id, user_id=user_id)
+    subscription_uuid = await _subscription_node_id(db, subscription_uuid, admin)
+    return await node_operator.get_subscription_online_stats_by_node(db=db, node_id=node_id, subscription_uuid=subscription_uuid)
+
+
+@router.get("/{node_id}/subscriptions/{subscription_uuid}/online-ips", response_model=SubscriptionIPList)
+async def subscription_ip_list(
+    node_id: int,
+    subscription_uuid: UUID4,
+    db: AsyncSession = Depends(get_db),
+    admin: AdminDetails = Depends(require_permission("nodes", "stats")),
+    _: AdminDetails = Depends(require_permission("subscriptions", "read")),
+):
+    subscription_uuid = await _subscription_node_id(db, subscription_uuid, admin)
+    return await node_operator.get_user_ip_list_by_node(db=db, node_id=node_id, subscription_uuid=subscription_uuid)
 
 
 @router.delete(
@@ -412,7 +432,7 @@ async def clear_usage_data(
     Deletes **all rows** from the selected usage data table. Use with caution.
 
     Allowed tables:
-        - `node_user_usages`: Deletes user-specific node usage traffic records.
+        - `node_subscription_usages`: Deletes user-specific node usage traffic records.
         - `node_usages`: Deletes node-level aggregated traffic (uplink/downlink) records.
 
     **Optional filters:**

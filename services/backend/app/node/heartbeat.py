@@ -10,8 +10,6 @@ import asyncio
 import itertools
 import time
 
-from waylane_node_bridge import Health, WayLaneNode
-
 from app.nats.leader import (
     DEFAULT_LEASE_SECONDS,
     HEARTBEAT_INTERVAL as LEADER_RETRY_SECONDS,
@@ -20,6 +18,7 @@ from app.nats.leader import (
 )
 from app.node import NodeManager, node_manager
 from app.utils.logger import get_logger
+from waylane_node_bridge import Health, WayLaneNode
 
 logger = get_logger("node-heartbeat")
 

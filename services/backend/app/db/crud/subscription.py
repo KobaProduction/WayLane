@@ -3,8 +3,25 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from uuid import UUID, uuid4
 
-from sqlalchemy import Row, and_, bindparam, case, delete, desc, func, insert, literal, not_, or_, select, update
+from sqlalchemy import (
+    Row,
+    String,
+    and_,
+    bindparam,
+    case,
+    delete,
+    desc,
+    false,
+    func,
+    insert,
+    literal,
+    not_,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, load_only, selectinload, with_expression
 from sqlalchemy.sql import Select
@@ -19,40 +36,40 @@ from app.db.models import (
     Group,
     NextPlan,
     Node,
-    NodeUserUsage,
+    NodeSubscriptionUsage,
     NotificationReminder,
     ProxyInbound,
     ReminderType,
-    User,
-    UserHWID,
-    UserStatus,
-    UserStatusCreate,
-    UserSubscriptionUpdate,
-    UserUsageResetLogs,
+    Subscription,
+    SubscriptionHWID,
+    SubscriptionStatus,
+    SubscriptionStatusCreate,
+    SubscriptionUpdate,
+    SubscriptionUsageResetLogs,
     inbounds_groups_association,
-    users_groups_association,
+    subscriptions_groups_association,
 )
 from app.models.proxy import ProxyTable
 from app.models.stats import (
     Period,
-    UserCountMetric,
-    UserCountMetricStat,
-    UserCountMetricStatsList,
-    UserUsageStat,
-    UserUsageStatsList,
+    SubscriptionCountMetric,
+    SubscriptionCountMetricStat,
+    SubscriptionCountMetricStatsList,
+    SubscriptionUsageStat,
+    SubscriptionUsageStatsList,
     validate_user_count_metric_scope,
 )
-from app.models.user import (
-    ExpiredUsersQuery,
-    UserCreate,
-    UserListQuery,
-    UserModify,
-    UserNotificationResponse,
-    UserSimpleListQuery,
-    UserSimpleSortField,
-    UserSimpleSortOption,
-    UserSortField,
-    UserSortOption,
+from app.models.subscription_models import (
+    ExpiredSubscriptionsQuery,
+    SubscriptionCreate,
+    SubscriptionListQuery,
+    SubscriptionModify,
+    SubscriptionNotificationResponse,
+    SubscriptionSimpleListQuery,
+    SubscriptionSimpleSortField,
+    SubscriptionSimpleSortOption,
+    SubscriptionSortField,
+    SubscriptionSortOption,
 )
 from app.models.validators import MAX_ON_HOLD_EXPIRE_DURATION_SECONDS
 from app.subscription.sub_update_buffer import flush_user_sub_updates, queue_user_sub_update
@@ -67,19 +84,18 @@ from .general import (
 )
 from .group import get_groups_by_ids
 from .wireguard import (
-    release_allocations_by_user_ids,
+    release_allocations_by_subscription_uuids,
     release_users_allocations,
     sync_user_allocations,
-    sync_users_allocations,
     tags_from_groups,
 )
 
 _ONLINE_USERS_WINDOW = timedelta(minutes=2)
 
 
-def _review_user_select_stmt(*, load_groups: bool = True) -> Select:
+def _review_subscription_select_stmt(*, load_groups: bool = True) -> Select:
     """Load relations needed for status review jobs without materializing usage logs."""
-    return _build_user_select_stmt(
+    return _build_subscription_select_stmt(
         load_admin=True,
         load_admin_role=True,
         load_next_plan=True,
@@ -89,24 +105,24 @@ def _review_user_select_stmt(*, load_groups: bool = True) -> Select:
     )
 
 
-def _user_reset_traffic_subquery():
+def _subscription_reset_traffic_subquery():
     return (
-        select(func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0))
-        .where(UserUsageResetLogs.user_id == User.id)
-        .correlate(User)
+        select(func.coalesce(func.sum(SubscriptionUsageResetLogs.used_traffic_at_reset), 0))
+        .where(SubscriptionUsageResetLogs.subscription_uuid == Subscription.uuid)
+        .correlate(Subscription)
         .scalar_subquery()
     )
 
 
-def _snapshot_reseted_usage(users: list[User]) -> dict[int, int]:
+def _snapshot_reseted_usage(users: list[Subscription]) -> dict[UUID, int]:
     """Keep the already-loaded lifetime aggregate across bulk UPDATEs."""
-    return {user.id: int(user.reseted_usage) for user in users}
+    return {user.uuid: int(user.reseted_usage) for user in users}
 
 
-def _restore_reseted_usage(users: list[User], reseted_usage: dict[int, int]) -> None:
+def _restore_reseted_usage(users: list[Subscription], reseted_usage: dict[UUID, int]) -> None:
     for user in users:
-        if user.id in reseted_usage:
-            user.__dict__["_reseted_usage_query"] = reseted_usage[user.id]
+        if user.uuid in reseted_usage:
+            user.__dict__["_reseted_usage_query"] = reseted_usage[user.uuid]
 
 
 def _safe_on_hold_expire_duration(duration: int | None) -> int | None:
@@ -115,25 +131,23 @@ def _safe_on_hold_expire_duration(duration: int | None) -> int | None:
     return min(duration, MAX_ON_HOLD_EXPIRE_DURATION_SECONDS)
 
 
-def _resolve_enabled_user_status(user: User) -> UserStatus:
+def _resolve_enabled_subscription_status(user: Subscription) -> SubscriptionStatus:
     now = datetime.now(UTC)
     if user.expire is not None and user.expire.replace(tzinfo=UTC) <= now:
-        return UserStatus.expired
+        return SubscriptionStatus.expired
     if user.data_limit is not None and user.data_limit > 0 and user.used_traffic >= user.data_limit:
-        return UserStatus.limited
+        return SubscriptionStatus.limited
     if user.on_hold_expire_duration is not None:
-        return UserStatus.on_hold
-    return UserStatus.active
+        return SubscriptionStatus.on_hold
+    return SubscriptionStatus.active
 
 
-def _explicit_ids(column, ids: Sequence[int]):
-    """`column IN (...)` for ids taken from the request body. The ids are rendered into the statement at execution
-    time instead of bound one by one, so a statement never exceeds asyncpg's 32767 bind parameters (a filter that is
-    OR-combined with other conditions cannot be split into chunks)."""
-    return column.in_(bindparam(None, list(ids), expanding=True, literal_execute=True))
+def _explicit_uuids(column, uuids: Sequence[UUID]):
+    """Bound UUID filter that does not exhaust asyncpg's parameter limit."""
+    return column.in_(bindparam(None, list(uuids), expanding=True, literal_execute=True))
 
 
-def _build_user_select_stmt(
+def _build_subscription_select_stmt(
     *,
     load_admin: bool = True,
     load_admin_role: bool = False,
@@ -144,35 +158,35 @@ def _build_user_select_stmt(
     load_group_inbounds: bool = False,
     load_lifetime_used_traffic: bool = False,
 ) -> Select:
-    """Build a user select statement with eager-load options."""
-    stmt = select(User)
+    """Build a subscription select statement with eager-load options."""
+    stmt = select(Subscription)
     options = []
     if load_admin:
-        admin_loader = joinedload(User.admin)
+        admin_loader = joinedload(Subscription.admin)
         if load_admin_role:
             admin_loader = admin_loader.selectinload(Admin.role)
         options.append(admin_loader)
     if load_next_plan:
-        options.append(joinedload(User.next_plan))
+        options.append(joinedload(Subscription.next_plan))
     if load_usage_logs:
-        options.append(selectinload(User.usage_logs))
+        options.append(selectinload(Subscription.usage_logs))
     if load_groups:
         if join_groups:
-            groups_loader = joinedload(User.groups)
+            groups_loader = joinedload(Subscription.groups)
         else:
-            groups_loader = selectinload(User.groups)
+            groups_loader = selectinload(Subscription.groups)
             if load_group_inbounds:
                 groups_loader = groups_loader.selectinload(Group.inbounds)
         options.append(groups_loader)
     if options:
         stmt = stmt.options(*options)
     if load_lifetime_used_traffic:
-        stmt = stmt.options(with_expression(User._reseted_usage_query, _user_reset_traffic_subquery()))
+        stmt = stmt.options(with_expression(Subscription._reseted_usage_query, _subscription_reset_traffic_subquery()))
     return stmt
 
 
-async def load_user_attrs(
-    user: User,
+async def load_subscription_attrs(
+    user: Subscription,
     *,
     load_admin: bool = True,
     load_admin_role: bool = False,
@@ -192,9 +206,9 @@ async def load_user_attrs(
         await user.awaitable_attrs.groups
 
 
-async def refresh_and_load_user(
+async def refresh_and_load_subscription(
     db: AsyncSession,
-    user: User,
+    user: Subscription,
     *,
     load_admin: bool = True,
     load_admin_role: bool = False,
@@ -203,7 +217,7 @@ async def refresh_and_load_user(
     load_groups: bool = True,
 ):
     await db.refresh(user)
-    await load_user_attrs(
+    await load_subscription_attrs(
         user,
         load_admin=load_admin,
         load_admin_role=load_admin_role,
@@ -213,9 +227,9 @@ async def refresh_and_load_user(
     )
 
 
-async def get_user(
+async def get_subscription_by_uuid(
     db: AsyncSession,
-    username: str,
+    subscription_uuid: UUID,
     *,
     load_admin: bool = True,
     load_admin_role: bool = False,
@@ -225,19 +239,19 @@ async def get_user(
     join_groups: bool = False,
     load_lifetime_used_traffic: bool = False,
     admin_id: int | None = None,
-) -> User | None:
+) -> Subscription | None:
     """
-    Retrieves a user by username.
+    Retrieves a subscription by its canonical UUID.
 
     Args:
         db (AsyncSession): Database session.
-        username (str): The username of the user.
+        subscription_uuid (UUID): Canonical subscription UUIDv4.
         admin_id: If provided, only return the user if they belong to this admin.
 
     Returns:
-        Optional[User]: The user object if found, else None.
+        Optional[Subscription]: The user object if found, else None.
     """
-    stmt = _build_user_select_stmt(
+    stmt = _build_subscription_select_stmt(
         load_admin=load_admin,
         load_admin_role=load_admin_role,
         load_next_plan=load_next_plan,
@@ -245,72 +259,32 @@ async def get_user(
         load_groups=load_groups,
         join_groups=join_groups,
         load_lifetime_used_traffic=load_lifetime_used_traffic,
-    ).where(User.username == username)
+    ).where(Subscription.uuid == subscription_uuid)
 
     if admin_id is not None:
-        stmt = stmt.where(User.admin_id == admin_id)
+        stmt = stmt.where(Subscription.admin_id == admin_id)
 
     return (await db.execute(stmt)).unique().scalar_one_or_none()
 
 
-async def get_user_by_id(
+async def get_wireguard_subscription_node_identity(
     db: AsyncSession,
-    user_id: int,
-    *,
-    load_admin: bool = True,
-    load_admin_role: bool = False,
-    load_next_plan: bool = True,
-    load_usage_logs: bool = True,
-    load_groups: bool = True,
-    join_groups: bool = False,
-    load_lifetime_used_traffic: bool = False,
-    admin_id: int | None = None,
-) -> User | None:
-    """
-    Retrieves a user by user ID.
-
-    Args:
-        db (AsyncSession): Database session.
-        user_id (int): The ID of the user.
-        admin_id: If provided, only return the user if they belong to this admin.
-
-    Returns:
-        Optional[User]: The user object if found, else None.
-    """
-    stmt = _build_user_select_stmt(
-        load_admin=load_admin,
-        load_admin_role=load_admin_role,
-        load_next_plan=load_next_plan,
-        load_usage_logs=load_usage_logs,
-        load_groups=load_groups,
-        join_groups=join_groups,
-        load_lifetime_used_traffic=load_lifetime_used_traffic,
-    ).where(User.id == user_id)
-
-    if admin_id is not None:
-        stmt = stmt.where(User.admin_id == admin_id)
-
-    return (await db.execute(stmt)).unique().scalar_one_or_none()
-
-
-async def get_wireguard_subscription_user(
-    db: AsyncSession,
-    user_id: int,
+    subscription_uuid: UUID,
     *,
     load_admin_role: bool = True,
     admin_id: int | None = None,
-) -> User | None:
+) -> Subscription | None:
     """Load only the ORM state required to render a WireGuard subscription."""
-    stmt = _build_user_select_stmt(
+    stmt = _build_subscription_select_stmt(
         load_admin=True,
         load_admin_role=load_admin_role,
         load_next_plan=False,
         load_usage_logs=False,
         load_groups=False,
         load_lifetime_used_traffic=False,
-    ).where(User.id == user_id)
+    ).where(Subscription.uuid == subscription_uuid)
     if admin_id is not None:
-        stmt = stmt.where(User.admin_id == admin_id)
+        stmt = stmt.where(Subscription.admin_id == admin_id)
 
     user = (await db.execute(stmt)).unique().scalar_one_or_none()
     if user is None:
@@ -318,133 +292,144 @@ async def get_wireguard_subscription_user(
 
     tags_stmt = (
         select(ProxyInbound.tag)
-        .select_from(users_groups_association)
-        .join(Group, users_groups_association.c.groups_id == Group.id)
+        .select_from(subscriptions_groups_association)
+        .join(Group, subscriptions_groups_association.c.groups_id == Group.id)
         .join(inbounds_groups_association, Group.id == inbounds_groups_association.c.group_id)
         .join(ProxyInbound, inbounds_groups_association.c.inbound_id == ProxyInbound.id)
-        .where(users_groups_association.c.user_id == user_id, Group.is_disabled.is_(False))
+        .where(subscriptions_groups_association.c.subscription_uuid == subscription_uuid, Group.is_disabled.is_(False))
         .distinct()
     )
     user.__dict__["_wireguard_inbounds"] = list((await db.execute(tags_stmt)).scalars().all())
     return user
 
 
-async def get_user_lifetime_used_traffic(db: AsyncSession, user_id: int) -> int:
+async def get_subscription_lifetime_used_traffic(db: AsyncSession, subscription_uuid: UUID) -> int:
     stmt = (
         select(
-            func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0) + func.coalesce(User.used_traffic, 0)
+            func.coalesce(func.sum(SubscriptionUsageResetLogs.used_traffic_at_reset), 0)
+            + func.coalesce(Subscription.used_traffic, 0)
         )
-        .select_from(User)
-        .outerjoin(UserUsageResetLogs, UserUsageResetLogs.user_id == User.id)
-        .where(User.id == user_id)
-        .group_by(User.id)
+        .select_from(Subscription)
+        .outerjoin(SubscriptionUsageResetLogs, SubscriptionUsageResetLogs.subscription_uuid == Subscription.uuid)
+        .where(Subscription.uuid == subscription_uuid)
+        .group_by(Subscription.uuid)
     )
     result = await db.execute(stmt)
     value = result.scalar_one_or_none()
     return int(value or 0)
 
 
-async def get_existing_usernames(db: AsyncSession, usernames: Sequence[str]) -> set[str]:
-    """
-    Returns the set of usernames that already exist in the database.
-    """
-    if not usernames:
+async def get_existing_subscription_uuids(db: AsyncSession, uuids: Sequence[UUID]) -> set[UUID]:
+    """Read the canonical UUIDs already allocated to a subscription."""
+    if not uuids:
         return set()
-
-    stmt = select(User.username).where(User.username.in_(usernames))
-    result = await db.execute(stmt)
-    return set(result.scalars().all())
+    return set((await db.scalars(select(Subscription.uuid).where(Subscription.uuid.in_(uuids)))).all())
 
 
-async def get_users_with_proxy_settings(
+async def get_subscriptions_with_proxy_settings(
     db: AsyncSession,
     *,
-    exclude_user_id: int | None = None,
-) -> list[User]:
+    exclude_subscription_uuid: UUID | None = None,
+) -> list[Subscription]:
     """
     Retrieve users for proxy-settings related operations without eager-loading relations.
     """
-    stmt = select(User)
-    if exclude_user_id is not None:
-        stmt = stmt.where(User.id != exclude_user_id)
+    stmt = select(Subscription)
+    if exclude_subscription_uuid is not None:
+        stmt = stmt.where(Subscription.uuid != exclude_subscription_uuid)
 
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
-def _user_hwid_count_subquery():
-    return select(func.count(UserHWID.id)).where(UserHWID.user_id == User.id).correlate(User).scalar_subquery()
+def _subscription_hwid_count_subquery():
+    return (
+        select(func.count(SubscriptionHWID.id))
+        .where(SubscriptionHWID.subscription_uuid == Subscription.uuid)
+        .correlate(Subscription)
+        .scalar_subquery()
+    )
 
 
-async def get_admin_users_for_node_sync(
+async def get_admin_subscriptions_for_node_sync(
     db: AsyncSession,
     admin_id: int,
     *,
-    statuses: Sequence[UserStatus] | None = None,
-) -> list[User]:
+    statuses: Sequence[SubscriptionStatus] | None = None,
+) -> list[Subscription]:
     """Load an admin's users for node dispatch, without response-only fields or history."""
-    return await _get_users_for_node_sync(db, User.admin_id == admin_id, statuses=statuses)
+    return await _get_subscriptions_for_node_sync(db, Subscription.admin_id == admin_id, statuses=statuses)
 
 
-async def get_role_users_for_node_sync(
+async def get_role_subscriptions_for_node_sync(
     db: AsyncSession,
     role_id: int,
     admin_statuses: Sequence[AdminStatus],
     *,
-    after_user_id: int = 0,
+    after_subscription_uuid: UUID | None = None,
     limit: int = 500,
-) -> list[User]:
-    """Load one ID-ordered batch of connectable users of affected admins in a role."""
+) -> list[Subscription]:
+    """Load one UUID-ordered batch of Core-authorized subscriptions of affected admins."""
     admin_ids = select(Admin.id).where(Admin.role_id == role_id, Admin.status.in_(admin_statuses))
-    return await _get_users_for_node_sync(
+    return await _get_subscriptions_for_node_sync(
         db,
-        User.admin_id.in_(admin_ids),
-        statuses=[UserStatus.active, UserStatus.on_hold],
-        after_user_id=after_user_id,
+        Subscription.admin_id.in_(admin_ids),
+        statuses=[SubscriptionStatus.active, SubscriptionStatus.on_hold],
+        after_subscription_uuid=after_subscription_uuid,
         limit=limit,
     )
 
 
-async def _get_users_for_node_sync(
+async def _get_subscriptions_for_node_sync(
     db: AsyncSession,
     admin_filter: ColumnElement[bool],
     *,
-    statuses: Sequence[UserStatus] | None = None,
-    after_user_id: int = 0,
+    statuses: Sequence[SubscriptionStatus] | None = None,
+    after_subscription_uuid: UUID | None = None,
     limit: int | None = None,
-) -> list[User]:
-    """Load node-dispatch state, optionally restricted to a bounded ID-ordered page."""
+) -> list[Subscription]:
+    """Load node-dispatch state, optionally restricted to a bounded UUID-ordered page."""
     stmt = (
-        select(User)
+        select(Subscription)
         .where(admin_filter)
         .options(
-            load_only(User.id, User.admin_id, User.status, User.proxy_settings),
-            joinedload(User.admin).joinedload(Admin.role),
-            selectinload(User.groups).selectinload(Group.inbounds),
+            load_only(
+                Subscription.uuid,
+                Subscription.admin_id,
+                Subscription.status,
+                Subscription.entitlement,
+                Subscription.proxy_settings,
+            ),
+            joinedload(Subscription.admin).joinedload(Admin.role),
+            selectinload(Subscription.groups).selectinload(Group.inbounds),
         )
     )
     if statuses is not None:
-        stmt = stmt.where(User.status.in_(statuses))
+        stmt = stmt.where(Subscription.status.in_(statuses))
     if limit is not None:
-        stmt = stmt.where(User.id > after_user_id).order_by(User.id).limit(limit)
+        # UUIDv4 keys are sortable, but cannot be compared with integer 0.
+        # A null cursor starts from the first UUID on SQLite and PostgreSQL.
+        if after_subscription_uuid is not None:
+            stmt = stmt.where(Subscription.uuid > after_subscription_uuid)
+        stmt = stmt.order_by(Subscription.uuid).limit(limit)
     return list((await db.scalars(stmt)).all())
 
 
-def _build_user_sort_clause(sort_option: UserSortOption):
-    if sort_option.field == UserSortField.hwid_count:
-        count = _user_hwid_count_subquery()
+def _build_subscription_sort_clause(sort_option: SubscriptionSortOption):
+    if sort_option.field == SubscriptionSortField.hwid_count:
+        count = _subscription_hwid_count_subquery()
         return count.desc() if sort_option.value.startswith("-") else count.asc()
 
     field_map = {
-        UserSortField.username: User.username,
-        UserSortField.used_traffic: User.used_traffic,
-        UserSortField.data_limit: User.data_limit,
-        UserSortField.expire: User.expire,
-        UserSortField.created_at: User.created_at,
+        SubscriptionSortField.uuid: Subscription.uuid,
+        SubscriptionSortField.used_traffic: Subscription.used_traffic,
+        SubscriptionSortField.data_limit: Subscription.data_limit,
+        SubscriptionSortField.expire: Subscription.expire,
+        SubscriptionSortField.created_at: Subscription.created_at,
     }
     nullable_field_map = {
-        UserSortField.edit_at: User.edit_at,
-        UserSortField.online_at: User.online_at,
+        SubscriptionSortField.edit_at: Subscription.edit_at,
+        SubscriptionSortField.online_at: Subscription.online_at,
     }
 
     if sort_option.field in field_map:
@@ -458,19 +443,19 @@ def _build_user_sort_clause(sort_option: UserSortOption):
     )
 
 
-def _build_user_simple_sort_clause(sort_option: UserSimpleSortOption):
+def _build_subscription_simple_sort_clause(sort_option: SubscriptionSimpleSortOption):
     field_map = {
-        UserSimpleSortField.id: User.id,
-        UserSimpleSortField.username: User.username,
+        SubscriptionSimpleSortField.uuid: Subscription.uuid,
+        SubscriptionSimpleSortField.uuid: Subscription.uuid,
     }
     column = field_map[sort_option.field]
     return column.desc() if sort_option.value.startswith("-") else column.asc()
 
 
-def _build_user_sort_clauses(sort_options: list[UserSortOption]) -> list[ColumnElement]:
+def _build_subscription_sort_clauses(sort_options: list[SubscriptionSortOption]) -> list[ColumnElement]:
     clauses = []
     for sort_option in sort_options:
-        clause = _build_user_sort_clause(sort_option)
+        clause = _build_subscription_sort_clause(sort_option)
         if isinstance(clause, tuple):
             clauses.extend(clause)
         else:
@@ -481,19 +466,19 @@ def _build_user_sort_clauses(sort_options: list[UserSortOption]) -> list[ColumnE
         # same value for the requested sort field. Matching the last direction
         # also lets the default created_at sort use (created_at, id) directly.
         last_sort_descending = sort_options[-1].value.startswith("-")
-        clauses.append(User.id.desc() if last_sort_descending else User.id.asc())
+        clauses.append(Subscription.uuid.desc() if last_sort_descending else Subscription.uuid.asc())
 
     return clauses
 
 
-def _build_user_count_stmt(stmt: Select) -> Select:
+def _build_subscription_count_stmt(stmt: Select) -> Select:
     """Count filtered users without carrying page ordering or wide user rows."""
-    return stmt.with_only_columns(func.count(User.id)).order_by(None)
+    return stmt.with_only_columns(func.count(Subscription.uuid)).order_by(None)
 
 
-async def get_users(
+async def get_subscriptions(
     db: AsyncSession,
-    query: UserListQuery,
+    query: SubscriptionListQuery,
     admin: Admin | None = None,
     return_with_count: bool = False,
     load_admin_role: bool = False,
@@ -501,7 +486,7 @@ async def get_users(
     load_lifetime_used_traffic: bool = False,
     load_group_inbounds: bool = False,
     load_hwid_count: bool = False,
-) -> list[User] | tuple[list[User], int]:
+) -> list[Subscription] | tuple[list[Subscription], int]:
     """
     Retrieves users based on various filters.
 
@@ -518,98 +503,108 @@ async def get_users(
     Returns:
         List of users or tuple with (users, count) if return_with_count is True.
     """
-    admin_loader = selectinload(User.admin)
+    admin_loader = selectinload(Subscription.admin)
     if load_admin_role:
         admin_loader = admin_loader.selectinload(Admin.role)
 
-    groups_loader = selectinload(User.groups)
+    groups_loader = selectinload(Subscription.groups)
     if load_group_inbounds:
         groups_loader = groups_loader.selectinload(Group.inbounds)
 
     options = [
         admin_loader,
-        selectinload(User.next_plan),
+        selectinload(Subscription.next_plan),
         groups_loader,
     ]
     if load_usage_logs:
-        options.append(selectinload(User.usage_logs))
+        options.append(selectinload(Subscription.usage_logs))
     if load_lifetime_used_traffic:
-        options.append(with_expression(User._reseted_usage_query, _user_reset_traffic_subquery()))
-    stmt = select(User).options(*options)
+        options.append(with_expression(Subscription._reseted_usage_query, _subscription_reset_traffic_subquery()))
+    stmt = select(Subscription).options(*options)
     if load_lifetime_used_traffic:
         stmt = stmt.execution_options(populate_existing=True)
     if load_hwid_count:
-        stmt = stmt.options(with_expression(User.hwid_count, _user_hwid_count_subquery()))
+        stmt = stmt.options(with_expression(Subscription.hwid_count, _subscription_hwid_count_subquery()))
 
     filters = []
-    if query.ids:
-        filters.append(_explicit_ids(User.id, query.ids))
-    if query.username:
-        filters.append(User.username.in_(query.username))
-    if query.usernames:
-        filters.append(User.username.in_(query.usernames))
+    if query.uuids:
+        filters.append(_explicit_uuids(Subscription.uuid, query.uuids))
     if query.search:
-        filters.append(or_(User.username.ilike(f"%{query.search}%"), User.note.ilike(f"%{query.search}%")))
+        filters.append(
+            or_(Subscription.uuid.cast(String).ilike(f"%{query.search}%"), Subscription.note.ilike(f"%{query.search}%"))
+        )
 
     if query.status:
         if isinstance(query.status, list):
-            filters.append(User.status.in_(query.status))
+            filters.append(Subscription.status.in_(query.status))
         else:
-            filters.append(User.status == query.status)
+            filters.append(Subscription.status == query.status)
     if admin:
-        filters.append(User.admin_id == admin.id)
+        filters.append(Subscription.admin_id == admin.id)
     if query.owner or query.admin_ids:
-        stmt = stmt.join(User.admin)
+        stmt = stmt.join(Subscription.admin)
         if query.owner:
             filters.append(Admin.username.in_(query.owner))
         if query.admin_ids:
             filters.append(Admin.id.in_(query.admin_ids))
     if query.data_limit_reset_strategy:
         if isinstance(query.data_limit_reset_strategy, list):
-            filters.append(User.data_limit_reset_strategy.in_(query.data_limit_reset_strategy))
+            filters.append(Subscription.data_limit_reset_strategy.in_(query.data_limit_reset_strategy))
         else:
-            filters.append(User.data_limit_reset_strategy == query.data_limit_reset_strategy)
+            filters.append(Subscription.data_limit_reset_strategy == query.data_limit_reset_strategy)
     if query.no_data_limit:
-        filters.append(or_(User.data_limit.is_(None), User.data_limit == 0))
+        filters.append(or_(Subscription.data_limit.is_(None), Subscription.data_limit == 0))
     else:
         if query.data_limit_min is not None:
             filters.append(
-                and_(User.data_limit.is_not(None), User.data_limit > 0, User.data_limit >= query.data_limit_min)
+                and_(
+                    Subscription.data_limit.is_not(None),
+                    Subscription.data_limit > 0,
+                    Subscription.data_limit >= query.data_limit_min,
+                )
             )
         if query.data_limit_max is not None:
             filters.append(
-                and_(User.data_limit.is_not(None), User.data_limit > 0, User.data_limit <= query.data_limit_max)
+                and_(
+                    Subscription.data_limit.is_not(None),
+                    Subscription.data_limit > 0,
+                    Subscription.data_limit <= query.data_limit_max,
+                )
             )
     if query.no_expire:
-        filters.append(and_(User.expire.is_(None), User.status != UserStatus.on_hold))
+        filters.append(and_(Subscription.expire.is_(None), Subscription.status != SubscriptionStatus.on_hold))
     else:
         if query.expire_after is not None:
-            filters.append(and_(User.expire.is_not(None), User.expire >= query.expire_after))
+            filters.append(and_(Subscription.expire.is_not(None), Subscription.expire >= query.expire_after))
         if query.expire_before is not None:
-            filters.append(and_(User.expire.is_not(None), User.expire <= query.expire_before))
+            filters.append(and_(Subscription.expire.is_not(None), Subscription.expire <= query.expire_before))
     if query.online_after is not None:
-        filters.append(and_(User.online_at.is_not(None), User.online_at >= query.online_after))
+        filters.append(and_(Subscription.online_at.is_not(None), Subscription.online_at >= query.online_after))
     if query.online_before is not None:
-        filters.append(and_(User.online_at.is_not(None), User.online_at <= query.online_before))
+        filters.append(and_(Subscription.online_at.is_not(None), Subscription.online_at <= query.online_before))
     if query.online:
-        filters.append(and_(User.online_at.is_not(None), User.online_at >= datetime.now(UTC) - _ONLINE_USERS_WINDOW))
+        filters.append(
+            and_(
+                Subscription.online_at.is_not(None), Subscription.online_at >= datetime.now(UTC) - _ONLINE_USERS_WINDOW
+            )
+        )
 
     if query.group_ids:
-        filters.append(User.groups.any(Group.id.in_(query.group_ids)))
+        filters.append(Subscription.groups.any(Group.id.in_(query.group_ids)))
     if query.no_group:
-        filters.append(~User.groups.any())
+        filters.append(~Subscription.groups.any())
     if query.proxy_id:
-        filters.append(build_json_proxy_settings_search_condition(db, User.proxy_settings, query.proxy_id))
+        filters.append(build_json_proxy_settings_search_condition(db, Subscription.proxy_settings, query.proxy_id))
 
     if filters:
         stmt = stmt.where(and_(*filters))
 
     if query.sort:
-        stmt = stmt.order_by(*_build_user_sort_clauses(query.sort))
+        stmt = stmt.order_by(*_build_subscription_sort_clauses(query.sort))
 
     total = None
     if return_with_count:
-        count_stmt = _build_user_count_stmt(stmt)
+        count_stmt = _build_subscription_count_stmt(stmt)
         result = await db.execute(count_stmt)
         total = result.scalar()
 
@@ -626,11 +621,11 @@ async def get_users(
     return users
 
 
-async def get_users_simple(
+async def get_subscriptions_simple(
     db: AsyncSession,
-    query: UserSimpleListQuery,
+    query: SubscriptionSimpleListQuery,
     admin: Admin | None = None,
-) -> tuple[list[tuple[int, str]], int]:
+) -> tuple[list[tuple[UUID]], int]:
     """
     Retrieves lightweight user data with only id and username.
 
@@ -642,17 +637,15 @@ async def get_users_simple(
     Returns:
         Tuple of (list of (id, username) tuples, total_count).
     """
-    stmt = select(User.id, User.username)
+    stmt = select(Subscription.uuid)
 
     filters = []
-    if query.ids:
-        filters.append(User.id.in_(query.ids))
-    if query.usernames:
-        filters.append(User.username.in_(query.usernames))
+    if query.uuids:
+        filters.append(_explicit_uuids(Subscription.uuid, query.uuids))
     if query.search:
-        filters.append(User.username.ilike(f"%{query.search}%"))
+        filters.append(Subscription.uuid.cast(String).ilike(f"%{query.search}%"))
     if admin:
-        filters.append(User.admin_id == admin.id)
+        filters.append(Subscription.admin_id == admin.id)
 
     if filters:
         stmt = stmt.where(and_(*filters))
@@ -660,7 +653,7 @@ async def get_users_simple(
     if query.sort:
         sort_list = []
         for sort_option in query.sort:
-            clause = _build_user_simple_sort_clause(sort_option)
+            clause = _build_subscription_simple_sort_clause(sort_option)
             if isinstance(clause, tuple):
                 sort_list.extend(clause)
             else:
@@ -687,18 +680,18 @@ async def get_users_simple(
     return rows, total
 
 
-async def get_expired_users(
+async def get_expired_subscriptions(
     db: AsyncSession,
-    query: ExpiredUsersQuery,
+    query: ExpiredSubscriptionsQuery,
     admin_id: int | None = None,
 ):
-    conditions = _cleanup_target_user_conditions(query.expired_after, query.expired_before, admin_id, query.target)
-    stmt = select(User).where(*conditions)
+    conditions = _cleanup_target_subscription_conditions(query.expired_after, query.expired_before, admin_id, query.target)
+    stmt = select(Subscription).where(*conditions)
 
     return (await db.execute(stmt)).unique().scalars().all()
 
 
-def _cleanup_target_user_conditions(
+def _cleanup_target_subscription_conditions(
     expired_after: datetime | None = None,
     expired_before: datetime | None = None,
     admin_id: int | None = None,
@@ -706,15 +699,15 @@ def _cleanup_target_user_conditions(
 ):
     if target == "expired":
         # Time-expired users: date range filters on the expiration date.
-        conditions = [User.is_expired]
+        conditions = [Subscription.is_expired]
         if expired_after:
-            conditions.append(User.expire >= expired_after)
+            conditions.append(Subscription.expire >= expired_after)
         if expired_before:
-            conditions.append(User.expire <= expired_before)
+            conditions.append(Subscription.expire <= expired_before)
     elif target == "inactive":
         # Fall back to account creation for users that have never connected,
         # so newly created accounts are not treated as long-term inactive.
-        last_activity = func.coalesce(User.online_at, User.created_at)
+        last_activity = func.coalesce(Subscription.online_at, Subscription.created_at)
         conditions = []
         if expired_after:
             conditions.append(last_activity >= expired_after)
@@ -724,23 +717,23 @@ def _cleanup_target_user_conditions(
         # For limited / on_hold / disabled: date range filters apply to
         # last_status_change (i.e. when the user entered that status).
         status_map = {
-            "limited": UserStatus.limited,
-            "on_hold": UserStatus.on_hold,
-            "disabled": UserStatus.disabled,
+            "limited": SubscriptionStatus.limited,
+            "on_hold": SubscriptionStatus.on_hold,
+            "disabled": SubscriptionStatus.disabled,
         }
-        conditions = [User.status == status_map[target]]
+        conditions = [Subscription.status == status_map[target]]
         if expired_after:
-            conditions.append(User.last_status_change >= expired_after.replace(tzinfo=None))
+            conditions.append(Subscription.last_status_change >= expired_after.replace(tzinfo=None))
         if expired_before:
-            conditions.append(User.last_status_change <= expired_before.replace(tzinfo=None))
+            conditions.append(Subscription.last_status_change <= expired_before.replace(tzinfo=None))
 
     if admin_id is not None:
-        conditions.append(User.admin_id == admin_id)
+        conditions.append(Subscription.admin_id == admin_id)
 
     return conditions
 
 
-async def remove_expired_users(
+async def remove_expired_subscriptions(
     db: AsyncSession,
     expired_after: datetime | None = None,
     expired_before: datetime | None = None,
@@ -749,74 +742,93 @@ async def remove_expired_users(
     dry_run: bool = False,
 ) -> tuple[list[str], list[Row]]:
     """
-    Delete the users matching a cleanup target.
+    Delete subscriptions matching a cleanup target.
 
-    Returns the usernames, plus the deleted users that nodes still serve (active and on_hold,
-    as `id`/`proxy_settings` rows) so the caller can remove them from the nodes.
+    Returns UUIDs and deleted subscriptions still served by nodes, with their
+    UUID, status and proxy settings for reliable access revocation.
     """
-    conditions = _cleanup_target_user_conditions(expired_after, expired_before, admin_id, target)
+    conditions = _cleanup_target_subscription_conditions(expired_after, expired_before, admin_id, target)
 
-    rows = (await db.execute(select(User.id, User.username, User.status, User.proxy_settings).where(*conditions))).all()
+    rows = (
+        await db.execute(
+            select(Subscription.uuid, Subscription.status, Subscription.proxy_settings).where(*conditions)
+        )
+    ).all()
     if not rows:
         return [], []
 
-    usernames = [row.username for row in rows]
+    uuids = [row.uuid for row in rows]
 
     if dry_run:
-        return usernames, []
+        return uuids, []
 
-    user_ids = [row.id for row in rows]
+    subscription_uuids = [row.uuid for row in rows]
 
-    for start in range(0, len(user_ids), 1000):
-        chunk = user_ids[start : start + 1000]
-        await release_allocations_by_user_ids(db, chunk)
-        await _delete_user_dependencies(db, chunk)
-        await db.execute(delete(User).where(User.id.in_(chunk)))
+    for start in range(0, len(subscription_uuids), 1000):
+        chunk = subscription_uuids[start : start + 1000]
+        await release_allocations_by_subscription_uuids(db, chunk)
+        await _delete_subscription_dependencies(db, chunk)
+        await db.execute(delete(Subscription).where(Subscription.uuid.in_(chunk)))
     await db.commit()
 
-    return usernames, [row for row in rows if row.status in (UserStatus.active, UserStatus.on_hold)]
+    return uuids, [row for row in rows if row.status in (SubscriptionStatus.active, SubscriptionStatus.on_hold)]
 
 
-async def get_active_to_expire_users(db: AsyncSession) -> list[User]:
-    stmt = _review_user_select_stmt().where(User.status == UserStatus.active).where(User.is_expired)
-
-    return list((await db.execute(stmt)).unique().scalars().all())
-
-
-async def get_active_to_limited_users(db: AsyncSession) -> list[User]:
-    stmt = _review_user_select_stmt().where(User.status == UserStatus.active).where(User.is_limited)
+async def get_active_to_expire_subscriptions(db: AsyncSession) -> list[Subscription]:
+    stmt = (
+        _review_subscription_select_stmt()
+        .where(Subscription.status == SubscriptionStatus.active)
+        .where(Subscription.is_expired)
+    )
 
     return list((await db.execute(stmt)).unique().scalars().all())
 
 
-async def get_on_hold_to_active_users(db: AsyncSession) -> list[User]:
-    stmt = _review_user_select_stmt().where(User.status == UserStatus.on_hold).where(User.become_online)
+async def get_active_to_limited_subscriptions(db: AsyncSession) -> list[Subscription]:
+    stmt = (
+        _review_subscription_select_stmt()
+        .where(Subscription.status == SubscriptionStatus.active)
+        .where(Subscription.is_limited)
+    )
 
     return list((await db.execute(stmt)).unique().scalars().all())
 
 
-async def reload_review_users(db: AsyncSession, user_ids: list[int]) -> None:
+async def get_on_hold_to_active_subscriptions(db: AsyncSession) -> list[Subscription]:
+    stmt = (
+        _review_subscription_select_stmt()
+        .where(Subscription.status == SubscriptionStatus.on_hold)
+        .where(Subscription.become_online)
+        # Core-managed status is revision-fenced. The provider cannot activate
+        # a paid subscription on a local on-hold timer or device connection.
+        .where(false())
+    )
+
+    return list((await db.execute(stmt)).unique().scalars().all())
+
+
+async def reload_review_subscriptions(db: AsyncSession, subscription_uuids: list[UUID]) -> None:
     """Load users picked by a review query again in place, e.g. after a rollback expired them."""
-    if not user_ids:
+    if not subscription_uuids:
         return
-    stmt = _review_user_select_stmt().where(_explicit_ids(User.id, user_ids))
+    stmt = _review_subscription_select_stmt().where(_explicit_uuids(Subscription.uuid, subscription_uuids))
     (await db.execute(stmt.execution_options(populate_existing=True))).unique().scalars().all()
 
 
-async def get_users_to_reset_data_usage(db: AsyncSession) -> list[User]:
+async def get_subscriptions_to_reset_data_usage(db: AsyncSession) -> list[Subscription]:
     """
     Retrieves users whose data usage needs to be reset based on their reset strategy.
     """
     last_reset_subq = (
         select(
-            UserUsageResetLogs.user_id,
-            func.max(UserUsageResetLogs.reset_at).label("last_reset_at"),
+            SubscriptionUsageResetLogs.subscription_uuid,
+            func.max(SubscriptionUsageResetLogs.reset_at).label("last_reset_at"),
         )
-        .group_by(UserUsageResetLogs.user_id)
+        .group_by(SubscriptionUsageResetLogs.subscription_uuid)
         .subquery()
     )
 
-    last_reset_time = coalesce(last_reset_subq.c.last_reset_at, User.created_at)
+    last_reset_time = coalesce(last_reset_subq.c.last_reset_at, Subscription.created_at)
 
     reset_strategy_to_days = {
         DataLimitResetStrategy.day: 1,
@@ -826,16 +838,20 @@ async def get_users_to_reset_data_usage(db: AsyncSession) -> list[User]:
     }
 
     num_days_to_reset_case = case(
-        *((User.data_limit_reset_strategy == strategy, days) for strategy, days in reset_strategy_to_days.items()),
+        *(
+            (Subscription.data_limit_reset_strategy == strategy, days)
+            for strategy, days in reset_strategy_to_days.items()
+        ),
         else_=None,
     )
 
     stmt = (
-        _review_user_select_stmt()
-        .outerjoin(last_reset_subq, User.id == last_reset_subq.c.user_id)
+        _review_subscription_select_stmt()
+        .outerjoin(last_reset_subq, Subscription.uuid == last_reset_subq.c.subscription_uuid)
         .where(
-            User.status.in_([UserStatus.active, UserStatus.limited]),
-            User.data_limit_reset_strategy != DataLimitResetStrategy.no_reset,
+            Subscription.status.in_([SubscriptionStatus.active, SubscriptionStatus.limited]),
+            Subscription.data_limit_reset_strategy != DataLimitResetStrategy.no_reset,
+            false(),
             DateDiff(func.now(), last_reset_time) >= num_days_to_reset_case,
         )
     )
@@ -843,16 +859,16 @@ async def get_users_to_reset_data_usage(db: AsyncSession) -> list[User]:
     return list((await db.execute(stmt)).unique().scalars().all())
 
 
-async def get_usage_percentage_reached_users(db: AsyncSession, percentage: int) -> list[User]:
+async def get_usage_percentage_reached_subscriptions(db: AsyncSession, percentage: int) -> list[Subscription]:
     """
     Get active users who have reached or exceeded the specified usage percentage threshold
     and don't have an existing notification reminder for this threshold.
     """
     # Subquery to check for existing notification reminders
     existing_reminder_subq = (
-        select(NotificationReminder.user_id)
+        select(NotificationReminder.subscription_uuid)
         .where(
-            NotificationReminder.user_id == User.id,
+            NotificationReminder.subscription_uuid == Subscription.uuid,
             NotificationReminder.type == ReminderType.data_usage,
             NotificationReminder.threshold == percentage,
         )
@@ -860,26 +876,26 @@ async def get_usage_percentage_reached_users(db: AsyncSession, percentage: int) 
     )
 
     stmt = (
-        _review_user_select_stmt()
-        .options(joinedload(User.notification_reminders))
-        .where(User.status == UserStatus.active)
-        .where(User.usage_percentage >= percentage)
+        _review_subscription_select_stmt()
+        .options(joinedload(Subscription.notification_reminders))
+        .where(Subscription.status == SubscriptionStatus.active)
+        .where(Subscription.usage_percentage >= percentage)
         .where(not_(existing_reminder_subq))  # Only users without existing reminders
     )
 
     return list((await db.execute(stmt)).unique().scalars().all())
 
 
-async def get_days_left_reached_users(db: AsyncSession, days: int) -> list[User]:
+async def get_days_left_reached_subscriptions(db: AsyncSession, days: int) -> list[Subscription]:
     """
     Get active users who have reached or exceeded the specified days left threshold
     and don't have an existing notification reminder for this threshold.
     """
     # Subquery to check for existing notification reminders
     existing_reminder_subq = (
-        select(NotificationReminder.user_id)
+        select(NotificationReminder.subscription_uuid)
         .where(
-            NotificationReminder.user_id == User.id,
+            NotificationReminder.subscription_uuid == Subscription.uuid,
             NotificationReminder.type == ReminderType.expiration_date,
             NotificationReminder.threshold == days,
         )
@@ -887,44 +903,44 @@ async def get_days_left_reached_users(db: AsyncSession, days: int) -> list[User]
     )
 
     stmt = (
-        _review_user_select_stmt()
-        .options(joinedload(User.notification_reminders))
-        .where(User.status == UserStatus.active)
-        .where(User.expire.isnot(None))
-        .where(User.days_left == days)
+        _review_subscription_select_stmt()
+        .options(joinedload(Subscription.notification_reminders))
+        .where(Subscription.status == SubscriptionStatus.active)
+        .where(Subscription.expire.isnot(None))
+        .where(Subscription.days_left == days)
         .where(not_(existing_reminder_subq))  # Only users without existing reminders
     )
 
     return list((await db.execute(stmt)).unique().scalars().all())
 
 
-async def get_user_usages(
+async def get_subscription_usages(
     db: AsyncSession,
-    user_id: int,
+    subscription_uuid: UUID,
     start: datetime,
     end: datetime,
     period: Period,
     node_id: int | None = None,
     group_by_node: bool = False,
-) -> UserUsageStatsList:
+) -> SubscriptionUsageStatsList:
     """
     Retrieves user usages within a specified date range.
     Groups data by periods in the timezone of the start/end parameters.
     """
     # Build the appropriate truncation expression
-    trunc_expr = _build_trunc_expression(db, period, NodeUserUsage.created_at, start)
+    trunc_expr = _build_trunc_expression(db, period, NodeSubscriptionUsage.created_at, start)
 
     # Filter using UTC timestamps (DB stores naive UTC) from first complete bucket
     start_utc = get_complete_period_start_for_filter(start, period)
     end_utc = to_utc_for_filter(end)
     conditions = [
-        NodeUserUsage.created_at >= start_utc,
-        NodeUserUsage.created_at < end_utc,
-        NodeUserUsage.user_id == user_id,
+        NodeSubscriptionUsage.created_at >= start_utc,
+        NodeSubscriptionUsage.created_at < end_utc,
+        NodeSubscriptionUsage.subscription_uuid == subscription_uuid,
     ]
 
     if node_id is not None:
-        conditions.append(NodeUserUsage.node_id == node_id)
+        conditions.append(NodeSubscriptionUsage.node_id == node_id)
     else:
         node_id = -1
 
@@ -933,17 +949,19 @@ async def get_user_usages(
         stmt = (
             select(
                 trunc_expr.label("period_start"),
-                func.coalesce(NodeUserUsage.node_id, 0).label("node_id"),
-                func.sum(NodeUserUsage.used_traffic).label("total_traffic"),
+                func.coalesce(NodeSubscriptionUsage.node_id, 0).label("node_id"),
+                func.sum(NodeSubscriptionUsage.used_traffic).label("total_traffic"),
             )
             .where(and_(*conditions))
-            .group_by(trunc_expr, NodeUserUsage.node_id)
+            .group_by(trunc_expr, NodeSubscriptionUsage.node_id)
             .order_by(trunc_expr)
         )
 
     else:
         stmt = (
-            select(trunc_expr.label("period_start"), func.sum(NodeUserUsage.used_traffic).label("total_traffic"))
+            select(
+                trunc_expr.label("period_start"), func.sum(NodeSubscriptionUsage.used_traffic).label("total_traffic")
+            )
             .where(and_(*conditions))
             .group_by(trunc_expr)
             .order_by(trunc_expr)
@@ -961,12 +979,12 @@ async def get_user_usages(
 
         if node_id_val not in stats:
             stats[node_id_val] = []
-        stats[node_id_val].append(UserUsageStat(**row_dict))
+        stats[node_id_val].append(SubscriptionUsageStat(**row_dict))
 
-    return UserUsageStatsList(period=period, start=start, end=end, stats=stats)
+    return SubscriptionUsageStatsList(period=period, start=start, end=end, stats=stats)
 
 
-async def get_users_count_by_admin(db: AsyncSession, admin_id: int | None) -> int:
+async def get_subscriptions_count_by_admin(db: AsyncSession, admin_id: int | None) -> int:
     """
     Gets the total count of users belonging to a specific admin.
 
@@ -977,9 +995,9 @@ async def get_users_count_by_admin(db: AsyncSession, admin_id: int | None) -> in
     Returns:
         int: Total count of users for the given admin.
     """
-    stmt = select(func.count(User.id))
+    stmt = select(func.count(Subscription.uuid))
     if admin_id is not None:
-        stmt = stmt.where(User.admin_id == admin_id)
+        stmt = stmt.where(Subscription.admin_id == admin_id)
     return (await db.execute(stmt)).scalar_one() or 0
 
 
@@ -1002,65 +1020,60 @@ async def lock_admin_quota_row(db: AsyncSession, admin_id: int) -> None:
     await db.execute(select(Admin.id).where(Admin.id == admin_id).with_for_update())
 
 
-async def get_users_by_usernames(
-    db: AsyncSession,
-    usernames: Sequence[str],
-    *,
-    load_admin_role: bool = False,
-) -> list[User]:
-    if not usernames:
+async def get_subscriptions_by_uuids(db: AsyncSession, uuids: Sequence[UUID], *, load_admin_role: bool = False) -> list[Subscription]:
+    """Retrieve subscriptions in the requested UUID order."""
+    if not uuids:
         return []
-
-    result = await db.execute(
-        _build_user_select_stmt(load_admin_role=load_admin_role).where(User.username.in_(usernames))
+    rows = await db.execute(
+        _build_subscription_select_stmt(load_admin_role=load_admin_role).where(Subscription.uuid.in_(uuids))
     )
-    users_by_username = {user.username: user for user in result.unique().scalars().all()}
-    return [users_by_username[username] for username in usernames if username in users_by_username]
+    by_uuid = {subscription.uuid: subscription for subscription in rows.unique().scalars().all()}
+    return [by_uuid[uid] for uid in uuids if uid in by_uuid]
 
 
-async def get_users_by_ids(
+async def get_subscriptions_by_uuid_batch(
     db: AsyncSession,
-    user_ids: Sequence[int],
+    subscription_uuids: Sequence[UUID],
     *,
     load_admin_role: bool = False,
     load_group_inbounds: bool = False,
     load_usage_logs: bool = True,
     load_lifetime_used_traffic: bool = False,
     populate_existing: bool = False,
-) -> list[User]:
+) -> list[Subscription]:
     """Load users in request order with optional history, aggregates and refreshed state."""
-    if not user_ids:
+    if not subscription_uuids:
         return []
 
-    stmt = _build_user_select_stmt(
+    stmt = _build_subscription_select_stmt(
         load_admin_role=load_admin_role,
         load_group_inbounds=load_group_inbounds,
         load_usage_logs=load_usage_logs,
         load_lifetime_used_traffic=load_lifetime_used_traffic,
     ).execution_options(populate_existing=populate_existing)
-    result = await db.execute(stmt.where(_explicit_ids(User.id, user_ids)))
-    users_by_id = {user.id: user for user in result.unique().scalars().all()}
-    return [users_by_id[user_id] for user_id in user_ids if user_id in users_by_id]
+    result = await db.execute(stmt.where(_explicit_uuids(Subscription.uuid, subscription_uuids)))
+    users_by_id = {user.uuid: user for user in result.unique().scalars().all()}
+    return [users_by_id[subscription_uuid] for subscription_uuid in subscription_uuids if subscription_uuid in users_by_id]
 
 
-async def get_users_count(db: AsyncSession, status: UserStatus = None, admin_id: int | None = None) -> int:
+async def get_subscriptions_count(db: AsyncSession, status: SubscriptionStatus = None, admin_id: int | None = None) -> int:
     """
     Gets the total count of users with optional filters.
 
     Args:
         db (AsyncSession): Database session.
-        status (UserStatus, optional): Filter by user status.
+        status (SubscriptionStatus, optional): Filter by user status.
         admin_id (int, optional): Filter by admin.
     Returns:
         int: Total count of users.
     """
-    stmt = select(func.count(User.id))
+    stmt = select(func.count(Subscription.uuid))
 
     filters = []
     if status:
-        filters.append(User.status == status)
+        filters.append(Subscription.status == status)
     if admin_id:
-        filters.append(User.admin_id == admin_id)
+        filters.append(Subscription.admin_id == admin_id)
 
     if filters:
         stmt = stmt.where(and_(*filters))
@@ -1069,49 +1082,51 @@ async def get_users_count(db: AsyncSession, status: UserStatus = None, admin_id:
     return result.scalar()
 
 
-def _build_user_count_metrics_query(
-    statuses: list[UserStatus], online_since: datetime, admin_id: int | None = None
+def _build_subscription_count_metrics_query(
+    statuses: list[SubscriptionStatus], online_since: datetime, admin_id: int | None = None
 ) -> Select:
     """Build one index-aware query for dashboard user counts."""
     if admin_id is not None:
         status_columns = [
-            select(func.count(User.id))
-            .where(User.admin_id == admin_id, User.status == status)
+            select(func.count(Subscription.uuid))
+            .where(Subscription.admin_id == admin_id, Subscription.status == status)
             .scalar_subquery()
             .label(status.value)
             for status in statuses
         ]
         online_column = (
-            select(func.count(User.id))
+            select(func.count(Subscription.uuid))
             .where(
-                User.admin_id == admin_id,
-                User.online_at.isnot(None),
-                User.online_at >= online_since,
+                Subscription.admin_id == admin_id,
+                Subscription.online_at.isnot(None),
+                Subscription.online_at >= online_since,
             )
             .scalar_subquery()
             .label("online")
         )
         return select(*status_columns, online_column)
 
-    status_columns = [func.count(case((User.status == status, User.id))).label(status.value) for status in statuses]
-    online_column = func.count(case((and_(User.online_at.isnot(None), User.online_at >= online_since), User.id))).label(
-        "online"
-    )
+    status_columns = [
+        func.count(case((Subscription.status == status, Subscription.uuid))).label(status.value) for status in statuses
+    ]
+    online_column = func.count(
+        case((and_(Subscription.online_at.isnot(None), Subscription.online_at >= online_since), Subscription.uuid))
+    ).label("online")
     return select(*status_columns, online_column)
 
 
-async def get_users_count_metrics(
+async def get_subscriptions_count_metrics(
     db: AsyncSession,
-    statuses: list[UserStatus],
+    statuses: list[SubscriptionStatus],
     online_window: timedelta,
     admin_id: int | None = None,
 ) -> tuple[dict[str, int], int]:
     """Return per-status, total, and recent-online user counts in one SELECT.
 
     The ``total`` value includes only the requested statuses. Pass every
-    ``UserStatus`` value when a complete user count is required.
+    ``SubscriptionStatus`` value when a complete user count is required.
     """
-    stmt = _build_user_count_metrics_query(statuses, datetime.now(UTC) - online_window, admin_id)
+    stmt = _build_subscription_count_metrics_query(statuses, datetime.now(UTC) - online_window, admin_id)
     row = (await db.execute(stmt)).one()
 
     status_counts = {status.value: int(getattr(row, status.value) or 0) for status in statuses}
@@ -1119,23 +1134,35 @@ async def get_users_count_metrics(
     return status_counts, int(row.online or 0)
 
 
-async def create_user(
-    db: AsyncSession, new_user: UserCreate, groups: list[Group], admin: Admin, *, commit: bool = True
-) -> User:
+def _subscription_uuid_for_username(username: str) -> UUID:
+    # Core's managed technical identity already contains the canonical subscription UUID.
+    # Other WayLane subscriptions receive an independent random UUID.
+    if username.startswith("sub_"):
+        try:
+            return UUID(username[4:])
+        except ValueError:
+            pass
+    return uuid4()
+
+
+async def create_subscription(
+    db: AsyncSession, new_user: SubscriptionCreate, groups: list[Group], admin: Admin, *, commit: bool = True
+) -> Subscription:
     """
     Creates a new user.
 
     Args:
         db (AsyncSession): Database session.
-        new_user (UserCreate): User creation data.
+        new_user (SubscriptionCreate): Subscription creation data.
         groups (list[Group]): Groups to assign to user.
         admin (Admin): Admin creating the user.
 
     Returns:
-        User: Created user object.
+        Subscription: Created user object.
     """
-    db_user = User(
-        **new_user.model_dump(exclude={"group_ids", "expire", "proxy_settings", "next_plan", "on_hold_timeout"})
+    db_user = Subscription(
+        uuid=new_user.uuid,
+        **new_user.model_dump(exclude={"uuid", "group_ids", "expire", "proxy_settings", "next_plan", "on_hold_timeout"}),
     )
     db_user.admin = admin
     db_user.groups = groups
@@ -1152,123 +1179,81 @@ async def create_user(
     await sync_user_allocations(db, db_user, accessible_tags=await tags_from_groups(groups))
 
     if new_user.next_plan:
-        db_user.next_plan = NextPlan(user_id=db_user.id, **new_user.next_plan.model_dump())
+        db_user.next_plan = NextPlan(subscription_uuid=db_user.uuid, **new_user.next_plan.model_dump())
         db.add(db_user.next_plan)
     if commit:
         await db.commit()
-        await refresh_and_load_user(db, db_user)
+        await refresh_and_load_subscription(db, db_user)
     return db_user
 
 
-async def create_users_bulk(
-    db: AsyncSession, new_users: list[UserCreate], groups: list[Group], admin: Admin, *, commit: bool = True
-) -> list[User]:
-    """
-    Creates multiple users in a single commit for better performance.
-    """
-    if not new_users:
-        return []
-
-    db_users: list[User] = []
-    for new_user in new_users:
-        db_user = User(
-            **new_user.model_dump(exclude={"group_ids", "expire", "proxy_settings", "next_plan", "on_hold_timeout"})
-        )
-        db_user.admin = admin
-        db_user.groups = list(groups)
-        db_user.expire = new_user.expire or None
-        db_user.on_hold_timeout = new_user.on_hold_timeout or None
-        db_user.hwid_limit = new_user.hwid_limit if new_user.hwid_limit is not None else None
-        db_user.proxy_settings = new_user.proxy_settings.dict()
-        db_users.append(db_user)
-
-    db.add_all(db_users)
-    await db.flush()
-    group_tags = await tags_from_groups(groups)
-    await sync_users_allocations(db, db_users, tags_by_user={user.id: group_tags for user in db_users})
-
-    next_plans: list[NextPlan] = []
-    for db_user, new_user in zip(db_users, new_users):
-        if new_user.next_plan:
-            next_plans.append(NextPlan(user_id=db_user.id, **new_user.next_plan.model_dump()))
-
-    if next_plans:
-        db.add_all(next_plans)
-        await db.flush()
-
-    if commit:
-        await db.commit()
-        for user in db_users:
-            await refresh_and_load_user(db, user)
-
-    return db_users
-
-
-async def _delete_user_dependencies(db: AsyncSession, user_ids: list[int]):
-    """Remove all rows that reference the given user IDs."""
-    if not user_ids:
+async def _delete_subscription_dependencies(db: AsyncSession, subscription_uuids: list[UUID]):
+    """Remove all dependent rows referencing the given subscription UUIDs."""
+    if not subscription_uuids:
         return
 
     await db.execute(
-        users_groups_association.delete().where(_explicit_ids(users_groups_association.c.user_id, user_ids))
+        subscriptions_groups_association.delete().where(
+            _explicit_uuids(subscriptions_groups_association.c.subscription_uuid, subscription_uuids)
+        )
     )
 
 
-async def remove_user(db: AsyncSession, db_user: User) -> User:
+async def remove_subscription(db: AsyncSession, db_user: Subscription) -> Subscription:
     """
     Removes a user from the database.
 
     Args:
         db (AsyncSession): Database session.
-        db_user (User): User to remove.
+        db_user (Subscription): Subscription to remove.
 
     Returns:
-        User: Removed user object.
+        Subscription: Removed user object.
     """
     await release_users_allocations(db, [db_user])
-    await _delete_user_dependencies(db, [db_user.id])
-    await db.execute(delete(User).where(User.id == db_user.id))
+    await _delete_subscription_dependencies(db, [db_user.uuid])
+    await db.execute(delete(Subscription).where(Subscription.uuid == db_user.uuid))
     await db.commit()
     return db_user
 
 
-async def remove_users(db: AsyncSession, db_users: list[User]):
+async def remove_subscriptions(db: AsyncSession, db_users: list[Subscription]):
     """
     Removes multiple users from the database.
 
     Args:
         db (AsyncSession): Database session.
-        db_users (list[User]): List of user objects to be removed.
+        db_users (list[Subscription]): List of user objects to be removed.
     """
     if not db_users:
         return
 
-    user_ids = list({user.id for user in db_users})
+    subscription_uuids = list({user.uuid for user in db_users})
 
     await release_users_allocations(db, db_users)
-    await _delete_user_dependencies(db, user_ids)
-    await db.execute(delete(User).where(_explicit_ids(User.id, user_ids)))
+    await _delete_subscription_dependencies(db, subscription_uuids)
+    await db.execute(delete(Subscription).where(_explicit_uuids(Subscription.uuid, subscription_uuids)))
     await db.commit()
 
 
-async def modify_user(
+async def modify_subscription(
     db: AsyncSession,
-    db_user: User,
-    modify: UserModify,
+    db_user: Subscription,
+    modify: SubscriptionModify,
     *,
     groups: list[Group] | None = None,
     commit: bool = True,
-) -> User:
+) -> Subscription:
     """
     Modify a user's information.
 
     Args:
         db (AsyncSession): Database session.
-        dbuser (User): User to update.
-        modify (UserModify): Modified user data.
+        dbuser (Subscription): Subscription to update.
+        modify (SubscriptionModify): Modified user data.
 
     Returns:
-        User: Updated user object.
+        Subscription: Updated user object.
     """
     remove_usage_reminder = False
     remove_expiration_reminder = False
@@ -1280,41 +1265,41 @@ async def modify_user(
         await sync_user_allocations(db, db_user, accessible_tags=await tags_from_groups(db_user.groups))
 
     if modify.status is not None:
-        if modify.status == UserStatus.active and db_user.status == UserStatus.disabled:
-            db_user.status = _resolve_enabled_user_status(db_user)
+        if modify.status == SubscriptionStatus.active and db_user.status == SubscriptionStatus.disabled:
+            db_user.status = _resolve_enabled_subscription_status(db_user)
         else:
             db_user.status = modify.status
 
-    if modify.status is UserStatus.on_hold:
+    if modify.status is SubscriptionStatus.on_hold:
         db_user.expire = None
         remove_expiration_reminder = True
 
     elif modify.expire == 0:
         db_user.expire = None
         remove_expiration_reminder = True
-        if db_user.status is UserStatus.expired:
-            db_user.status = UserStatus.active
+        if db_user.status is SubscriptionStatus.expired:
+            db_user.status = SubscriptionStatus.active
 
     elif modify.expire is not None:
         db_user.expire = modify.expire
-        if db_user.status in [UserStatus.active, UserStatus.expired]:
+        if db_user.status in [SubscriptionStatus.active, SubscriptionStatus.expired]:
             if not db_user.expire or db_user.expire.replace(tzinfo=UTC) > datetime.now(UTC):
-                db_user.status = UserStatus.active
+                db_user.status = SubscriptionStatus.active
 
                 remove_expiration_reminder = True
             else:
-                db_user.status = UserStatus.expired
+                db_user.status = SubscriptionStatus.expired
 
     if modify.data_limit is not None:
         db_user.data_limit = modify.data_limit or None
-        if db_user.status not in [UserStatus.expired, UserStatus.disabled]:
+        if db_user.status not in [SubscriptionStatus.expired, SubscriptionStatus.disabled]:
             if not db_user.data_limit or db_user.used_traffic < db_user.data_limit:
-                if db_user.status != UserStatus.on_hold:
-                    db_user.status = UserStatus.active
+                if db_user.status != SubscriptionStatus.on_hold:
+                    db_user.status = SubscriptionStatus.active
 
                 remove_usage_reminder = True
             else:
-                db_user.status = UserStatus.limited
+                db_user.status = SubscriptionStatus.limited
 
     if modify.note is not None:
         db_user.note = modify.note or None
@@ -1336,8 +1321,8 @@ async def modify_user(
     if "next_plan" in modify.model_fields_set:
         if modify.next_plan is not None:
             db_user.next_plan = NextPlan(
-                user_id=db_user.id,
-                user_template_id=modify.next_plan.user_template_id,
+                subscription_uuid=db_user.uuid,
+                subscription_template_id=modify.next_plan.subscription_template_id,
                 data_limit=modify.next_plan.data_limit,
                 expire=modify.next_plan.expire,
                 add_remaining_traffic=modify.next_plan.add_remaining_traffic,
@@ -1348,23 +1333,23 @@ async def modify_user(
     db_user.edit_at = datetime.now(UTC)
 
     if remove_usage_reminder or remove_expiration_reminder:
-        id = db_user.id
+        id = db_user.uuid
         usage_percentage = db_user.usage_percentage
         days_left = db_user.days_left
 
     if remove_usage_reminder:
-        await delete_user_passed_notification_reminders(db, id, ReminderType.data_usage, usage_percentage)
+        await delete_subscription_passed_notification_reminders(db, id, ReminderType.data_usage, usage_percentage)
     if remove_expiration_reminder:
-        await delete_user_passed_notification_reminders(db, id, ReminderType.expiration_date, days_left)
+        await delete_subscription_passed_notification_reminders(db, id, ReminderType.expiration_date, days_left)
 
     if commit:
         await db.commit()
-        await refresh_and_load_user(db, db_user)
+        await refresh_and_load_subscription(db, db_user)
     return db_user
 
 
-async def _reset_users_traffic_and_log(
-    db: AsyncSession, user_ids: Sequence[int], *, clean_chart_data: bool = False
+async def _reset_subscriptions_traffic_and_log(
+    db: AsyncSession, subscription_uuids: Sequence[UUID], *, clean_chart_data: bool = False
 ) -> None:
     """Log and zero the users' traffic, drop their next plans and passed data-usage reminders, and reactivate
     limited users, with the same few statements for any number of users.
@@ -1373,71 +1358,75 @@ async def _reset_users_traffic_and_log(
     adding to `used_traffic` meanwhile, and logging a stale value then writing 0 drops that traffic from both the
     new period and the lifetime total. The rows are locked first (PostgreSQL/MySQL); on SQLite the INSERT is the
     first write, so it takes the write lock before it reads them."""
-    if not user_ids:
+    if not subscription_uuids:
         return
-    selected = _explicit_ids(User.id, user_ids)
-    await db.execute(select(User.id).where(selected).order_by(User.id).with_for_update())
+    selected = _explicit_uuids(Subscription.uuid, subscription_uuids)
+    await db.execute(select(Subscription.uuid).where(selected).order_by(Subscription.uuid).with_for_update())
 
-    reset_at = bindparam("reset_at", datetime.now(UTC), type_=UserUsageResetLogs.reset_at.type)
+    reset_at = bindparam("reset_at", datetime.now(UTC), type_=SubscriptionUsageResetLogs.reset_at.type)
     await db.execute(
-        insert(UserUsageResetLogs.__table__).from_select(
-            ["user_id", "used_traffic_at_reset", "reset_at"],
-            select(User.id, User.used_traffic, reset_at).where(selected),
+        insert(SubscriptionUsageResetLogs.__table__).from_select(
+            ["subscription_uuid", "used_traffic_at_reset", "reset_at"],
+            select(Subscription.uuid, Subscription.used_traffic, reset_at).where(selected),
         )
     )
-    reset_status = case((User.status == UserStatus.limited, UserStatus.active), else_=User.status)
+    reset_status = case(
+        (Subscription.status == SubscriptionStatus.limited, SubscriptionStatus.active), else_=Subscription.status
+    )
     await db.execute(
-        update(User)
+        update(Subscription)
         .where(selected)
         .values(used_traffic=0, status=reset_status)
         .execution_options(synchronize_session=False)
     )
-    await db.execute(delete(NextPlan).where(_explicit_ids(NextPlan.user_id, user_ids)))
+    await db.execute(delete(NextPlan).where(_explicit_uuids(NextPlan.subscription_uuid, subscription_uuids)))
     await db.execute(
         delete(NotificationReminder).where(
-            _explicit_ids(NotificationReminder.user_id, user_ids),
+            _explicit_uuids(NotificationReminder.subscription_uuid, subscription_uuids),
             NotificationReminder.type == ReminderType.data_usage,
             NotificationReminder.threshold > 0,
         )
     )
     if clean_chart_data:
-        await db.execute(delete(NodeUserUsage).where(_explicit_ids(NodeUserUsage.user_id, user_ids)))
+        await db.execute(
+            delete(NodeSubscriptionUsage).where(_explicit_uuids(NodeSubscriptionUsage.subscription_uuid, subscription_uuids))
+        )
 
 
-async def clear_user_node_usages(db: AsyncSession, user_id: int, *, before: datetime | None = None) -> None:
-    stmt = delete(NodeUserUsage).where(NodeUserUsage.user_id == user_id)
+async def clear_subscription_node_usages(db: AsyncSession, subscription_uuid: UUID, *, before: datetime | None = None) -> None:
+    stmt = delete(NodeSubscriptionUsage).where(NodeSubscriptionUsage.subscription_uuid == subscription_uuid)
     if before is not None:
-        stmt = stmt.where(NodeUserUsage.created_at <= before)
+        stmt = stmt.where(NodeSubscriptionUsage.created_at <= before)
     await db.execute(stmt)
 
 
-async def reset_user_data_usage(
-    db: AsyncSession, db_user: User, *, clean_chart_data: bool = False, commit: bool = True
-) -> User:
+async def reset_subscription_data_usage(
+    db: AsyncSession, db_user: Subscription, *, clean_chart_data: bool = False, commit: bool = True
+) -> Subscription:
     """
     Resets the data usage of a user and logs the reset.
 
     Args:
         db (AsyncSession): Database session.
-        dbuser (User): The user object whose data usage is to be reset.
+        dbuser (Subscription): The user object whose data usage is to be reset.
 
     Returns:
-        User: The updated user object.
+        Subscription: The updated user object.
     """
-    await _reset_users_traffic_and_log(db, [db_user.id], clean_chart_data=clean_chart_data)
+    await _reset_subscriptions_traffic_and_log(db, [db_user.uuid], clean_chart_data=clean_chart_data)
 
     if commit:
         await db.commit()
-        await refresh_and_load_user(db, db_user)
+        await refresh_and_load_subscription(db, db_user)
     else:
         # The reset ran in SQL: reload what it changed so the caller keeps editing an up-to-date user
         await db.refresh(db_user, attribute_names=["used_traffic", "status", "next_plan"])
     return db_user
 
 
-async def bulk_reset_user_data_usage(
-    db: AsyncSession, users: list[User], *, clean_chart_data: bool = False, commit: bool = True
-) -> list[User]:
+async def bulk_reset_subscription_data_usage(
+    db: AsyncSession, users: list[Subscription], *, clean_chart_data: bool = False, commit: bool = True
+) -> list[Subscription]:
     """
     Resets the data usage for a list of users and logs the reset.
 
@@ -1446,19 +1435,19 @@ async def bulk_reset_user_data_usage(
 
     Args:
         db (AsyncSession): Database session.
-        users (list[User]): The list of user objects whose data usage is to be reset.
+        users (list[Subscription]): The list of user objects whose data usage is to be reset.
 
     Returns:
-        list[User]: The updated list of user objects.
+        list[Subscription]: The updated list of user objects.
     """
-    user_ids = [db_user.id for db_user in users]
-    await _reset_users_traffic_and_log(db, user_ids, clean_chart_data=clean_chart_data)
+    subscription_uuids = [db_user.uuid for db_user in users]
+    await _reset_subscriptions_traffic_and_log(db, subscription_uuids, clean_chart_data=clean_chart_data)
     if commit:
         await db.commit()
     # One reload for all users (with the node-sync relations), without materializing their reset history
-    return await get_users_by_ids(
+    return await get_subscriptions_by_uuid_batch(
         db,
-        user_ids,
+        subscription_uuids,
         load_admin_role=True,
         load_group_inbounds=True,
         load_usage_logs=False,
@@ -1467,7 +1456,7 @@ async def bulk_reset_user_data_usage(
     )
 
 
-def build_revoked_proxy_settings(db_user: User) -> dict:
+def build_revoked_proxy_settings(db_user: Subscription) -> dict:
     proxy_settings = ProxyTable()
     proxy_settings.shadowsocks.method = db_user.proxy_settings.get("shadowsocks", {}).get(
         "method", "chacha20-ietf-poly1305"
@@ -1476,42 +1465,44 @@ def build_revoked_proxy_settings(db_user: User) -> dict:
     return proxy_settings.dict()
 
 
-async def reset_user_by_next(db: AsyncSession, db_user: User, *, clean_chart_data: bool = False) -> User:
+async def reset_subscription_by_next(
+    db: AsyncSession, db_user: Subscription, *, clean_chart_data: bool = False
+) -> Subscription:
     """
     Resets the data usage of a user based on next user.
 
     Args:
         db (AsyncSession): Database session.
-        dbuser (User): The user object whose data usage is to be reset.
+        dbuser (Subscription): The user object whose data usage is to be reset.
 
     Returns:
-        User: The updated user object.
+        Subscription: The updated user object.
     """
     now = datetime.now(UTC)
-    db_user.status = UserStatus.active
+    db_user.status = SubscriptionStatus.active
     db_user.on_hold_expire_duration = None
     db_user.on_hold_timeout = None
     db_user.edit_at = now
     remaining_traffic = (db_user.data_limit or 0) - db_user.used_traffic
-    if db_user.next_plan.user_template_id is None:
+    if db_user.next_plan.subscription_template_id is None:
         db_user.data_limit = db_user.next_plan.data_limit + (
             0 if not db_user.next_plan.add_remaining_traffic else remaining_traffic
         )
         db_user.expire = now + timedelta(seconds=db_user.next_plan.expire) if db_user.next_plan.expire else None
     else:
-        await db_user.next_plan.awaitable_attrs.user_template
-        await db_user.next_plan.user_template.awaitable_attrs.groups
-        db_user.groups = db_user.next_plan.user_template.groups
+        await db_user.next_plan.awaitable_attrs.subscription_template
+        await db_user.next_plan.subscription_template.awaitable_attrs.groups
+        db_user.groups = db_user.next_plan.subscription_template.groups
         await sync_user_allocations(db, db_user, accessible_tags=await tags_from_groups(db_user.groups))
-        db_user.data_limit = db_user.next_plan.user_template.data_limit + (
+        db_user.data_limit = db_user.next_plan.subscription_template.data_limit + (
             0 if not db_user.next_plan.add_remaining_traffic else remaining_traffic
         )
-        if db_user.next_plan.user_template.status is UserStatusCreate.on_hold:
-            db_user.status = UserStatus.on_hold
-            db_user.on_hold_expire_duration = db_user.next_plan.user_template.expire_duration
+        if db_user.next_plan.subscription_template.status is SubscriptionStatusCreate.on_hold:
+            db_user.status = SubscriptionStatus.on_hold
+            db_user.on_hold_expire_duration = db_user.next_plan.subscription_template.expire_duration
             db_user.on_hold_timeout = (
-                now + timedelta(seconds=db_user.next_plan.user_template.on_hold_timeout)
-                if db_user.next_plan.user_template.on_hold_timeout
+                now + timedelta(seconds=db_user.next_plan.subscription_template.on_hold_timeout)
+                if db_user.next_plan.subscription_template.on_hold_timeout
                 else None
             )
             # Only connections after renewal may start this plan.
@@ -1519,70 +1510,74 @@ async def reset_user_by_next(db: AsyncSession, db_user: User, *, clean_chart_dat
             db_user.expire = None
         else:
             db_user.expire = (
-                now + timedelta(seconds=db_user.next_plan.user_template.expire_duration)
-                if db_user.next_plan.user_template.expire_duration
+                now + timedelta(seconds=db_user.next_plan.subscription_template.expire_duration)
+                if db_user.next_plan.subscription_template.expire_duration
                 else None
             )
 
-        if db_user.next_plan.user_template.extra_settings:
+        if db_user.next_plan.subscription_template.extra_settings:
             proxy_settings = deepcopy(db_user.proxy_settings)
             proxy_settings["shadowsocks"]["method"] = (
-                db_user.next_plan.user_template.extra_settings["method"]
-                if db_user.next_plan.user_template.extra_settings["method"]
+                db_user.next_plan.subscription_template.extra_settings["method"]
+                if db_user.next_plan.subscription_template.extra_settings["method"]
                 else "chacha20-ietf-poly1305"
             )
             db_user.proxy_settings = proxy_settings
-        db_user.data_limit_reset_strategy = db_user.next_plan.user_template.data_limit_reset_strategy
+        db_user.data_limit_reset_strategy = db_user.next_plan.subscription_template.data_limit_reset_strategy
 
-    await _reset_users_traffic_and_log(db, [db_user.id], clean_chart_data=clean_chart_data)
+    await _reset_subscriptions_traffic_and_log(db, [db_user.uuid], clean_chart_data=clean_chart_data)
     await db.commit()
-    await refresh_and_load_user(db, db_user)
+    await refresh_and_load_subscription(db, db_user)
     return db_user
 
 
-async def revoke_user_sub(db: AsyncSession, db_user: User, *, proxy_settings: dict | None = None) -> User:
+async def revoke_subscription_sub(
+    db: AsyncSession, db_user: Subscription, *, proxy_settings: dict | None = None
+) -> Subscription:
     """
     Revokes the subscription of a user and updates proxies settings.
 
     Args:
         db (AsyncSession): Database session.
-        db_user (User): The user object whose subscription is to be revoked.
+        db_user (Subscription): The user object whose subscription is to be revoked.
 
     Returns:
-        User: The updated user object.
+        Subscription: The updated user object.
     """
     db_user.sub_revoked_at = datetime.now(UTC)
+    db_user.access_generation += 1
     db_user.proxy_settings = proxy_settings if proxy_settings is not None else build_revoked_proxy_settings(db_user)
     await db.commit()
-    await refresh_and_load_user(db, db_user)
+    await refresh_and_load_subscription(db, db_user)
     return db_user
 
 
-async def bulk_revoke_user_sub(
-    db: AsyncSession, users: list[User], *, proxy_settings_by_user_id: dict[int, dict] | None = None
-) -> list[User]:
+async def bulk_revoke_subscription_sub(
+    db: AsyncSession, users: list[Subscription], *, proxy_settings_by_subscription_uuid: dict[UUID, dict] | None = None
+) -> list[Subscription]:
     """
     Revoke subscriptions for multiple users in a single transaction.
 
     Args:
         db (AsyncSession): Database session.
-        users (list[User]): Users whose subscriptions should be revoked.
+        users (list[Subscription]): Users whose subscriptions should be revoked.
 
     Returns:
-        list[User]: The refreshed users.
+        list[Subscription]: The refreshed users.
     """
     revoked_at = datetime.now(UTC)
     for user in users:
         user.sub_revoked_at = revoked_at
+        user.access_generation += 1
         user.proxy_settings = (
-            proxy_settings_by_user_id.get(user.id)
-            if proxy_settings_by_user_id is not None and user.id in proxy_settings_by_user_id
+            proxy_settings_by_subscription_uuid.get(user.uuid)
+            if proxy_settings_by_subscription_uuid is not None and user.uuid in proxy_settings_by_subscription_uuid
             else build_revoked_proxy_settings(user)
         )
 
     await db.commit()
     for user in users:
-        await refresh_and_load_user(db, user, load_admin_role=True)
+        await refresh_and_load_subscription(db, user, load_admin_role=True)
     return users
 
 
@@ -1597,8 +1592,8 @@ async def _subscription_update_read_session(db: AsyncSession) -> AsyncIterator[A
         yield read_db
 
 
-async def user_sub_update(
-    db: AsyncSession, user_id: int, user_agent: str, ip: str | None = None, hwid: str | None = None
+async def subscription_update(
+    db: AsyncSession, subscription_uuid: UUID, user_agent: str, ip: str | None = None, hwid: str | None = None
 ) -> None:
     """
     Queue a subscription-update row. The request session is unused; writes are
@@ -1606,22 +1601,22 @@ async def user_sub_update(
 
     Args:
         db (AsyncSession): Database session (unused; kept for call-site compatibility).
-        user_id (int): The user id whose subscription is to be updated.
+        subscription_uuid (UUID): Canonical subscription UUIDv4 whose update is queued.
         user_agent (str): The user agent string.
         ip (str | None): The client IP address.
         hwid (str | None): The hardware ID of the client.
     """
     _ = db
-    await queue_user_sub_update(user_id, user_agent, ip=ip, hwid=hwid)
+    await queue_user_sub_update(subscription_uuid, user_agent, ip=ip, hwid=hwid)
 
 
-async def get_users_sub_update_list(
-    db: AsyncSession, user_id: int, offset: int = 0, limit: int = 10
-) -> tuple[Sequence[UserSubscriptionUpdate], int]:
+async def get_subscriptions_sub_update_list(
+    db: AsyncSession, subscription_uuid: UUID, offset: int = 0, limit: int = 10
+) -> tuple[Sequence[SubscriptionUpdate], int]:
     stmt = (
-        select(UserSubscriptionUpdate)
-        .where(UserSubscriptionUpdate.user_id == user_id)
-        .order_by(desc(UserSubscriptionUpdate.created_at))
+        select(SubscriptionUpdate)
+        .where(SubscriptionUpdate.subscription_uuid == subscription_uuid)
+        .order_by(desc(SubscriptionUpdate.created_at))
     )
 
     async with _subscription_update_read_session(db) as read_db:
@@ -1639,81 +1634,83 @@ async def get_users_sub_update_list(
 
 
 def _subscription_update_from_clause(
-    user_id: int | None = None,
+    subscription_uuid: UUID | None = None,
     admin_id: int | None = None,
 ):
     conditions = []
-    if user_id is not None:
-        conditions.append(UserSubscriptionUpdate.user_id == user_id)
-        from_clause = UserSubscriptionUpdate.__table__
+    if subscription_uuid is not None:
+        conditions.append(SubscriptionUpdate.subscription_uuid == subscription_uuid)
+        from_clause = SubscriptionUpdate.__table__
     elif admin_id is not None:
-        from_clause = UserSubscriptionUpdate.__table__.join(User, UserSubscriptionUpdate.user_id == User.id)
-        conditions.append(User.admin_id == admin_id)
+        from_clause = SubscriptionUpdate.__table__.join(
+            Subscription, SubscriptionUpdate.subscription_uuid == Subscription.uuid
+        )
+        conditions.append(Subscription.admin_id == admin_id)
     else:
         # The owner-wide chart does not read any users columns. Keeping this
         # history-only lets the created_at index drive the global time range.
-        from_clause = UserSubscriptionUpdate.__table__
+        from_clause = SubscriptionUpdate.__table__
     return from_clause, conditions
 
 
-async def get_users_subscription_agent_counts(
+async def get_subscriptions_agent_counts(
     db: AsyncSession,
-    user_id: int | None = None,
+    subscription_uuid: UUID | None = None,
     admin_id: int | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
     period: Period | None = None,
 ) -> list[tuple[str, int]]:
-    stmt = select(UserSubscriptionUpdate.user_agent, func.count().label("count"))
-    from_clause, conditions = _subscription_update_from_clause(user_id=user_id, admin_id=admin_id)
+    stmt = select(SubscriptionUpdate.user_agent, func.count().label("count"))
+    from_clause, conditions = _subscription_update_from_clause(subscription_uuid=subscription_uuid, admin_id=admin_id)
 
     if start is not None:
         start_utc = (
             get_complete_period_start_for_filter(start, period) if period is not None else to_utc_for_filter(start)
         )
-        conditions.append(UserSubscriptionUpdate.created_at >= start_utc)
+        conditions.append(SubscriptionUpdate.created_at >= start_utc)
     if end is not None:
-        conditions.append(UserSubscriptionUpdate.created_at < to_utc_for_filter(end))
+        conditions.append(SubscriptionUpdate.created_at < to_utc_for_filter(end))
 
     stmt = stmt.select_from(from_clause)
     if conditions:
         stmt = stmt.where(and_(*conditions))
-    stmt = stmt.group_by(UserSubscriptionUpdate.user_agent)
+    stmt = stmt.group_by(SubscriptionUpdate.user_agent)
 
     async with _subscription_update_read_session(db) as read_db:
         result = await read_db.execute(stmt)
     return [(agent, count) for agent, count in result.all()]
 
 
-async def get_users_subscription_agent_stats(
+async def get_subscriptions_agent_stats(
     db: AsyncSession,
     start: datetime,
     end: datetime,
     period: Period = Period.hour,
-    user_id: int | None = None,
+    subscription_uuid: UUID | None = None,
     admin_id: int | None = None,
 ) -> list[dict]:
     """Retrieve subscription update counts grouped by agent and period."""
-    trunc_expr = _build_trunc_expression(db, period, UserSubscriptionUpdate.created_at, start)
+    trunc_expr = _build_trunc_expression(db, period, SubscriptionUpdate.created_at, start)
     start_utc = get_complete_period_start_for_filter(start, period)
     end_utc = to_utc_for_filter(end)
-    from_clause, conditions = _subscription_update_from_clause(user_id=user_id, admin_id=admin_id)
+    from_clause, conditions = _subscription_update_from_clause(subscription_uuid=subscription_uuid, admin_id=admin_id)
     conditions.extend(
         [
-            UserSubscriptionUpdate.created_at >= start_utc,
-            UserSubscriptionUpdate.created_at < end_utc,
+            SubscriptionUpdate.created_at >= start_utc,
+            SubscriptionUpdate.created_at < end_utc,
         ]
     )
 
     stmt = (
         select(
             trunc_expr.label("period_start"),
-            UserSubscriptionUpdate.user_agent.label("agent"),
+            SubscriptionUpdate.user_agent.label("agent"),
             func.count().label("count"),
         )
         .select_from(from_clause)
         .where(and_(*conditions))
-        .group_by(trunc_expr, UserSubscriptionUpdate.user_agent)
+        .group_by(trunc_expr, SubscriptionUpdate.user_agent)
         .order_by(trunc_expr)
     )
 
@@ -1728,9 +1725,9 @@ async def get_users_subscription_agent_stats(
     return rows
 
 
-async def autodelete_expired_users(
+async def autodelete_expired_subscriptions(
     db: AsyncSession, include_limited_users: bool = False
-) -> list[UserNotificationResponse]:
+) -> list[SubscriptionNotificationResponse]:
     """
     Deletes expired (optionally also limited) users whose auto-delete time has passed.
 
@@ -1740,22 +1737,26 @@ async def autodelete_expired_users(
             Defaults to False.
 
     Returns:
-        list[UserNotificationResponse]: List of deleted users.
+        list[SubscriptionNotificationResponse]: List of deleted users.
     """
-    target_status = [UserStatus.expired] if not include_limited_users else [UserStatus.expired, UserStatus.limited]
+    target_status = (
+        [SubscriptionStatus.expired]
+        if not include_limited_users
+        else [SubscriptionStatus.expired, SubscriptionStatus.limited]
+    )
 
-    auto_delete = func.coalesce(User.auto_delete_in_days, literal(user_cleanup_settings.autodelete_days))
+    auto_delete = func.coalesce(Subscription.auto_delete_in_days, literal(user_cleanup_settings.autodelete_days))
 
     query = (
         select(
-            User,
+            Subscription,
             auto_delete,  # Use global auto-delete days as fallback
         )
         .where(
             auto_delete >= 0,  # Negative values prevent auto-deletion
-            User.status.in_(target_status),
+            Subscription.status.in_(target_status),
         )
-        .options(joinedload(User.admin))
+        .options(joinedload(Subscription.admin))
     )
 
     expired_users = [
@@ -1764,18 +1765,18 @@ async def autodelete_expired_users(
         if user.last_status_change.replace(tzinfo=UTC) + timedelta(days=auto_delete) <= datetime.now(UTC)
     ]
 
-    result: list[UserNotificationResponse] = []
+    result: list[SubscriptionNotificationResponse] = []
     if expired_users:
         for user in expired_users:
-            await load_user_attrs(user)
-            result.append(UserNotificationResponse.model_validate(user))
+            await load_subscription_attrs(user)
+            result.append(SubscriptionNotificationResponse.model_validate(user))
 
-        await remove_users(db, expired_users)
+        await remove_subscriptions(db, expired_users)
 
     return result
 
 
-async def get_all_users_usages(
+async def get_all_subscriptions_usages(
     db: AsyncSession,
     admins: Sequence[str] | None,
     start: datetime,
@@ -1785,7 +1786,7 @@ async def get_all_users_usages(
     group_by_node: bool = False,
     core_id: int | None = None,
     group_by_admin: bool = False,
-) -> UserUsageStatsList:
+) -> SubscriptionUsageStatsList:
     """
     Retrieves aggregated usage data for all users of an admin within a specified time range,
     grouped by the specified time period.
@@ -1803,65 +1804,67 @@ async def get_all_users_usages(
         group_by_admin (bool): Whether to group results by the users' admin (0 for users without admin).
 
     Returns:
-        UserUsageStatsList: Aggregated usage data for each period.
+        SubscriptionUsageStatsList: Aggregated usage data for each period.
     """
     admins_filter = admins or None
 
     # Build the appropriate truncation expression
-    trunc_expr = _build_trunc_expression(db, period, NodeUserUsage.created_at, start)
+    trunc_expr = _build_trunc_expression(db, period, NodeSubscriptionUsage.created_at, start)
 
     # Filter using UTC timestamps (DB stores naive UTC) from first complete bucket
     start_utc = get_complete_period_start_for_filter(start, period)
     end_utc = to_utc_for_filter(end)
     conditions = [
-        NodeUserUsage.created_at >= start_utc,
-        NodeUserUsage.created_at < end_utc,
+        NodeSubscriptionUsage.created_at >= start_utc,
+        NodeSubscriptionUsage.created_at < end_utc,
     ]
     if admins_filter:
         conditions.append(Admin.username.in_(admins_filter))
 
     if core_id is not None:
-        conditions.append(NodeUserUsage.node_id.in_(select(Node.id).where(Node.core_config_id == core_id)))
+        conditions.append(NodeSubscriptionUsage.node_id.in_(select(Node.id).where(Node.core_config_id == core_id)))
 
     if node_id is not None:
-        conditions.append(NodeUserUsage.node_id == node_id)
+        conditions.append(NodeSubscriptionUsage.node_id == node_id)
     else:
         node_id = -1
 
     dialect = db.bind.dialect.name
-    from_clause = NodeUserUsage.__table__
-    if _usage_history_needs_users_join(dialect, admins_filter, group_by_admin):
-        from_clause = from_clause.join(User, User.id == NodeUserUsage.user_id)
+    from_clause = NodeSubscriptionUsage.__table__
+    if _usage_history_needs_subscriptions_join(dialect, admins_filter, group_by_admin):
+        from_clause = from_clause.join(Subscription, Subscription.uuid == NodeSubscriptionUsage.subscription_uuid)
     if admins_filter:
-        from_clause = from_clause.join(Admin, Admin.id == User.admin_id)
+        from_clause = from_clause.join(Admin, Admin.id == Subscription.admin_id)
 
     if group_by_node:
         stmt = (
             select(
                 trunc_expr.label("period_start"),
-                func.coalesce(NodeUserUsage.node_id, 0).label("node_id"),
-                func.sum(NodeUserUsage.used_traffic).label("total_traffic"),
+                func.coalesce(NodeSubscriptionUsage.node_id, 0).label("node_id"),
+                func.sum(NodeSubscriptionUsage.used_traffic).label("total_traffic"),
             )
             .select_from(from_clause)
             .where(and_(*conditions))
-            .group_by(trunc_expr, NodeUserUsage.node_id)
+            .group_by(trunc_expr, NodeSubscriptionUsage.node_id)
             .order_by(trunc_expr)
         )
     elif group_by_admin:
         stmt = (
             select(
                 trunc_expr.label("period_start"),
-                func.coalesce(User.admin_id, 0).label("admin_id"),
-                func.sum(NodeUserUsage.used_traffic).label("total_traffic"),
+                func.coalesce(Subscription.admin_id, 0).label("admin_id"),
+                func.sum(NodeSubscriptionUsage.used_traffic).label("total_traffic"),
             )
             .select_from(from_clause)
             .where(and_(*conditions))
-            .group_by(trunc_expr, User.admin_id)
+            .group_by(trunc_expr, Subscription.admin_id)
             .order_by(trunc_expr)
         )
     else:
         stmt = (
-            select(trunc_expr.label("period_start"), func.sum(NodeUserUsage.used_traffic).label("total_traffic"))
+            select(
+                trunc_expr.label("period_start"), func.sum(NodeSubscriptionUsage.used_traffic).label("total_traffic")
+            )
             .select_from(from_clause)
             .where(and_(*conditions))
             .group_by(trunc_expr)
@@ -1882,47 +1885,47 @@ async def get_all_users_usages(
 
         if stats_key not in stats:
             stats[stats_key] = []
-        stats[stats_key].append(UserUsageStat(**row_dict))
+        stats[stats_key].append(SubscriptionUsageStat(**row_dict))
 
-    return UserUsageStatsList(period=period, start=start, end=end, stats=stats)
+    return SubscriptionUsageStatsList(period=period, start=start, end=end, stats=stats)
 
 
-def _usage_history_needs_users_join(dialect: str, admins_filter: Sequence[str] | None, group_by_admin: bool) -> bool:
+def _usage_history_needs_subscriptions_join(dialect: str, admins_filter: Sequence[str] | None, group_by_admin: bool) -> bool:
     # PostgreSQL, MySQL and MariaDB delete a user's history rows through ON DELETE CASCADE, so joining every row to
     # users only matters for admin scoping. SQLite does not enforce foreign keys and keeps orphan rows to filter out.
     return bool(admins_filter) or group_by_admin or dialect == "sqlite"
 
 
-async def get_user_count_metric_stats(
+async def get_subscription_count_metric_stats(
     db: AsyncSession,
     admins: Sequence[str] | None,
     start: datetime,
     end: datetime,
     period: Period = Period.hour,
-    metric: UserCountMetric = UserCountMetric.online,
+    metric: SubscriptionCountMetric = SubscriptionCountMetric.online,
     node_id: int | None = None,
     group_by_node: bool = False,
-) -> UserCountMetricStatsList:
-    """Retrieves one distinct user count metric from node_user_usages."""
+) -> SubscriptionCountMetricStatsList:
+    """Retrieves one distinct user count metric from node_subscription_usages."""
     validate_user_count_metric_scope(metric, node_id=node_id, group_by_node=group_by_node)
 
-    query_parts = _build_user_count_query_parts(db, admins, start, end, period, metric, node_id)
-    count_expr = _build_user_count_metric_expression(metric).label("count")
+    query_parts = _build_subscription_count_query_parts(db, admins, start, end, period, metric, node_id)
+    count_expr = _build_subscription_count_metric_expression(metric).label("count")
     total_stmt = select(count_expr).select_from(query_parts["from_clause"]).where(and_(*query_parts["conditions"]))
 
-    if _user_count_buckets_from_distinct_pairs(query_parts["dialect"]):
-        stmt = _build_user_count_buckets_from_distinct_pairs(query_parts, metric, group_by_node)
+    if _subscription_count_buckets_from_distinct_pairs(query_parts["dialect"]):
+        stmt = _build_subscription_count_buckets_from_distinct_pairs(query_parts, metric, group_by_node)
     elif group_by_node:
         stmt = (
             select(
                 query_parts["trunc_expr"].label("period_start"),
-                func.coalesce(NodeUserUsage.node_id, 0).label("node_id"),
+                func.coalesce(NodeSubscriptionUsage.node_id, 0).label("node_id"),
                 count_expr,
             )
             .select_from(query_parts["from_clause"])
             .where(and_(*query_parts["conditions"]))
-            .group_by(query_parts["trunc_expr"], NodeUserUsage.node_id)
-            .order_by(query_parts["trunc_expr"], NodeUserUsage.node_id)
+            .group_by(query_parts["trunc_expr"], NodeSubscriptionUsage.node_id)
+            .order_by(query_parts["trunc_expr"], NodeSubscriptionUsage.node_id)
         )
     else:
         stmt = (
@@ -1946,9 +1949,9 @@ async def get_user_count_metric_stats(
 
         if node_id_val not in stats:
             stats[node_id_val] = []
-        stats[node_id_val].append(UserCountMetricStat(**row_dict))
+        stats[node_id_val].append(SubscriptionCountMetricStat(**row_dict))
 
-    return UserCountMetricStatsList(
+    return SubscriptionCountMetricStatsList(
         metric=metric,
         period=period,
         start=start,
@@ -1958,22 +1961,22 @@ async def get_user_count_metric_stats(
     )
 
 
-def _build_user_count_query_parts(
+def _build_subscription_count_query_parts(
     db: AsyncSession,
     admins: Sequence[str] | None,
     start: datetime,
     end: datetime,
     period: Period,
-    metric: UserCountMetric,
+    metric: SubscriptionCountMetric,
     node_id: int | None,
 ) -> dict:
     admins_filter = admins or None
-    trunc_expr = _build_trunc_expression(db, period, NodeUserUsage.created_at, start)
+    trunc_expr = _build_trunc_expression(db, period, NodeSubscriptionUsage.created_at, start)
     start_utc = get_complete_period_start_for_filter(start, period)
     end_utc = to_utc_for_filter(end)
     conditions = [
-        NodeUserUsage.created_at >= start_utc,
-        NodeUserUsage.created_at < end_utc,
+        NodeSubscriptionUsage.created_at >= start_utc,
+        NodeSubscriptionUsage.created_at < end_utc,
     ]
 
     if admins_filter:
@@ -1981,17 +1984,17 @@ def _build_user_count_query_parts(
 
     stats_key = node_id
     if node_id is not None:
-        conditions.append(NodeUserUsage.node_id == node_id)
+        conditions.append(NodeSubscriptionUsage.node_id == node_id)
     else:
         stats_key = -1
 
-    # Online counts only read node_user_usages. Avoid joining every history row
+    # Online counts only read node_subscription_usages. Avoid joining every history row
     # to users unless a status metric or an admin scope actually needs it.
-    from_clause = NodeUserUsage.__table__
-    if metric != UserCountMetric.online or admins_filter:
-        from_clause = from_clause.join(User, User.id == NodeUserUsage.user_id)
+    from_clause = NodeSubscriptionUsage.__table__
+    if metric != SubscriptionCountMetric.online or admins_filter:
+        from_clause = from_clause.join(Subscription, Subscription.uuid == NodeSubscriptionUsage.subscription_uuid)
     if admins_filter:
-        from_clause = from_clause.join(Admin, Admin.id == User.admin_id)
+        from_clause = from_clause.join(Admin, Admin.id == Subscription.admin_id)
 
     return {
         "conditions": conditions,
@@ -2002,38 +2005,44 @@ def _build_user_count_query_parts(
     }
 
 
-def _build_user_count_metric_expression(metric: UserCountMetric):
-    return func.count(func.distinct(_user_count_metric_user_id(metric)))
+def _build_subscription_count_metric_expression(metric: SubscriptionCountMetric):
+    return func.count(func.distinct(_subscription_count_metric_subscription_uuid(metric)))
 
 
-def _user_count_metric_user_id(metric: UserCountMetric):
-    """The user id a history row counts for in this metric, NULL when the row does not count."""
-    if metric == UserCountMetric.online:
-        return NodeUserUsage.user_id
-    if metric == UserCountMetric.expired:
-        return case((User.status == UserStatus.expired, NodeUserUsage.user_id), else_=None)
-    if metric == UserCountMetric.limited:
-        return case((User.status == UserStatus.limited, NodeUserUsage.user_id), else_=None)
+def _subscription_count_metric_subscription_uuid(metric: SubscriptionCountMetric):
+    """The subscription UUID counted by this metric, NULL for non-matching rows."""
+    if metric == SubscriptionCountMetric.online:
+        return NodeSubscriptionUsage.subscription_uuid
+    if metric == SubscriptionCountMetric.expired:
+        return case(
+            (Subscription.status == SubscriptionStatus.expired, NodeSubscriptionUsage.subscription_uuid), else_=None
+        )
+    if metric == SubscriptionCountMetric.limited:
+        return case(
+            (Subscription.status == SubscriptionStatus.limited, NodeSubscriptionUsage.subscription_uuid), else_=None
+        )
     raise ValueError(f"Unsupported user count metric: {metric}")
 
 
-def _user_count_buckets_from_distinct_pairs(dialect: str) -> bool:
+def _subscription_count_buckets_from_distinct_pairs(dialect: str) -> bool:
     # PostgreSQL cannot hash count(DISTINCT ...), so a per-bucket count sorts every history row in range.
     # MySQL and MariaDB are faster with plain count(DISTINCT ...).
     return dialect == "postgresql"
 
 
-def _build_user_count_buckets_from_distinct_pairs(query_parts: dict, metric: UserCountMetric, group_by_node: bool):
+def _build_subscription_count_buckets_from_distinct_pairs(
+    query_parts: dict, metric: SubscriptionCountMetric, group_by_node: bool
+):
     """Per-bucket distinct user counts as a count over DISTINCT (bucket, [node,] user) rows.
 
-    Same result as count(DISTINCT ...) per bucket: a NULL user id (a row the metric does not count) is kept as
+    Same result as count(DISTINCT ...) per bucket: a NULL subscription UUID (a row the metric does not count) is kept as
     one pair, so its bucket still appears, and count() skips it.
     """
     pair_columns = [query_parts["trunc_expr"].label("period_start")]
     if group_by_node:
-        pair_columns.append(NodeUserUsage.node_id.label("node_id"))
+        pair_columns.append(NodeSubscriptionUsage.node_id.label("node_id"))
     pairs = (
-        select(*pair_columns, _user_count_metric_user_id(metric).label("user_id"))
+        select(*pair_columns, _subscription_count_metric_subscription_uuid(metric).label("subscription_uuid"))
         .select_from(query_parts["from_clause"])
         .where(and_(*query_parts["conditions"]))
         .distinct()
@@ -2046,33 +2055,35 @@ def _build_user_count_buckets_from_distinct_pairs(query_parts: dict, metric: Use
         group_columns.append(pairs.c.node_id)
         output_columns.append(func.coalesce(pairs.c.node_id, 0).label("node_id"))
     return (
-        select(*output_columns, func.count(pairs.c.user_id).label("count"))
+        select(*output_columns, func.count(pairs.c.subscription_uuid).label("count"))
         .group_by(*group_columns)
         .order_by(*group_columns)
     )
 
 
-async def update_users_status(db: AsyncSession, users: list[User], status: UserStatus) -> list[User]:
+async def update_subscriptions_status(
+    db: AsyncSession, users: list[Subscription], status: SubscriptionStatus
+) -> list[Subscription]:
     """
     Updates a users status and records the time of change.
 
     Args:
         db (AsyncSession): Database session.
-        users list[User]: The users list to update.
-        status (UserStatus): The new status.
+        users list[Subscription]: The users list to update.
+        status (SubscriptionStatus): The new status.
 
     Returns:
-        list[User]: The updated user objects.
+        list[Subscription]: The updated user objects.
     """
     if not users:
         return []
 
-    user_ids = [user.id for user in users]
+    subscription_uuids = [user.uuid for user in users]
     changed_at = datetime.now(UTC)
     reseted_usage = _snapshot_reseted_usage(users)
     stmt = (
-        update(User)
-        .where(User.id.in_(user_ids))
+        update(Subscription)
+        .where(Subscription.uuid.in_(subscription_uuids))
         .values(status=status, last_status_change=changed_at)
         .execution_options(synchronize_session=False)
     )
@@ -2088,17 +2099,17 @@ async def update_users_status(db: AsyncSession, users: list[User], status: UserS
     return users
 
 
-async def set_owner(db: AsyncSession, db_user: User, admin: Admin) -> User:
+async def set_owner(db: AsyncSession, db_user: Subscription, admin: Admin) -> Subscription:
     """
     Sets the owner (admin) of a user.
 
     Args:
         db (AsyncSession): Database session.
-        db_user (User): The user object whose owner is to be set.
+        db_user (Subscription): The user object whose owner is to be set.
         admin (Admin): The admin to set as owner.
 
     Returns:
-        User: The updated user object.
+        Subscription: The updated user object.
     """
     old_admin = db_user.admin
     db_user.admin = admin
@@ -2109,21 +2120,21 @@ async def set_owner(db: AsyncSession, db_user: User, admin: Admin) -> User:
         admin.used_traffic += db_user.used_traffic
 
     await db.commit()
-    await refresh_and_load_user(db, db_user)
+    await refresh_and_load_subscription(db, db_user)
     return db_user
 
 
-async def bulk_set_owner(db: AsyncSession, users: list[User], admin: Admin) -> list[User]:
+async def bulk_set_owner(db: AsyncSession, users: list[Subscription], admin: Admin) -> list[Subscription]:
     """
     Set the same owner for multiple users in a single transaction.
 
     Args:
         db (AsyncSession): Database session.
-        users (list[User]): Users to update.
+        users (list[Subscription]): Users to update.
         admin (Admin): Admin that should become the owner.
 
     Returns:
-        list[User]: The refreshed users.
+        list[Subscription]: The refreshed users.
     """
     # Group users by old admin to update traffic counters
     admin_traffic_changes = {}
@@ -2153,20 +2164,20 @@ async def bulk_set_owner(db: AsyncSession, users: list[User], admin: Admin) -> l
 
     await db.commit()
     for user in users:
-        await refresh_and_load_user(db, user)
+        await refresh_and_load_subscription(db, user)
     return users
 
 
-async def start_users_expire(db: AsyncSession, users: list[User]) -> list[User]:
+async def start_subscriptions_expire(db: AsyncSession, users: list[Subscription]) -> list[Subscription]:
     """
     Starts the expiration timer for a user.
 
     Args:
         db (AsyncSession): Database session.
-        users list[User]: The users list whose expiration timer is to be started.
+        users list[Subscription]: The users list whose expiration timer is to be started.
 
     Returns:
-        list[User]: The updated users list.
+        list[Subscription]: The updated users list.
     """
     if not users:
         return []
@@ -2182,17 +2193,17 @@ async def start_users_expire(db: AsyncSession, users: list[User]) -> list[User]:
         user.expire = expire_time
         user.on_hold_expire_duration = None
         user.on_hold_timeout = None
-        user.status = UserStatus.active
-        params.append({"u_id": user.id, "u_expire": expire_time})
+        user.status = SubscriptionStatus.active
+        params.append({"u_id": user.uuid, "u_expire": expire_time})
 
     await db.execute(
-        update(User.__table__)
-        .where(User.__table__.c.id == bindparam("u_id"))
+        update(Subscription.__table__)
+        .where(Subscription.__table__.c.uuid == bindparam("u_id"))
         .values(
             expire=bindparam("u_expire"),
             on_hold_expire_duration=None,
             on_hold_timeout=None,
-            status=UserStatus.active,
+            status=SubscriptionStatus.active,
         )
         .execution_options(synchronize_session=False),
         params,
@@ -2203,7 +2214,11 @@ async def start_users_expire(db: AsyncSession, users: list[User]) -> list[User]:
 
 
 async def create_notification_reminder(
-    db: AsyncSession, reminder_type: ReminderType, expires_at: datetime, user_id: int, threshold: int | None = None
+    db: AsyncSession,
+    reminder_type: ReminderType,
+    expires_at: datetime,
+    subscription_uuid: UUID,
+    threshold: int | None = None,
 ) -> NotificationReminder:
     """
     Creates a new notification reminder.
@@ -2212,13 +2227,13 @@ async def create_notification_reminder(
         db (AsyncSession): The database session.
         reminder_type (ReminderType): The type of reminder.
         expires_at (datetime): The expiration time of the reminder.
-        user_id (int): The ID of the user associated with the reminder.
+        subscription_uuid (UUID): Canonical subscription UUIDv4.
         threshold (Optional[int]): The threshold value to check for (e.g., days left or usage percent).
 
     Returns:
         NotificationReminder: The newly created NotificationReminder object.
     """
-    reminder = NotificationReminder(type=reminder_type, expires_at=expires_at, user_id=user_id)
+    reminder = NotificationReminder(type=reminder_type, expires_at=expires_at, subscription_uuid=subscription_uuid)
     if threshold is not None:
         reminder.threshold = threshold
     db.add(reminder)
@@ -2232,7 +2247,7 @@ async def bulk_create_notification_reminders(db: AsyncSession, reminder_data: li
 
     Args:
         db (AsyncSession): The database session.
-        reminder_data (List[dict]): List of reminder data dicts with keys: user_id, type, threshold, expires_at
+        reminder_data (List[dict]): List of reminder dictionaries with keys: subscription_uuid, type, threshold, expires_at
     """
     if not reminder_data:
         return
@@ -2240,7 +2255,10 @@ async def bulk_create_notification_reminders(db: AsyncSession, reminder_data: li
     reminders = []
     for data in reminder_data:
         reminder = NotificationReminder(
-            type=data["type"], expires_at=data["expires_at"], user_id=data["user_id"], threshold=data.get("threshold")
+            type=data["type"],
+            expires_at=data["expires_at"],
+            subscription_uuid=data["subscription_uuid"],
+            threshold=data.get("threshold"),
         )
         reminders.append(reminder)
 
@@ -2248,19 +2266,19 @@ async def bulk_create_notification_reminders(db: AsyncSession, reminder_data: li
     await db.commit()
 
 
-async def delete_user_passed_notification_reminders(
-    db: AsyncSession, user_id: int, type: ReminderType, threshold: int
+async def delete_subscription_passed_notification_reminders(
+    db: AsyncSession, subscription_uuid: UUID, type: ReminderType, threshold: int
 ) -> None:
     """
     Deletes user reminders passed.
 
     Args:
         db (AsyncSession): The database session.
-        user_id (int): The ID of the user.
+        subscription_uuid (UUID): Canonical subscription UUIDv4.
         reminder_type (ReminderType): The type of reminder to delete.
         threshold (int): The threshold to delete (e.g., days left or usage percent).
     """
-    conditions = [NotificationReminder.user_id == user_id, NotificationReminder.type == type]
+    conditions = [NotificationReminder.subscription_uuid == subscription_uuid, NotificationReminder.type == type]
 
     if type == ReminderType.data_usage:
         conditions.append(NotificationReminder.threshold > threshold)

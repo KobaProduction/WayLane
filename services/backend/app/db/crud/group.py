@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, with_expression
@@ -6,10 +8,10 @@ from sqlalchemy.orm.attributes import set_committed_value
 from app.db.models import (
     Group,
     ProxyInbound,
-    User,
+    Subscription,
     inbounds_groups_association,
+    subscriptions_groups_association,
     template_group_association,
-    users_groups_association,
 )
 from app.models.group import (
     GroupCreate,
@@ -46,11 +48,11 @@ async def load_group_attrs(
     db: AsyncSession, group: Group, *, load_total_users: bool = True, load_inbounds: bool = True
 ):
     if load_total_users:
-        # Count memberships in SQL instead of hydrating every Group.users row.
+        # Count memberships in SQL instead of hydrating every Group.subscriptions row.
         total_users = (
             await db.execute(
-                select(func.count(users_groups_association.c.user_id)).where(
-                    users_groups_association.c.groups_id == group.id
+                select(func.count(subscriptions_groups_association.c.subscription_uuid)).where(
+                    subscriptions_groups_association.c.groups_id == group.id
                 )
             )
         ).scalar_one()
@@ -134,7 +136,7 @@ async def get_group(db: AsyncSession, query: GroupListQuery) -> tuple[list[Group
 
     count = (await db.execute(count_query)).scalar_one()
 
-    # inbounds are eagerly loaded and total_users is computed in SQL, so no User rows are loaded
+    # inbounds are eagerly loaded and total_users is computed in SQL, so no Subscription rows are loaded
     all_groups = (await db.execute(groups)).unique().scalars().all()
 
     return all_groups, count
@@ -207,7 +209,7 @@ async def get_groups_by_ids(
     stmt = select(Group).where(Group.id.in_(group_ids))
     options = []
     if load_users:
-        options.append(selectinload(Group.users))
+        options.append(selectinload(Group.subscriptions))
     if load_inbounds:
         options.append(selectinload(Group.inbounds))
     if options:
@@ -248,19 +250,19 @@ async def modify_group(db: AsyncSession, db_group: Group, modified_group: GroupM
     return db_group
 
 
-async def get_group_usernames(db: AsyncSession, group_ids: list[int]) -> list[str]:
-    """Distinct usernames of the members of any of the groups, without hydrating User rows."""
-    usernames: set[str] = set()
+async def get_group_subscription_uuids(db: AsyncSession, group_ids: list[int]) -> list[str]:
+    """Distinct usernames of the members of any of the groups, without hydrating Subscription rows."""
+    uuids: set[UUID] = set()
     # 10k group ids per query: asyncpg caps a statement at 32767 bind parameters.
     for start in range(0, len(group_ids), 10_000):
         stmt = (
-            select(User.username)
-            .join(users_groups_association, users_groups_association.c.user_id == User.id)
-            .where(users_groups_association.c.groups_id.in_(group_ids[start : start + 10_000]))
+            select(Subscription.uuid)
+            .join(subscriptions_groups_association, subscriptions_groups_association.c.subscription_uuid == Subscription.uuid)
+            .where(subscriptions_groups_association.c.groups_id.in_(group_ids[start : start + 10_000]))
             .distinct()
         )
-        usernames.update((await db.execute(stmt)).scalars())
-    return list(usernames)
+        uuids.update((await db.execute(stmt)).scalars())
+    return list(uuids)
 
 
 async def remove_group(db: AsyncSession, dbgroup: Group):
@@ -271,7 +273,7 @@ async def remove_group(db: AsyncSession, dbgroup: Group):
         db (AsyncSession): The database session.
         dbgroup (Group): The Group object to be removed.
     """
-    # db.delete(dbgroup) would load Group.users and delete the association rows one by one.
+    # db.delete(dbgroup) would load Group.subscriptions and delete the association rows one by one.
     await remove_groups(db, [dbgroup.id])
 
 
@@ -286,7 +288,9 @@ async def remove_groups(db: AsyncSession, group_ids: list[int]) -> None:
     if not group_ids:
         return
 
-    await db.execute(delete(users_groups_association).where(users_groups_association.c.groups_id.in_(group_ids)))
+    await db.execute(
+        delete(subscriptions_groups_association).where(subscriptions_groups_association.c.groups_id.in_(group_ids))
+    )
     await db.execute(delete(template_group_association).where(template_group_association.c.group_id.in_(group_ids)))
     await db.execute(delete(inbounds_groups_association).where(inbounds_groups_association.c.group_id.in_(group_ids)))
     await db.execute(delete(Group).where(Group.id.in_(group_ids)))

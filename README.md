@@ -17,6 +17,17 @@ Each service keeps a native Dockerfile, dependency lock and tests.
 Root CI and planned Coolify resources watch only affected directories.
 DEV builds from source in Coolify; PROD pulls pinned GHCR release images.
 
+## Git validation
+
+This monorepo already tracks a root `pre-push` gate. Use
+`git config --local core.hooksPath .githooks` in a regular checkout, or
+`git config --worktree core.hooksPath .githooks` in a linked worktree.
+The hook runs `scripts/verify-layout.py` and each affected owner's
+`services/{backend,frontend,node}/scripts/verify.sh` based on the changes
+since `origin/main`. A cross-service release checks all three owners.
+Follow each service's documented toolchain requirements before pushing.
+This gate does not replace backend integration tests or real VPN/Node acceptance.
+
 Provenance snapshot (2026-10-26):
 - backend f5eba56a0315ff99964ffd2c9a2a652513ea48b8
 - frontend 4b6656e19b11199e2117163c73bfc22770f4d247
@@ -64,9 +75,9 @@ Web App and VPN Core are separate services.
 The new node uses one Compose resource with exactly two services:
 one-shot privileged `bootstrap` and autonomous non-privileged `agent`.
 The agent owns its private embedded rootless Docker daemon and controls
-a single Xray DEV child; binary WebSocket and gRPC control transports
-are implemented in source, but end-to-end acceptance and public VPN traffic
-have not been demonstrated for this merged revision. Other engines and
+a single Xray DEV child. Its sole panel control transport is outbound WSS
+with binary Protobuf frames; source implementation exists, but real TLS/WSS
+host acceptance and public VPN traffic remain unverified. Other engines and
 networking/privilege hardening remain future work.
 The legacy Go node is preserved independently until migration acceptance.
 See [services/node/agent/README.md](services/node/agent/README.md).

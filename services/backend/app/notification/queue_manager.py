@@ -1,4 +1,7 @@
+"""Durable outbound webhook events; no embedded messaging clients or bot queues."""
+
 import asyncio
+import time
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -11,54 +14,14 @@ from config import nats_settings, runtime_settings
 logger = get_logger("Notification")
 
 
-class TelegramNotification(BaseModel):
-    """Model for Telegram notification queue items"""
-
-    type: Literal["telegram"] = Field(default="telegram")
-    message: str
-    chat_id: int | None = Field(default=None)
-    topic_id: int | None = Field(default=None)
-    tries: int = Field(default=0, ge=0)
-    send_at: float = Field(default=0, allow_inf_nan=False)
-    # Position in a rate-limited destination's schedule (see app.notification.client)
-    slot: float | None = Field(default=None, allow_inf_nan=False)
-
-
-class DiscordNotification(BaseModel):
-    """Model for Discord notification queue items"""
-
-    type: Literal["discord"] = Field(default="discord")
-    json_data: dict
-    webhook: str
-    tries: int = Field(default=0, ge=0)
-    send_at: float = Field(default=0, allow_inf_nan=False)
-    # Position in a rate-limited destination's schedule (see app.notification.client)
-    slot: float | None = Field(default=None, allow_inf_nan=False)
-
-
 class WebhookNotification(BaseModel):
-    """Model for Webhook notification queue items"""
-
-    type: Literal["webhook"] = Field(default="webhook")
-    payload: dict  # the jsonable_encoder'd notification (what gets POSTed to webhook URLs)
+    type: Literal["webhook"] = "webhook"
+    payload: dict
     send_at: float = Field(allow_inf_nan=False)
     tries: int = Field(default=0, ge=0)
     pending_webhooks: list[str] | None = None
 
 
-# Telegram/Discord queue singleton
-queue_instance: NotificationQueue = (
-    NatsNotificationQueue(
-        stream_name=nats_settings.notification_stream,
-        subject=nats_settings.notification_subject,
-        consumer_name=nats_settings.notification_consumer,
-    )
-    if is_nats_enabled()
-    else InMemoryNotificationQueue()
-)
-
-
-# Webhook queue singleton
 webhook_queue_instance: NotificationQueue = (
     NatsNotificationQueue(
         stream_name=nats_settings.webhook_stream,
@@ -70,90 +33,45 @@ webhook_queue_instance: NotificationQueue = (
 )
 
 
-def get_queue() -> NotificationQueue:
-    return queue_instance
+def get_webhook_queue() -> NotificationQueue:
+    return webhook_queue_instance
 
 
-async def init_queue(queue: NotificationQueue):
+async def initialize_queues() -> None:
+    await initialize_webhook_queue()
+
+
+async def initialize_webhook_queue() -> None:
+    queue = webhook_queue_instance
     if isinstance(queue, NatsNotificationQueue):
-        # Only scheduler role (and all-in-one) actually dequeue and need the consumer
         await queue.initialize(create_consumer=runtime_settings.role.runs_scheduler)
 
 
-async def initialize_queues():
-    """Initialize the notification queue if it's a NATS queue.
-
-    Producers (backend, node) only need the stream for publishing.
-    Consumers (scheduler) need the full consumer subscription.
-    """
-
-    await init_queue(queue_instance)
-    await init_queue(webhook_queue_instance)
-
-
-async def shutdown_queue(queue: NotificationQueue):
-    """Close NATS connection on shutdown."""
+async def shutdown_webhook_queue() -> None:
+    queue = webhook_queue_instance
     if isinstance(queue, NatsNotificationQueue):
-        try:
-            if queue._consumer:
+        if queue._consumer:
+            try:
                 await queue._consumer.unsubscribe()
-        except Exception:
-            pass
-
+            except Exception:
+                pass
         if queue._nc and not queue._nc.is_closed:
             try:
                 await asyncio.wait_for(queue._nc.close(), timeout=3)
-            except TimeoutError:
-                # Don't block shutdown if NATS is slow to close
-                pass
             except Exception:
                 pass
-
         queue._consumer = None
         queue._js = None
         queue._nc = None
 
 
-async def shutdown_webhook_queue():
-    await shutdown_queue(webhook_queue_instance)
-
-
-async def shutdown_queues():
-    await shutdown_queue(queue_instance)
-
-
-def get_webhook_queue() -> NotificationQueue:
-    return webhook_queue_instance
-
-
-async def _enqueue(
-    queue: NotificationQueue, notification: TelegramNotification | DiscordNotification | WebhookNotification
-) -> None:
-    try:
-        await queue.enqueue(notification.model_dump())
-    except asyncio.QueueFull:
-        # Bounded queues reject new work instead of evicting queued work. Callers
-        # such as scheduled jobs must keep running, so drop and log instead.
-        logger.warning("Notification queue is full, dropping a %s notification", notification.type)
-
-
-async def enqueue_telegram(message: str, chat_id: int | None = None, topic_id: int | None = None) -> None:
-    """Add a Telegram notification to the queue, dropping it if the queue is full"""
-    await _enqueue(get_queue(), TelegramNotification(message=message, chat_id=chat_id, topic_id=topic_id))
-
-
-async def enqueue_discord(json_data: dict, webhook: str) -> None:
-    """Add a Discord notification to the queue, dropping it if the queue is full"""
-    await _enqueue(get_queue(), DiscordNotification(json_data=json_data, webhook=webhook))
-
-
 async def enqueue_webhook(payload: dict, send_at: float | None = None, tries: int = 0) -> None:
-    """Add a webhook notification to the queue, dropping it if the queue is full"""
-    import time
-
     notification = WebhookNotification(
         payload=payload,
         send_at=send_at if send_at is not None else time.time(),
         tries=tries,
     )
-    await _enqueue(get_webhook_queue(), notification)
+    try:
+        await webhook_queue_instance.enqueue(notification.model_dump())
+    except asyncio.QueueFull:
+        logger.warning("Webhook queue full; dropping notification")

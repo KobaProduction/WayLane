@@ -1,12 +1,13 @@
 import asyncio
 
+from sqlalchemy import select
+
 from app import notification
 from app.db import AsyncSession
-from app.db.crud.bulk import add_groups_to_users, count_bulk_group_scope, remove_groups_from_users
 from app.db.crud.group import (
     create_group,
     get_group,
-    get_group_usernames,
+    get_group_subscription_uuids,
     get_groups_by_ids,
     get_groups_simple,
     load_group_attrs,
@@ -14,11 +15,10 @@ from app.db.crud.group import (
     remove_group,
     remove_groups,
 )
-from app.db.crud.user import get_users
+from app.db.crud.subscription import get_subscriptions
 from app.db.crud.wireguard import sync_users_allocations
-from app.db.models import Admin, User
+from app.db.models import Admin, Group as DBGroup, Subscription, subscriptions_groups_association
 from app.models.group import (
-    BulkGroup,
     BulkGroupsActionResponse,
     BulkGroupSelection,
     Group,
@@ -32,9 +32,9 @@ from app.models.group import (
     GroupsSimpleResponse,
     RemoveGroupsResponse,
 )
-from app.models.user import BulkOperationDryRunResponse, UserListQuery
-from app.node.sync import sync_users
-from app.operation import BaseOperation, OperatorType
+from app.models.subscription_models import SubscriptionListQuery
+from app.node.sync import sync_subscriptions
+from app.operation import BaseOperation
 from app.operation.permissions import apply_group_access
 from app.utils.logger import get_logger
 
@@ -42,6 +42,34 @@ logger = get_logger("group-operation")
 
 
 class GroupOperation(BaseOperation):
+    async def _reject_core_managed_group_deletion(self, db: AsyncSession, group_ids: list[int]) -> None:
+        """A provider-side group deletion must not silently erase Core's desired group assignment."""
+        if not group_ids:
+            return
+        # Lock in a deterministic order to serialize concurrent local group
+        # deletions before checking the impacted subscription bindings.
+        await db.execute(
+            select(DBGroup.id)
+            .where(DBGroup.id.in_(sorted(set(group_ids))))
+            .order_by(DBGroup.id)
+            .with_for_update(of=DBGroup)
+        )
+        managed_subscription = (
+            await db.execute(
+                select(Subscription.uuid)
+                .join(
+                    subscriptions_groups_association,
+                    subscriptions_groups_association.c.subscription_uuid == Subscription.uuid,
+                )
+                .where(
+                    subscriptions_groups_association.c.groups_id.in_(group_ids),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if managed_subscription is not None:
+            await self.raise_error("Cannot delete group assigned to a Core-managed subscription", 409, db=db)
+
     async def _get_group_with_access(self, db: AsyncSession, group_id: int, admin: Admin) -> Group:
         """Fetch a group, returning 404 if it doesn't exist or is outside the admin's allowed set."""
         allowed = apply_group_access(admin, [group_id])
@@ -58,13 +86,13 @@ class GroupOperation(BaseOperation):
             await self.raise_error(message=str(exc), code=400, db=db)
 
     @staticmethod
-    async def _get_users_for_sync(db: AsyncSession, usernames: list[str]) -> list[User]:
+    async def _get_users_for_sync(db: AsyncSession, uuids: list) -> list[Subscription]:
         """Load users for a node sync, 10k usernames per query (asyncpg caps a statement at 32767 bind params)."""
-        users: list[User] = []
-        for start in range(0, len(usernames), 10_000):
-            users += await get_users(
+        users: list[Subscription] = []
+        for start in range(0, len(uuids), 10_000):
+            users += await get_subscriptions(
                 db,
-                query=UserListQuery(username=usernames[start : start + 10_000]),
+                query=SubscriptionListQuery(uuids=uuids[start : start + 10_000]),
                 load_admin_role=True,
                 load_usage_logs=False,
                 load_group_inbounds=True,
@@ -105,16 +133,16 @@ class GroupOperation(BaseOperation):
             await self.check_inbound_tags(modified_group.inbound_tags)
         db_group = await modify_group(db, db_group, modified_group)
 
-        users = await get_users(
+        users = await get_subscriptions(
             db,
-            query=UserListQuery(group_ids=[db_group.id]),
+            query=SubscriptionListQuery(group_ids=[db_group.id]),
             load_admin_role=True,
             load_usage_logs=False,
             load_group_inbounds=True,
         )
         await self._sync_users_allocations(db, users)
         await db.commit()
-        await sync_users(users)
+        await sync_subscriptions(users)
 
         group = GroupResponse.model_validate(db_group)
 
@@ -125,49 +153,20 @@ class GroupOperation(BaseOperation):
 
     async def remove_group(self, db: AsyncSession, group_id: int, admin: Admin) -> None:
         db_group = await self._get_group_with_access(db, group_id, admin)
+        await self._reject_core_managed_group_deletion(db, [db_group.id])
 
-        username_list = await get_group_usernames(db, [db_group.id])
+        uuid_list = await get_group_subscription_uuids(db, [db_group.id])
 
         await remove_group(db, db_group)
 
-        users = await self._get_users_for_sync(db, username_list)
+        users = await self._get_users_for_sync(db, uuid_list)
         await self._sync_users_allocations(db, users)
         await db.commit()
-        await sync_users(users)
+        await sync_subscriptions(users)
 
         logger.info(f'Group "{db_group.name}" deleted by admin "{admin.username}"')
 
         asyncio.create_task(notification.remove_group(db_group.id, admin.username))
-
-    async def bulk_add_groups(self, db: AsyncSession, bulk_model: BulkGroup, admin: Admin):
-        await self.validate_all_groups(db, bulk_model, admin)
-        if bulk_model.dry_run:
-            n = await count_bulk_group_scope(db, bulk_model)
-            return BulkOperationDryRunResponse(affected_users=n)
-
-        users, users_count = await add_groups_to_users(db, bulk_model)
-        await self._sync_users_allocations(db, users)
-        await db.commit()
-        await sync_users(users)
-
-        if self.operator_type in (OperatorType.API, OperatorType.WEB):
-            return {"detail": f"operation has been successfuly done on {users_count} users"}
-        return users_count
-
-    async def bulk_remove_groups(self, db: AsyncSession, bulk_model: BulkGroup, admin: Admin):
-        await self.validate_all_groups(db, bulk_model, admin)
-        if bulk_model.dry_run:
-            n = await count_bulk_group_scope(db, bulk_model)
-            return BulkOperationDryRunResponse(affected_users=n)
-
-        users, users_count = await remove_groups_from_users(db, bulk_model)
-        await self._sync_users_allocations(db, users)
-        await db.commit()
-        await sync_users(users)
-
-        if self.operator_type in (OperatorType.API, OperatorType.WEB):
-            return {"detail": f"operation has been successfuly done on {users_count} users"}
-        return users_count
 
     async def bulk_remove_groups_by_id(
         self, db: AsyncSession, bulk_groups: BulkGroupSelection, admin: Admin
@@ -184,16 +183,17 @@ class GroupOperation(BaseOperation):
                 await self.raise_error("Group not found", 404)
 
         group_ids = [g.id for g in db_groups]
+        await self._reject_core_managed_group_deletion(db, group_ids)
         group_names = [g.name for g in db_groups]
-        all_affected_usernames = await get_group_usernames(db, group_ids)
+        affected_uuids = await get_group_subscription_uuids(db, group_ids)
 
         await remove_groups(db, group_ids)
 
-        if all_affected_usernames:
-            users = await self._get_users_for_sync(db, all_affected_usernames)
+        if affected_uuids:
+            users = await self._get_users_for_sync(db, affected_uuids)
             await self._sync_users_allocations(db, users)
             await db.commit()
-            await sync_users(users)
+            await sync_subscriptions(users)
 
         for name, group_id in zip(group_names, group_ids):
             logger.info(f'Group "{name}" deleted by admin "{admin.username}"')
@@ -235,16 +235,16 @@ class GroupOperation(BaseOperation):
             await load_group_attrs(db, db_group)
 
         if groups_to_update:
-            users = await get_users(
+            users = await get_subscriptions(
                 db,
-                query=UserListQuery(group_ids=[group.id for group in groups_to_update]),
+                query=SubscriptionListQuery(group_ids=[group.id for group in groups_to_update]),
                 load_admin_role=True,
                 load_usage_logs=False,
                 load_group_inbounds=True,
             )
             await self._sync_users_allocations(db, users)
             await db.commit()
-            await sync_users(users)
+            await sync_subscriptions(users)
 
         for db_group in groups_to_update:
             group = GroupResponse.model_validate(db_group)

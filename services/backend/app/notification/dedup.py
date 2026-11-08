@@ -36,6 +36,8 @@ def notification_fingerprint(event_name: str, args: tuple[Any, ...], kwargs: dic
 
 
 def _identity(value: Any) -> str:
+    if hasattr(value, "uuid") and getattr(value, "uuid", None) is not None:
+        return f"subscription:{value.uuid}"
     if hasattr(value, "id") and getattr(value, "id", None) is not None:
         return f"id:{value.id}"
     if hasattr(value, "username") and getattr(value, "username", None):

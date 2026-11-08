@@ -1,7 +1,7 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app import notification
@@ -21,7 +21,7 @@ from app.models.admin import (
     RemoveAdminsResponse,
     Token,
 )
-from app.models.stats import UserUsageStatsList
+from app.models.stats import SubscriptionUsageStatsList
 from app.operation import OperatorType
 from app.operation.admin import AdminOperation
 from app.utils import responses
@@ -33,7 +33,6 @@ from .authentication import (
     get_current_with_metrics,
     require_permission,
     validate_admin,
-    validate_mini_app_admin,
 )
 from .dependencies import get_admin_list_query, get_admin_simple_list_query, get_admin_usage_query
 
@@ -55,23 +54,6 @@ async def admin_token(
         )
     if db_admin.status == AdminStatus.disabled:
         asyncio.create_task(notification.admin_login(form_data.username, form_data.password, client_ip, False))
-        raise HTTPException(
-            status_code=403, detail="your account has been disabled", headers={"WWW-Authenticate": "Bearer"}
-        )
-    asyncio.create_task(notification.admin_login(db_admin.username, "", client_ip, True))
-    return Token(access_token=await create_admin_token(db_admin.id, db_admin.username, db_admin.hashed_password))
-
-
-@router.post("/miniapp/token", responses={409: responses._409})
-async def admin_mini_app_token(
-    request: Request, x_telegram_authorization: str = Header(), db: AsyncSession = Depends(get_db)
-):
-    """Authenticate an admin via Telegram MiniApp and issue a token."""
-    client_ip = get_client_ip(request)
-    db_admin = await validate_mini_app_admin(db, x_telegram_authorization)
-    if not db_admin:
-        raise HTTPException(status_code=401, detail="admin not found.", headers={"WWW-Authenticate": "Bearer"})
-    if db_admin.status == AdminStatus.disabled:
         raise HTTPException(
             status_code=403, detail="your account has been disabled", headers={"WWW-Authenticate": "Bearer"}
         )
@@ -207,7 +189,7 @@ async def get_admins_simple(
 
 @router.get(
     "/{username}/usage",
-    response_model=UserUsageStatsList,
+    response_model=SubscriptionUsageStatsList,
     responses={403: responses._403, 404: responses._404},
 )
 async def get_admin_usage(
@@ -222,7 +204,7 @@ async def get_admin_usage(
 
 @router.get(
     "/by-username/{username}/usage",
-    response_model=UserUsageStatsList,
+    response_model=SubscriptionUsageStatsList,
     responses={403: responses._403, 404: responses._404},
 )
 async def get_admin_usage_by_username(
@@ -236,7 +218,7 @@ async def get_admin_usage_by_username(
 
 @router.get(
     "/by-id/{admin_id}/usage",
-    response_model=UserUsageStatsList,
+    response_model=SubscriptionUsageStatsList,
     responses={403: responses._403, 404: responses._404},
 )
 async def get_admin_usage_by_id(
@@ -246,99 +228,6 @@ async def get_admin_usage_by_id(
     admin: AdminDetails = Depends(require_permission("admins", "read")),
 ):
     return await admin_operator.get_admin_usage_by_id(db, admin_id=admin_id, admin=admin, query=query)
-
-
-@router.post("/{username}/users/disable", responses={404: responses._404})
-async def disable_all_active_users(
-    username: str,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    """Disable all active users under a specific admin."""
-    await admin_operator.disable_all_active_users(db, username=username, admin=admin)
-    return {}
-
-
-@router.post("/by-username/{username}/users/disable", responses={404: responses._404})
-async def disable_all_active_users_by_username(
-    username: str,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    await admin_operator.disable_all_active_users(db, username=username, admin=admin)
-    return {}
-
-
-@router.post("/by-id/{admin_id}/users/disable", responses={404: responses._404})
-async def disable_all_active_users_by_id(
-    admin_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    await admin_operator.disable_all_active_users_by_id(db, admin_id=admin_id, admin=admin)
-    return {}
-
-
-@router.post("/{username}/users/activate", responses={404: responses._404})
-async def activate_all_disabled_users(
-    username: str,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    """Activate all disabled users under a specific admin."""
-    await admin_operator.activate_all_disabled_users(db, username=username, admin=admin)
-    return {}
-
-
-@router.post("/by-username/{username}/users/activate", responses={404: responses._404})
-async def activate_all_disabled_users_by_username(
-    username: str,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    await admin_operator.activate_all_disabled_users(db, username=username, admin=admin)
-    return {}
-
-
-@router.post("/by-id/{admin_id}/users/activate", responses={404: responses._404})
-async def activate_all_disabled_users_by_id(
-    admin_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    await admin_operator.activate_all_disabled_users_by_id(db, admin_id=admin_id, admin=admin)
-    return {}
-
-
-@router.delete("/{username}/users", responses={403: responses._403, 404: responses._404})
-async def remove_all_users(
-    username: str,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "delete")),
-):
-    """Remove all users under a specific admin."""
-    deleted = await admin_operator.remove_all_users(db, username=username, admin=admin)
-    return {"detail": f"operation has been successfuly done {deleted} users deleted"}
-
-
-@router.delete("/by-username/{username}/users", responses={403: responses._403, 404: responses._404})
-async def remove_all_users_by_username(
-    username: str,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "delete")),
-):
-    deleted = await admin_operator.remove_all_users(db, username=username, admin=admin)
-    return {"detail": f"operation has been successfuly done {deleted} users deleted"}
-
-
-@router.delete("/by-id/{admin_id}/users", responses={403: responses._403, 404: responses._404})
-async def remove_all_users_by_id(
-    admin_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "delete")),
-):
-    deleted = await admin_operator.remove_all_users_by_id(db, admin_id=admin_id, admin=admin)
-    return {"detail": f"operation has been successfuly done {deleted} users deleted"}
 
 
 @router.post("/{username}/reset", response_model=AdminDetails, responses={404: responses._404})
@@ -423,45 +312,3 @@ async def bulk_enable_admins(
 ):
     """Enable selected admins by ID."""
     return await admin_operator.bulk_set_admins_disabled(db, bulk_admins, admin, is_disabled=False)
-
-
-@router.post(
-    "s/bulk/users/disable",
-    response_model=BulkAdminsActionResponse,
-    responses={400: responses._400, 403: responses._403, 404: responses._404},
-)
-async def bulk_disable_all_active_users(
-    bulk_admins: BulkAdminSelection,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    """Disable all active users under selected admins."""
-    return await admin_operator.bulk_disable_all_active_users_for_admins(db, bulk_admins, admin)
-
-
-@router.post(
-    "s/bulk/users/activate",
-    response_model=BulkAdminsActionResponse,
-    responses={400: responses._400, 403: responses._403, 404: responses._404},
-)
-async def bulk_activate_all_disabled_users(
-    bulk_admins: BulkAdminSelection,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "update")),
-):
-    """Activate all disabled users under selected admins."""
-    return await admin_operator.bulk_activate_all_disabled_users_for_admins(db, bulk_admins, admin)
-
-
-@router.delete(
-    "s/bulk/users",
-    response_model=BulkAdminsActionResponse,
-    responses={400: responses._400, 403: responses._403, 404: responses._404},
-)
-async def bulk_remove_all_users(
-    bulk_admins: BulkAdminSelection,
-    db: AsyncSession = Depends(get_db),
-    admin: AdminDetails = Depends(require_permission("admins", "delete")),
-):
-    """Remove all users under selected admins."""
-    return await admin_operator.bulk_remove_all_users_for_admins(db, bulk_admins, admin)

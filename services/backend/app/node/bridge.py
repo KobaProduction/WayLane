@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
 
 from waylane_node_bridge import Health, NodeAPIError, NodeType, WayLaneNode
-from waylane_node_bridge.common.service_pb2 import User
+from waylane_node_bridge.common.service_pb2 import Subscription as WireSubscription
 from waylane_node_bridge.grpclib import Node as GrpcNode
 from waylane_node_bridge.rest import Node as RestNode
 from waylane_node_bridge.storage import ClaimedUser
@@ -35,7 +35,7 @@ FULL_SYNC_LEASE_SECONDS = 120.0
 # Safety margin between the delivery budget and the claim lease itself.
 DELIVERY_DEADLINE_MARGIN = 1.0
 
-RefreshHandler = Callable[[str, list[str]], Awaitable[list[User]]]
+RefreshHandler = Callable[[str, list[str]], Awaitable[list[WireSubscription]]]
 _refresh_handler: RefreshHandler | None = None
 
 
@@ -54,12 +54,12 @@ def get_refresh_handler() -> RefreshHandler | None:
     return _refresh_handler
 
 
-def _has_wireguard_identity(user: User) -> bool:
+def _has_wireguard_identity(user: WireSubscription) -> bool:
     wireguard = user.proxies.wireguard
     return bool(wireguard.public_key and wireguard.peer_ips)
 
 
-def _keep_removal_credentials(fresh: User, queued: User) -> User:
+def _keep_removal_credentials(fresh: WireSubscription, queued: WireSubscription) -> WireSubscription:
     """Give a removal the queued payload's credentials where its own cannot identify the user.
 
     Nodes may need them to find what to remove: node v0.5.4's WireGuard
@@ -71,10 +71,10 @@ def _keep_removal_credentials(fresh: User, queued: User) -> User:
     if fresh.inbounds or not queued.HasField("proxies"):
         return fresh
     if not fresh.HasField("proxies"):
-        return User(email=fresh.email, proxies=queued.proxies)
+        return WireSubscription(subscription_uuid=fresh.subscription_uuid, proxies=queued.proxies)
     if _has_wireguard_identity(fresh) or not _has_wireguard_identity(queued):
         return fresh
-    kept = User()
+    kept = WireSubscription()
     kept.CopyFrom(fresh)
     kept.proxies.wireguard.CopyFrom(queued.proxies.wireguard)
     return kept
@@ -130,7 +130,7 @@ class _QueuedBatchSync:
         margin = min(DELIVERY_DEADLINE_MARGIN, self._sync_lease_seconds / 4)
         return self._delivery_deadline - time.time() - margin
 
-    async def _within_delivery_deadline(self, users: list[User], send):
+    async def _within_delivery_deadline(self, users: list[WireSubscription], send):
         """Run a queued delivery only while its claim is certainly still owned.
 
         The claim lease is what lets a full snapshot know a delivery is in
@@ -150,7 +150,7 @@ class _QueuedBatchSync:
             self.logger.warning(f"[{self.name}] Delivery of {len(users)} user(s) cancelled before its claim expired")
             return list(users)
 
-    async def _current_state(self, users: list[User]) -> list[User]:
+    async def _current_state(self, users: list[WireSubscription]) -> list[WireSubscription]:
         """Replace queued payloads with the state committed now, keeping identity and order.
 
         Two edits of one user can be queued in the opposite order of their
@@ -162,8 +162,8 @@ class _QueuedBatchSync:
         handler = _refresh_handler
         if handler is None:
             return users
-        fresh = {user.email: user for user in await handler(self.node_id, [user.email for user in users])}
-        return [_keep_removal_credentials(fresh[user.email], user) if user.email in fresh else user for user in users]
+        fresh = {user.subscription_uuid: user for user in await handler(self.node_id, [user.subscription_uuid for user in users])}
+        return [_keep_removal_credentials(fresh[user.subscription_uuid], user) if user.subscription_uuid in fresh else user for user in users]
 
     async def sync_users_chunked(self, users, chunk_size=100, flush_pending=False, timeout=None):
         if not _queued_sync.get() or not users:
@@ -176,7 +176,7 @@ class _QueuedBatchSync:
 
         return await self._within_delivery_deadline(users, send)
 
-    async def _sync_batch_users(self, users: list[User]) -> list[User]:
+    async def _sync_batch_users(self, users: list[WireSubscription]) -> list[WireSubscription]:
         # The bridge normally switches to per-user RPCs below 1000 users.
         # Bounded queue claims still need the efficient delta-batch endpoint.
         # Keep explicit per-user fallbacks outside the background worker intact.
@@ -211,7 +211,7 @@ class _QueuedBatchSync:
         finally:
             _queued_sync.reset(token)
 
-    async def _deliver_claimed_users(self, claimed_users: list[ClaimedUser]) -> list[User]:
+    async def _deliver_claimed_users(self, claimed_users: list[ClaimedUser]) -> list[WireSubscription]:
         # The bridge bounds the entire claim-and-delivery operation by the
         # lease. Keep the adapter's smaller transport budget within it.
         self._delivery_deadline = time.time() + self._sync_lease_seconds
@@ -382,19 +382,19 @@ class _QueuedBatchSync:
             await self._user_sync_store.requeue_users(self.node_id, captured)
             await self.wake_sync_worker()
 
-    async def request_refresh(self, users: list[User]) -> None:
+    async def request_refresh(self, users: list[WireSubscription]) -> None:
         """Ask the queue to re-derive these users from the source of truth before delivery."""
         if not users:
             return
         request = getattr(self._user_sync_store, "request_refresh", None)
         if callable(request):
-            await request(self.node_id, [user.email for user in users])
+            await request(self.node_id, [user.subscription_uuid for user in users])
             await self.wake_sync_worker()
         else:
             await self.update_users(users)
 
 
-async def _resolve_refresh(node_id: str, emails: list[str]) -> list[User]:
+async def _resolve_refresh(node_id: str, emails: list[str]) -> list[WireSubscription]:
     handler = _refresh_handler
     if handler is None:
         raise RuntimeError("no refresh handler registered")

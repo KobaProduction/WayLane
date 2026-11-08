@@ -33,7 +33,7 @@ class HostNotificationEnable(BaseNotificationEnable):
     modify_hosts: bool = Field(default=True)
 
 
-class UserNotificationEnable(BaseNotificationEnable):
+class SubscriptionNotificationEnable(BaseNotificationEnable):
     status_change: bool = Field(default=True)
     reset_data_usage: bool = Field(default=True)
     data_reset_by_next: bool = Field(default=True)
@@ -47,8 +47,8 @@ class NotificationEnable(BaseModel):
     group: BaseNotificationEnable = Field(default_factory=BaseNotificationEnable)
     host: HostNotificationEnable = Field(default_factory=HostNotificationEnable)
     node: NodeNotificationEnable = Field(default_factory=NodeNotificationEnable)
-    user: UserNotificationEnable = Field(default_factory=UserNotificationEnable)
-    user_template: BaseNotificationEnable = Field(default_factory=BaseNotificationEnable)
+    subscription: SubscriptionNotificationEnable = Field(default_factory=SubscriptionNotificationEnable)
+    subscription_template: BaseNotificationEnable = Field(default_factory=BaseNotificationEnable)
     api_key: BaseNotificationEnable = Field(default_factory=BaseNotificationEnable)
     days_left: bool = Field(default=True)
     percentage_reached: bool = Field(default=True)

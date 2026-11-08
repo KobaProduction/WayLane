@@ -10,20 +10,27 @@ from sqlalchemy import delete, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.db.subscription_firewall import subscription_firewall_config, subscription_device_events
+from app.db.subscription_firewall import subscription_device_events, subscription_firewall_config
 from app.models.admin import AdminDetails
 from app.subscription.device_webhook import (
-    requeue_exhausted_event, retry_pending_events, validate_webhook_url,
+    requeue_exhausted_event,
+    retry_pending_events,
+    validate_webhook_url,
 )
-from app.subscription.firewall import SCENARIOS, load_config, render_message
+from app.subscription.firewall import load_config, render_message
 
 from .authentication import require_permission
 
 router = APIRouter(prefix="/api/subscription-firewall", tags=["Subscription Firewall"])
 
 Scenario = Literal[
-    "invalid_link", "device_limit", "hwid_required", "unsupported_client",
-    "rate_limited", "access_denied", "bot_unavailable",
+    "invalid_link",
+    "device_limit",
+    "hwid_required",
+    "unsupported_client",
+    "rate_limited",
+    "access_denied",
+    "bot_unavailable",
 ]
 
 
@@ -87,8 +94,10 @@ async def preview_message(
 ):
     response = render_message(body.title, body.lines)
     return {
-        "title": body.title, "lines": body.lines,
-        "base64_payload": response.body.decode("ascii"), "announce": response.headers["announce"],
+        "title": body.title,
+        "lines": body.lines,
+        "base64_payload": response.body.decode("ascii"),
+        "announce": response.headers["announce"],
     }
 
 
@@ -97,15 +106,26 @@ async def get_device_event_status(
     db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("settings", "read")),
 ):
-    rows = (await db.execute(
-        select(
-            subscription_device_events.c.id, subscription_device_events.c.event_type,
-            subscription_device_events.c.status, subscription_device_events.c.attempts,
-            subscription_device_events.c.last_error, subscription_device_events.c.created_at,
-            subscription_device_events.c.delivered_at,
-            subscription_device_events.c.next_attempt_at,
-        ).order_by(subscription_device_events.c.created_at.desc()).limit(100)
-    )).mappings().all()
+    rows = (
+        (
+            await db.execute(
+                select(
+                    subscription_device_events.c.id,
+                    subscription_device_events.c.event_type,
+                    subscription_device_events.c.status,
+                    subscription_device_events.c.attempts,
+                    subscription_device_events.c.last_error,
+                    subscription_device_events.c.created_at,
+                    subscription_device_events.c.delivered_at,
+                    subscription_device_events.c.next_attempt_at,
+                )
+                .order_by(subscription_device_events.c.created_at.desc())
+                .limit(100)
+            )
+        )
+        .mappings()
+        .all()
+    )
     return [dict(row) for row in rows]
 
 
@@ -121,10 +141,11 @@ async def get_device_event_summary(
     db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("settings", "read")),
 ):
-    rows = (await db.execute(
-        select(subscription_device_events.c.status, func.count())
-        .group_by(subscription_device_events.c.status)
-    )).all()
+    rows = (
+        await db.execute(
+            select(subscription_device_events.c.status, func.count()).group_by(subscription_device_events.c.status)
+        )
+    ).all()
     return {status: count for status, count in rows}
 
 
