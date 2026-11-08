@@ -3,19 +3,14 @@ import DashboardStatistics from '@/features/dashboard/components/dashboard-stati
 import WorkersHealthCard from '@/features/dashboard/components/workers-health-card'
 import AdminFilterCombobox from '@/components/common/admin-filter-combobox'
 import { useCommandPaletteStore } from '@/hooks/use-command-palette-store'
-import UserModal from '@/features/users/dialogs/user-modal.lazy'
 import { Separator } from '@/components/ui/separator'
 import { useAdmin } from '@/hooks/use-admin'
-import { useClipboard } from '@/hooks/use-clipboard'
-import type { AdminDetails, UserResponse } from '@/service/api'
-import { useGetSystemUsersStats } from '@/service/api'
+import type { AdminDetails } from '@/service/api'
+import { useGetSystemSubscriptionsStats } from '@/service/api'
 import { Bookmark } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
+import { useNavigate } from 'react-router'
 import PageHeader from '@/components/layout/page-header'
-import { type UseEditFormValues, type UseFormValues, getDefaultUserForm } from '@/features/users/forms/user-form'
 import { hasPermission, hasScopeAll } from '@/utils/rbac'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -26,42 +21,26 @@ const totalAdmin: DashboardAdmin = {
 }
 
 const Dashboard = () => {
-  const [isUserModalOpen, setUserModalOpen] = useState(false)
   const setCommandPaletteOpen = useCommandPaletteStore(s => s.setOpen)
   const { admin: currentAdmin } = useAdmin()
-  const canReadAllUsers = hasScopeAll(currentAdmin, 'users', 'read')
-  const canCreateUsers = hasPermission(currentAdmin, 'users', 'create')
+  const canReadAllUsers = hasScopeAll(currentAdmin, 'subscriptions', 'read')
+  const canCreateSubscriptions = hasPermission(currentAdmin, 'subscriptions', 'create')
   const canReadNodeStats = hasPermission(currentAdmin, 'nodes', 'stats')
-  const { t } = useTranslation()
 
   const [selectedAdmin, setSelectedAdmin] = useState<DashboardAdmin | undefined>(totalAdmin)
 
-  const userForm = useForm<UseFormValues | UseEditFormValues>({
-    defaultValues: getDefaultUserForm,
-  })
-
   const queryClient = useQueryClient()
-  const { copy } = useClipboard()
+  const navigate = useNavigate()
 
   const refreshAllUserData = () => {
     queryClient.invalidateQueries({ queryKey: ['getUsers'] })
-    queryClient.invalidateQueries({ queryKey: ['getUsersUsage'] })
-    queryClient.invalidateQueries({ queryKey: ['/api/users/'] })
+    queryClient.invalidateQueries({ queryKey: ['getSubscriptionUsageMetrics'] })
+    queryClient.invalidateQueries({ queryKey: ['waylane-product-subscriptions'] })
   }
 
-  const handleCreateUserSuccess = async (user: UserResponse) => {
-    if (user.subscription_url) {
-      const subURL = user.subscription_url.startsWith('/') ? window.location.origin + user.subscription_url : user.subscription_url
-      await copy(subURL)
-      toast.success(t('userSettings.subscriptionUrlCopied'))
-    }
-    refreshAllUserData()
-  }
-
-  const handleCreateUser = () => {
-    if (!canCreateUsers) return
-    userForm.reset()
-    setUserModalOpen(true)
+  const handleCreateSubscription = () => {
+    if (!canCreateSubscriptions) return
+    navigate('/subscriptions')
   }
 
   const handleOpenQuickActions = () => {
@@ -72,7 +51,7 @@ const Dashboard = () => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'n' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
-        handleCreateUser()
+        handleCreateSubscription()
       }
       if (event.key === 'r' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
@@ -86,7 +65,7 @@ const Dashboard = () => {
 
   const systemUsersStatsParams = canReadAllUsers && selectedAdmin && selectedAdmin.username !== 'Total' ? { admin_username: selectedAdmin.username } : undefined
 
-  const { data: systemUsersStatsData } = useGetSystemUsersStats(systemUsersStatsParams, {
+  const { data: systemUsersStatsData } = useGetSystemSubscriptionsStats(systemUsersStatsParams, {
     query: {
       refetchInterval: 5000,
     },
@@ -135,7 +114,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <UserModal isDialogOpen={isUserModalOpen} onOpenChange={setUserModalOpen} form={userForm} editingUser={false} onSuccessCallback={handleCreateUserSuccess} />
     </div>
   )
 }

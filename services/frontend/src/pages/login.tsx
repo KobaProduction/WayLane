@@ -8,13 +8,11 @@ import { Input } from '@/components/ui/input'
 import { LoaderButton } from '@/components/ui/loader-button'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { passkeyLoginOptions, passkeyLoginVerify, getCurrentAdmin, useAdminMiniAppToken, useAdminToken, useCreateOwner, useDeleteOwner, useResetOwnerPassword, useUpgradeOwner } from '@/service/api'
-import { $fetch } from '@/service/http'
+import { passkeyLoginOptions, passkeyLoginVerify, getCurrentAdmin, useAdminToken, useCreateOwner, useDeleteOwner, useResetOwnerPassword, useUpgradeOwner } from '@/service/api'
 import { getAuthToken, removeAuthToken, setAuthToken } from '@/utils/authStorage'
 import { fromBase64Url, serializeCredential } from '@/utils/passkeys'
 import { queryClient } from '@/utils/query-client'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { retrieveRawInitData } from '@telegram-apps/sdk'
 import { ArrowLeft, CircleAlertIcon, KeyRound, LogInIcon, RotateCcw, ShieldCheck, Trash2, UserRoundKey } from 'lucide-react'
 import { FC, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -130,16 +128,6 @@ export const Login: FC = () => {
     resolver: zodResolver(schema),
   })
 
-  let isTelegram = false
-  let initDataRaw = ''
-  try {
-    initDataRaw = retrieveRawInitData() || ''
-    isTelegram = !!initDataRaw
-  } catch (e) {
-    isTelegram = false
-    initDataRaw = ''
-  }
-
   useEffect(() => {
     if (location.pathname !== '/login') {
       navigate('/login', { replace: true })
@@ -147,10 +135,6 @@ export const Login: FC = () => {
   }, [location.pathname, navigate])
 
   useEffect(() => {
-    // The Telegram MiniApp flow below owns its own auth exchange - let it run
-    // undisturbed rather than racing it over the stored token.
-    if (isTelegram) return
-
     const token = getAuthToken()
     // No token: nothing to verify, show the login form
     if (!token) return
@@ -180,7 +164,7 @@ export const Login: FC = () => {
       })
 
     return () => controller.abort()
-  }, [navigate, isTelegram])
+  }, [navigate])
 
   const {
     mutate: login,
@@ -203,45 +187,8 @@ export const Login: FC = () => {
     },
   })
 
-  // MiniApp login mutation
-  const { isPending: miniAppLoading, error: miniAppError } = useAdminMiniAppToken({
-    mutation: {
-      onSuccess(data: any) {
-        // Assume data contains access_token
-        if (data && data.access_token) {
-          setAuthToken(data.access_token)
-          navigate('/', { replace: true })
-        }
-      },
-    },
-  })
-
-  const handleLogin = async (values: LoginSchema) => {
-    if (isTelegram) {
-      try {
-        const data = await $fetch('/api/admin/miniapp/token', {
-          method: 'POST',
-          headers: {
-            'x-telegram-authorization': initDataRaw,
-          },
-        })
-        if (data && data.access_token) {
-          setAuthToken(data.access_token)
-          navigate('/', { replace: true })
-        } else {
-          throw new Error(data?.detail || 'Telegram login failed')
-        }
-      } catch (err: any) {
-        alert(err.message || 'Telegram login failed')
-      }
-    } else {
-      login({
-        data: {
-          ...values,
-          grant_type: 'password',
-        },
-      })
-    }
+  const handleLogin = (values: LoginSchema) => {
+    login({ data: { ...values, grant_type: 'password' } })
   }
 
   const [passkeyLoading, setPasskeyLoading] = useState(false)
@@ -268,7 +215,6 @@ export const Login: FC = () => {
     }
   }
 
-  const [telegramLoading, setTelegramLoading] = useState(false)
   const [view, setView] = useState<'login' | 'setup'>('login')
 
   const {
@@ -348,61 +294,6 @@ export const Login: FC = () => {
     }
   }
 
-  // Auto-login for Telegram MiniApp
-  useEffect(() => {
-    if (isTelegram) {
-      // Try to expand for all platforms
-      try {
-        const win = window as any
-        // Always try to expand the Telegram WebApp if possible
-        if (win.Telegram && win.Telegram.WebApp && typeof win.Telegram.WebApp.expand === 'function') {
-          win.Telegram.WebApp.expand()
-        }
-        // Send web_app_expand event for all platforms
-        const expandEventData = JSON.stringify({
-          eventType: 'web_app_expand',
-          eventData: {},
-        })
-        // Web (iframe)
-        if (window.parent && window.parent !== window) {
-          window.parent.postMessage(expandEventData, 'https://web.telegram.org')
-        }
-        // Windows Phone
-        if (typeof (window as any).external !== 'undefined' && typeof (window as any).external.notify === 'function') {
-          ;(window as any).external.notify(expandEventData)
-        }
-        // Mobile/Desktop
-        if (win.TelegramWebviewProxy && typeof win.TelegramWebviewProxy.postEvent === 'function') {
-          win.TelegramWebviewProxy.postEvent('web_app_expand', '{}')
-        }
-      } catch (e) {
-        // Ignore errors if not available
-      }
-
-      setTelegramLoading(true)
-      $fetch('/api/admin/miniapp/token', {
-        method: 'POST',
-        headers: {
-          'x-telegram-authorization': initDataRaw,
-        },
-      })
-        .then((data: any) => {
-          if (data && data.access_token) {
-            setAuthToken(data.access_token)
-            navigate('/', { replace: true })
-          } else {
-            throw new Error(data?.detail || 'Telegram login failed')
-          }
-        })
-        .catch((err: any) => {
-          alert(err.message || 'Telegram login failed')
-        })
-        .finally(() => {
-          setTelegramLoading(false)
-        })
-    }
-  }, [])
-
   return (
     <div className="flex min-h-screen w-full flex-col justify-between px-6 pb-10 pt-6">
       <div className="w-full">
@@ -430,14 +321,14 @@ export const Login: FC = () => {
                   <div className="mt-4 flex flex-col gap-y-2">
                     <Input className="py-5" placeholder={t('username')} autoComplete="username" {...register('username')} error={t(errors?.username?.message as string)} />
                     <PasswordInput className="py-5" placeholder={t('password')} allowBrowserSave {...register('password')} error={t(errors?.password?.message as string)} />
-                    {((error && error.data) || (miniAppError && miniAppError.data)) && (
+                    {error && error.data && (
                       <Alert className="mt-2" variant="destructive">
                         <CircleAlertIcon size="18px" />
-                        <AlertDescription>{getOwnerSetupErrorMessage(error || miniAppError)}</AlertDescription>
+                        <AlertDescription>{getOwnerSetupErrorMessage(error)}</AlertDescription>
                       </Alert>
                     )}
                     <div className="mt-2 flex flex-col gap-2">
-                      <LoaderButton isLoading={loading || miniAppLoading || telegramLoading} type="submit" className="flex w-full items-center gap-2">
+                      <LoaderButton isLoading={loading} type="submit" className="flex w-full items-center gap-2">
                         <LogInIcon size="18px" />
                         <span>{t('login')}</span>
                       </LoaderButton>

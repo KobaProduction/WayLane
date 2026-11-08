@@ -12,15 +12,15 @@ type Backend interface {
 	SubscribeLogs(context.Context) <-chan string
 	Restart() error
 	Shutdown()
-	SyncUser(context.Context, *common.User) error
-	SyncUsers(context.Context, []*common.User) error
-	UpdateUsers(context.Context, []*common.User) error
-	UpdateUsersAndRestart(context.Context, []*common.User) error
+	SyncSubscription(context.Context, *common.Subscription) error
+	SyncSubscriptions(context.Context, []*common.Subscription) error
+	UpdateUsers(context.Context, []*common.Subscription) error
+	UpdateUsersAndRestart(context.Context, []*common.Subscription) error
 	GetSysStats(context.Context) (*common.BackendStatsResponse, error)
 	GetStats(context.Context, *common.StatRequest) (*common.StatResponse, error)
 	GetOutboundsLatency(context.Context, *common.LatencyRequest) (*common.LatencyResponse, error)
-	GetUserOnlineStats(context.Context, string) (*common.OnlineStatResponse, error)
-	GetUserOnlineIpListStats(context.Context, string) (*common.StatsOnlineIpListResponse, error)
+	GetSubscriptionOnlineStats(context.Context, string) (*common.OnlineStatResponse, error)
+	GetSubscriptionOnlineIpListStats(context.Context, string) (*common.StatsOnlineIpListResponse, error)
 }
 
 // RoutingBackend is implemented by backends that expose xray RoutingService.

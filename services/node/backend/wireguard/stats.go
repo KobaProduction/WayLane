@@ -68,10 +68,10 @@ func (wg *WireGuard) GetStats(ctx context.Context, request *common.StatRequest) 
 	}
 
 	switch request.GetType() {
-	case common.StatType_UserStat:
+	case common.StatType_SubscriptionStat:
 		return wg.handleUserStats(ctx, request)
 
-	case common.StatType_UsersStat:
+	case common.StatType_SubscriptionsStat:
 		return wg.handleUsersStats(ctx, request)
 
 	case common.StatType_Outbound, common.StatType_Outbounds:
@@ -86,7 +86,7 @@ func (wg *WireGuard) GetStats(ctx context.Context, request *common.StatRequest) 
 	}
 }
 
-func (wg *WireGuard) GetUserOnlineStats(ctx context.Context, email string) (*common.OnlineStatResponse, error) {
+func (wg *WireGuard) GetSubscriptionOnlineStats(ctx context.Context, email string) (*common.OnlineStatResponse, error) {
 	wg.mu.RLock()
 	state := wg.state
 	wg.mu.RUnlock()
@@ -120,7 +120,7 @@ func (wg *WireGuard) GetUserOnlineStats(ctx context.Context, email string) (*com
 	}, nil
 }
 
-func (wg *WireGuard) GetUserOnlineIpListStats(ctx context.Context, email string) (*common.StatsOnlineIpListResponse, error) {
+func (wg *WireGuard) GetSubscriptionOnlineIpListStats(ctx context.Context, email string) (*common.StatsOnlineIpListResponse, error) {
 	wg.mu.RLock()
 	state := wg.state
 	wg.mu.RUnlock()

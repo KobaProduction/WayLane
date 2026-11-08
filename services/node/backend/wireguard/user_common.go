@@ -210,7 +210,7 @@ func peerIPAllowedOnInterface(peerNet *net.IPNet, ifaceNets []*net.IPNet) bool {
 	return false
 }
 
-func (wg *WireGuard) collectDesiredPeers(users []*common.User) (map[string]*DesiredPeer, error) {
+func (wg *WireGuard) collectDesiredPeers(users []*common.Subscription) (map[string]*DesiredPeer, error) {
 	desiredPeers := make(map[string]*DesiredPeer)
 	seenIPs := make(map[string]string)
 
@@ -219,7 +219,7 @@ func (wg *WireGuard) collectDesiredPeers(users []*common.User) (map[string]*Desi
 			continue
 		}
 
-		email := user.GetEmail()
+		email := user.GetSubscriptionUuid()
 		publicKey := user.GetProxies().GetWireguard().GetPublicKey()
 		peerIps := user.GetProxies().GetWireguard().GetPeerIps()
 
@@ -305,27 +305,27 @@ func buildRemoveConfigsForPeers(removeSet map[string]*PeerInfo) ([]string, []wgt
 	return validRemoveKeys, peerConfigs
 }
 
-func shouldIncludeUserInInterface(user *common.User, interfaceName string) bool {
+func shouldIncludeUserInInterface(user *common.Subscription, interfaceName string) bool {
 	return slices.Contains(user.GetInbounds(), interfaceName)
 }
 
-func normalizeUsers(users []*common.User) []*common.User {
-	lastByEmail := make(map[string]*common.User, len(users))
+func normalizeUsers(users []*common.Subscription) []*common.Subscription {
+	lastByEmail := make(map[string]*common.Subscription, len(users))
 
 	for _, user := range users {
 		switch {
 		case user == nil,
-			user.GetEmail() == "",
+			user.GetSubscriptionUuid() == "",
 			user.GetProxies() == nil,
 			user.GetProxies().GetWireguard() == nil,
 			user.GetProxies().GetWireguard().GetPublicKey() == "",
 			len(user.GetProxies().GetWireguard().GetPeerIps()) == 0:
 			continue
 		}
-		lastByEmail[user.GetEmail()] = user
+		lastByEmail[user.GetSubscriptionUuid()] = user
 	}
 
-	normalized := make([]*common.User, 0, len(lastByEmail))
+	normalized := make([]*common.Subscription, 0, len(lastByEmail))
 	for _, user := range lastByEmail {
 		normalized = append(normalized, user)
 	}

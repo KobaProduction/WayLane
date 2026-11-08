@@ -11,12 +11,12 @@ func (x *Xray) GetSysStats(ctx context.Context) (*common.BackendStatsResponse, e
 	return x.handler.GetSysStats(ctx)
 }
 
-func (x *Xray) GetUserOnlineStats(ctx context.Context, email string) (*common.OnlineStatResponse, error) {
-	return x.handler.GetUserOnlineStats(ctx, email)
+func (x *Xray) GetSubscriptionOnlineStats(ctx context.Context, email string) (*common.OnlineStatResponse, error) {
+	return x.handler.GetSubscriptionOnlineStats(ctx, email)
 }
 
-func (x *Xray) GetUserOnlineIpListStats(ctx context.Context, email string) (*common.StatsOnlineIpListResponse, error) {
-	return x.handler.GetUserOnlineIpListStats(ctx, email)
+func (x *Xray) GetSubscriptionOnlineIpListStats(ctx context.Context, email string) (*common.StatsOnlineIpListResponse, error) {
+	return x.handler.GetSubscriptionOnlineIpListStats(ctx, email)
 }
 
 func (x *Xray) GetStats(ctx context.Context, request *common.StatRequest) (*common.StatResponse, error) {
@@ -32,9 +32,9 @@ func (x *Xray) GetStats(ctx context.Context, request *common.StatRequest) (*comm
 	case common.StatType_Inbound:
 		return x.handler.GetInboundStats(ctx, request.GetName(), request.GetReset_())
 
-	case common.StatType_UsersStat:
+	case common.StatType_SubscriptionsStat:
 		return x.handler.GetUsersStats(ctx, request.GetReset_())
-	case common.StatType_UserStat:
+	case common.StatType_SubscriptionStat:
 		return x.handler.GetUserStats(ctx, request.GetName(), request.GetReset_())
 
 	default:

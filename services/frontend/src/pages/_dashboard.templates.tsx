@@ -16,7 +16,7 @@ interface Tab {
 }
 
 const tabs: Tab[] = [
-  { id: 'templates.userTemplates', label: 'templates.userTemplates', icon: FileUser, url: '/templates/user' },
+  { id: 'templates.subscriptionTemplates', label: 'templates.subscriptionTemplates', icon: FileUser, url: '/templates/subscriptions' },
   { id: 'templates.clientTemplates', label: 'templates.clientTemplates', icon: FileCode2, url: '/templates/client' },
 ]
 
@@ -25,12 +25,12 @@ export default function TemplatesLayout() {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { admin } = useAdmin()
-  const canReadUserTemplates = hasPermission(admin, 'templates', 'read')
-  const canCreateUserTemplates = hasPermission(admin, 'templates', 'create')
+  const canReadSubscriptionTemplates = hasPermission(admin, 'templates', 'read')
+  const canCreateSubscriptionTemplates = hasPermission(admin, 'templates', 'create')
   const canReadClientTemplates = hasPermission(admin, 'client_templates', 'read')
   const canCreateClientTemplates = hasPermission(admin, 'client_templates', 'create')
   const visibleTabs = tabs.filter(tab => {
-    if (tab.url === '/templates/user') return canReadUserTemplates
+    if (tab.url === '/templates/subscriptions') return canReadSubscriptionTemplates
     if (tab.url === '/templates/client') return canReadClientTemplates
     return false
   })
@@ -68,11 +68,11 @@ export default function TemplatesLayout() {
     return {
       title: 'templates.title',
       description: 'templates.description',
-      buttonIcon: canCreateUserTemplates ? Plus : undefined,
-      buttonText: canCreateUserTemplates ? 'templates.addTemplate' : undefined,
-      onButtonClick: canCreateUserTemplates
+      buttonIcon: canCreateSubscriptionTemplates ? Plus : undefined,
+      buttonText: canCreateSubscriptionTemplates ? 'templates.addTemplate' : undefined,
+      onButtonClick: canCreateSubscriptionTemplates
         ? () => {
-            window.dispatchEvent(new CustomEvent('openUserTemplateDialog'))
+            window.dispatchEvent(new CustomEvent('openSubscriptionTemplateDialog'))
           }
         : undefined,
     }
@@ -95,7 +95,7 @@ export default function TemplatesLayout() {
             >
               <div className="flex items-center gap-1.5">
                 <tab.icon className="h-4 w-4" />
-                <span>{t(tab.label, { defaultValue: tab.label === 'templates.userTemplates' ? 'User Templates' : 'Client Templates' })}</span>
+                <span>{t(tab.label, { defaultValue: tab.label === 'templates.subscriptionTemplates' ? 'Subscription Templates' : 'Client Templates' })}</span>
               </div>
             </button>
           ))}

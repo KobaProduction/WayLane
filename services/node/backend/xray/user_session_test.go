@@ -109,11 +109,11 @@ func requireFlowing(t *testing.T, conn net.Conn, moment string) {
 	}
 }
 
-func sessionUser(email string, id uuid.UUID, inbounds ...string) *common.User {
-	return &common.User{
-		Email:    email,
-		Inbounds: inbounds,
-		Proxies:  &common.Proxy{Vless: &common.Vless{Id: id.String()}},
+func sessionUser(email string, id uuid.UUID, inbounds ...string) *common.Subscription {
+	return &common.Subscription{
+		SubscriptionUuid: email,
+		Inbounds:         inbounds,
+		Proxies:          &common.Proxy{Vless: &common.Vless{Id: id.String()}},
 	}
 }
 
@@ -132,7 +132,7 @@ func TestUserSyncKeepsAnUnchangedUsersOpenConnection(t *testing.T) {
 	back, err := New(
 		context.Background(),
 		xrayConfig,
-		[]*common.User{alice},
+		[]*common.Subscription{alice},
 		netutil.FindFreePort(),
 		netutil.FindFreePort(),
 		&config.Config{
@@ -153,17 +153,17 @@ func TestUserSyncKeepsAnUnchangedUsersOpenConnection(t *testing.T) {
 	stream := openVlessStream(t, inboundPort, aliceID, source)
 	requireFlowing(t, stream, "before any sync")
 
-	if err := back.SyncUser(ctx, alice); err != nil {
+	if err := back.SyncSubscription(ctx, alice); err != nil {
 		t.Fatal(err)
 	}
-	requireFlowing(t, stream, "after SyncUser sent the same user again")
+	requireFlowing(t, stream, "after SyncSubscription sent the same user again")
 
-	if err := back.UpdateUsers(ctx, []*common.User{alice}); err != nil {
+	if err := back.UpdateUsers(ctx, []*common.Subscription{alice}); err != nil {
 		t.Fatal(err)
 	}
 	requireFlowing(t, stream, "after UpdateUsers sent the same user again")
 
-	if err := back.SyncUser(ctx, sessionUser("1.alice", aliceID)); err != nil {
+	if err := back.SyncSubscription(ctx, sessionUser("1.alice", aliceID)); err != nil {
 		t.Fatal(err)
 	}
 

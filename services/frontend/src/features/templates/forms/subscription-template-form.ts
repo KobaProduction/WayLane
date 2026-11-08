@@ -1,4 +1,4 @@
-import { DataLimitResetStrategy, ShadowsocksMethods, UserStatusCreate } from '@/service/api'
+import { DataLimitResetStrategy, ShadowsocksMethods, SubscriptionStatusCreate } from '@/service/api'
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { TFunction } from 'i18next'
 import type { FieldError, FieldErrors, Resolver } from 'react-hook-form'
@@ -6,11 +6,9 @@ import { z } from 'zod'
 
 const MAX_ON_HOLD_EXPIRE_DURATION_SECONDS = 2_147_483_647
 
-const userTemplateFormObjectSchema = z.object({
+const subscriptionTemplateFormObjectSchema = z.object({
   name: z.string().min(1, 'validation.required'),
-  status: z.enum([UserStatusCreate.active, UserStatusCreate.on_hold]).default(UserStatusCreate.active),
-  username_prefix: z.string().optional(),
-  username_suffix: z.string().optional(),
+  status: z.enum([SubscriptionStatusCreate.active, SubscriptionStatusCreate.on_hold]).default(SubscriptionStatusCreate.active),
   data_limit: z.number().min(0).optional(),
   hwid_limit: z.number().min(0).nullable().optional(),
   expire_duration: z.number().min(0).max(MAX_ON_HOLD_EXPIRE_DURATION_SECONDS).optional(),
@@ -32,8 +30,8 @@ const userTemplateFormObjectSchema = z.object({
   reset_usages: z.boolean().optional(),
 })
 
-function refineUserTemplateOnHold(data: z.infer<typeof userTemplateFormObjectSchema>, ctx: z.RefinementCtx) {
-  if (data.status !== UserStatusCreate.on_hold) return
+function refineSubscriptionTemplateOnHold(data: z.infer<typeof subscriptionTemplateFormObjectSchema>, ctx: z.RefinementCtx) {
+  if (data.status !== SubscriptionStatusCreate.on_hold) return
   const exp = data.expire_duration
   if (exp == null || !Number.isFinite(Number(exp)) || Number(exp) <= 0) {
     ctx.addIssue({
@@ -44,16 +42,14 @@ function refineUserTemplateOnHold(data: z.infer<typeof userTemplateFormObjectSch
   }
 }
 
-export const userTemplateFormSchema = userTemplateFormObjectSchema.superRefine(refineUserTemplateOnHold)
+export const subscriptionTemplateFormSchema = subscriptionTemplateFormObjectSchema.superRefine(refineSubscriptionTemplateOnHold)
 
-export type UserTemplatesFromValueInput = z.input<typeof userTemplateFormSchema>
-export type UserTemplatesFromValue = z.infer<typeof userTemplateFormSchema>
+export type SubscriptionTemplatesFromValueInput = z.input<typeof subscriptionTemplateFormSchema>
+export type SubscriptionTemplatesFromValue = z.infer<typeof subscriptionTemplateFormSchema>
 
-export const userTemplateFormDefaultValues: Partial<UserTemplatesFromValueInput> = {
+export const subscriptionTemplateFormDefaultValues: Partial<SubscriptionTemplatesFromValueInput> = {
   name: '',
-  status: UserStatusCreate.active,
-  username_prefix: '',
-  username_suffix: '',
+  status: SubscriptionStatusCreate.active,
   data_limit: 0,
   hwid_limit: null,
   expire_duration: 0,
@@ -64,13 +60,13 @@ export const userTemplateFormDefaultValues: Partial<UserTemplatesFromValueInput>
 }
 
 /** Wraps zodResolver: turns `validation.required` into fully translated messages (same idea as `user-modal` `setError` with `t('validation.required', { field: … })`). */
-export function createUserTemplateFormResolver(t: TFunction): Resolver<UserTemplatesFromValueInput> {
-  const base = zodResolver(userTemplateFormSchema)
+export function createSubscriptionTemplateFormResolver(t: TFunction): Resolver<SubscriptionTemplatesFromValueInput> {
+  const base = zodResolver(subscriptionTemplateFormSchema)
   return async (values, context, options) => {
     const result = await base(values, context, options)
     if (!result.errors) return result
-    const errors = { ...result.errors } as FieldErrors<UserTemplatesFromValueInput>
-    for (const key of Object.keys(errors) as Array<keyof FieldErrors<UserTemplatesFromValueInput>>) {
+    const errors = { ...result.errors } as FieldErrors<SubscriptionTemplatesFromValueInput>
+    for (const key of Object.keys(errors) as Array<keyof FieldErrors<SubscriptionTemplatesFromValueInput>>) {
       const err = errors[key] as FieldError | undefined
       if (err && typeof err === 'object' && err.message === 'validation.required') {
         const fieldName = String(key)

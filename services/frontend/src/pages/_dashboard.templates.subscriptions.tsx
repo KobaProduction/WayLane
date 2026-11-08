@@ -1,9 +1,9 @@
-import UserTemplate from '@/features/templates/components/user-template'
-import { useBulkDeleteUserTemplates, useBulkDisableUserTemplates, useBulkEnableUserTemplates, useGetUserTemplates, useModifyUserTemplate, UserTemplateResponse } from '@/service/api'
+import SubscriptionTemplate from '@/features/templates/components/subscription-template'
+import { useBulkDeleteSubscriptionTemplates, useBulkDisableSubscriptionTemplates, useBulkEnableSubscriptionTemplates, useGetSubscriptionTemplates, useModifySubscriptionTemplate, SubscriptionTemplateResponse } from '@/service/api'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
-import UserTemplateModal from '@/features/templates/dialogs/user-template-modal'
-import { createUserTemplateFormResolver, userTemplateFormDefaultValues, type UserTemplatesFromValueInput } from '@/features/templates/forms/user-template-form'
+import SubscriptionTemplateModal from '@/features/templates/dialogs/subscription-template-modal'
+import { createSubscriptionTemplateFormResolver, subscriptionTemplateFormDefaultValues, type SubscriptionTemplatesFromValueInput } from '@/features/templates/forms/subscription-template-form'
 import { useState, useMemo, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { queryClient } from '@/utils/query-client.ts'
@@ -17,16 +17,16 @@ import { cn } from '@/lib/utils'
 import ViewToggle from '@/components/common/view-toggle'
 import { ListGenerator } from '@/components/common/list-generator'
 import { ListGeneratorGrid } from '@/components/common/list-generator-grid'
-import { useUserTemplatesListColumns } from '@/features/templates/components/use-user-templates-list-columns'
+import { useSubscriptionTemplatesListColumns } from '@/features/templates/components/use-subscription-templates-list-columns'
 import { usePersistedViewMode } from '@/hooks/use-persisted-view-mode'
 import { bytesToFormGigabytes } from '@/utils/formatByte'
-import { BulkActionItem, BulkActionsBar } from '@/features/users/components/bulk-actions-bar'
-import { BulkActionAlertDialog } from '@/features/users/components/bulk-action-alert-dialog'
+import { BulkActionItem, BulkActionsBar } from '@/components/common/bulk-actions-bar'
+import { BulkActionAlertDialog } from '@/components/common/bulk-action-alert-dialog'
 import { useAdmin } from '@/hooks/use-admin'
 import { useCommandCreate } from '@/hooks/use-command-create'
 import { hasPermission } from '@/utils/rbac'
 
-type BulkUserTemplateActionType = 'delete' | 'disable' | 'enable'
+type BulkSubscriptionTemplateActionType = 'delete' | 'disable' | 'enable'
 
 interface BulkActionDialogConfig {
   title: string
@@ -37,83 +37,79 @@ interface BulkActionDialogConfig {
   destructive?: boolean
 }
 
-export default function UserTemplates() {
+export default function SubscriptionTemplates() {
   const { admin } = useAdmin()
   const canCreateTemplates = hasPermission(admin, 'templates', 'create')
   const canUpdateTemplates = hasPermission(admin, 'templates', 'update')
   const canDeleteTemplates = hasPermission(admin, 'templates', 'delete')
   const canUseBulkSelection = canUpdateTemplates || canDeleteTemplates
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [editingUserTemplate, setEditingUserTemplate] = useState<UserTemplateResponse | null>(null)
+  const [editingSubscriptionTemplate, setEditingSubscriptionTemplate] = useState<SubscriptionTemplateResponse | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = usePersistedViewMode('view-mode:templates')
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<number[]>([])
-  const [bulkAction, setBulkAction] = useState<BulkUserTemplateActionType | null>(null)
-  const { data: userTemplates, isLoading, isFetching, refetch } = useGetUserTemplates()
+  const [bulkAction, setBulkAction] = useState<BulkSubscriptionTemplateActionType | null>(null)
+  const { data: subscriptionTemplates, isLoading, isFetching, refetch } = useGetSubscriptionTemplates()
   const { t } = useTranslation()
-  const form = useForm<UserTemplatesFromValueInput>({
-    resolver: useMemo(() => createUserTemplateFormResolver(t), [t]),
-    defaultValues: userTemplateFormDefaultValues,
+  const form = useForm<SubscriptionTemplatesFromValueInput>({
+    resolver: useMemo(() => createSubscriptionTemplateFormResolver(t), [t]),
+    defaultValues: subscriptionTemplateFormDefaultValues,
   })
-  const modifyUserTemplateMutation = useModifyUserTemplate()
-  const bulkDeleteUserTemplatesMutation = useBulkDeleteUserTemplates()
-  const bulkDisableUserTemplatesMutation = useBulkDisableUserTemplates()
-  const bulkEnableUserTemplatesMutation = useBulkEnableUserTemplates()
+  const modifySubscriptionTemplateMutation = useModifySubscriptionTemplate()
+  const bulkDeleteSubscriptionTemplatesMutation = useBulkDeleteSubscriptionTemplates()
+  const bulkDisableSubscriptionTemplatesMutation = useBulkDisableSubscriptionTemplates()
+  const bulkEnableSubscriptionTemplatesMutation = useBulkEnableSubscriptionTemplates()
   const dir = useDirDetection()
 
   useEffect(() => {
     const handleOpenDialog = () => {
       if (!canCreateTemplates) return
-      setEditingUserTemplate(null)
-      form.reset(userTemplateFormDefaultValues)
+      setEditingSubscriptionTemplate(null)
+      form.reset(subscriptionTemplateFormDefaultValues)
       setIsDialogOpen(true)
     }
-    window.addEventListener('openUserTemplateDialog', handleOpenDialog)
-    return () => window.removeEventListener('openUserTemplateDialog', handleOpenDialog)
+    window.addEventListener('openSubscriptionTemplateDialog', handleOpenDialog)
+    return () => window.removeEventListener('openSubscriptionTemplateDialog', handleOpenDialog)
   }, [canCreateTemplates, form])
 
   useCommandCreate('template', () => {
     if (!canCreateTemplates) return
-    setEditingUserTemplate(null)
-    form.reset(userTemplateFormDefaultValues)
+    setEditingSubscriptionTemplate(null)
+    form.reset(subscriptionTemplateFormDefaultValues)
     setIsDialogOpen(true)
   })
 
-  const handleEdit = (userTemplate: UserTemplateResponse) => {
+  const handleEdit = (subscriptionTemplate: SubscriptionTemplateResponse) => {
     if (!canUpdateTemplates) return
 
-    setEditingUserTemplate(userTemplate)
+    setEditingSubscriptionTemplate(subscriptionTemplate)
     form.reset({
-      name: userTemplate.name || undefined,
-      status: userTemplate.status || undefined,
-      data_limit: bytesToFormGigabytes(userTemplate.data_limit),
-      hwid_limit: userTemplate.hwid_limit ?? null,
-      expire_duration: userTemplate.expire_duration || undefined,
-      method: userTemplate.extra_settings?.method || undefined,
-      groups: userTemplate.group_ids || undefined,
-      username_prefix: userTemplate.username_prefix || undefined,
-      username_suffix: userTemplate.username_suffix || undefined,
-      on_hold_timeout: typeof userTemplate.on_hold_timeout === 'number' ? userTemplate.on_hold_timeout : undefined,
-      data_limit_reset_strategy: userTemplate.data_limit_reset_strategy || undefined,
-      reset_usages: userTemplate.reset_usages || false,
+      name: subscriptionTemplate.name || undefined,
+      status: subscriptionTemplate.status || undefined,
+      data_limit: bytesToFormGigabytes(subscriptionTemplate.data_limit),
+      hwid_limit: subscriptionTemplate.hwid_limit ?? null,
+      expire_duration: subscriptionTemplate.expire_duration || undefined,
+      method: subscriptionTemplate.extra_settings?.method || undefined,
+      groups: subscriptionTemplate.group_ids || undefined,
+      on_hold_timeout: typeof subscriptionTemplate.on_hold_timeout === 'number' ? subscriptionTemplate.on_hold_timeout : undefined,
+      data_limit_reset_strategy: subscriptionTemplate.data_limit_reset_strategy || undefined,
+      reset_usages: subscriptionTemplate.reset_usages || false,
     })
 
     setIsDialogOpen(true)
   }
 
-  const handleToggleStatus = async (template: UserTemplateResponse) => {
+  const handleToggleStatus = async (template: SubscriptionTemplateResponse) => {
     if (!canUpdateTemplates) return
 
     try {
-      await modifyUserTemplateMutation.mutateAsync({
+      await modifySubscriptionTemplateMutation.mutateAsync({
         templateId: template.id,
         data: {
           name: template.name,
           data_limit: template.data_limit,
           hwid_limit: template.hwid_limit,
           expire_duration: template.expire_duration,
-          username_prefix: template.username_prefix,
-          username_suffix: template.username_suffix,
           group_ids: template.group_ids,
           status: template.status,
           reset_usages: template.reset_usages,
@@ -132,7 +128,7 @@ export default function UserTemplates() {
       })
 
       queryClient.invalidateQueries({
-        queryKey: ['/api/user_templates'],
+        queryKey: ['/api/subscription_templates'],
       })
     } catch {
       toast.error(t('error', { defaultValue: 'Error' }), {
@@ -145,15 +141,15 @@ export default function UserTemplates() {
   }
 
   const filteredTemplates = useMemo(() => {
-    if (!userTemplates || !searchQuery.trim()) return userTemplates
+    if (!subscriptionTemplates || !searchQuery.trim()) return subscriptionTemplates
     const query = searchQuery.toLowerCase().trim()
-    return userTemplates.filter(
-      (template: UserTemplateResponse) =>
-        template.name?.toLowerCase().includes(query) || template.username_prefix?.toLowerCase().includes(query) || template.username_suffix?.toLowerCase().includes(query),
+    return subscriptionTemplates.filter(
+      (template: SubscriptionTemplateResponse) =>
+        template.name?.toLowerCase().includes(query),
     )
-  }, [userTemplates, searchQuery])
+  }, [subscriptionTemplates, searchQuery])
 
-  const listColumns = useUserTemplatesListColumns({
+  const listColumns = useSubscriptionTemplatesListColumns({
     onEdit: handleEdit,
     onToggleStatus: handleToggleStatus,
     canCreate: canCreateTemplates,
@@ -168,7 +164,7 @@ export default function UserTemplates() {
     if (!canDeleteTemplates || !selectedTemplateIds.length) return
 
     try {
-      const response = await bulkDeleteUserTemplatesMutation.mutateAsync({
+      const response = await bulkDeleteSubscriptionTemplatesMutation.mutateAsync({
         data: {
           ids: selectedTemplateIds,
         },
@@ -182,7 +178,7 @@ export default function UserTemplates() {
       clearSelection()
       setBulkAction(null)
       queryClient.invalidateQueries({
-        queryKey: ['/api/user_templates'],
+        queryKey: ['/api/subscription_templates'],
       })
     } catch (error: any) {
       toast.error(t('error', { defaultValue: 'Error' }), {
@@ -200,7 +196,7 @@ export default function UserTemplates() {
     if (!canUpdateTemplates || !selectedDisableEligibleIds.length) return
 
     try {
-      const response = await bulkDisableUserTemplatesMutation.mutateAsync({
+      const response = await bulkDisableSubscriptionTemplatesMutation.mutateAsync({
         data: {
           ids: selectedDisableEligibleIds,
         },
@@ -214,7 +210,7 @@ export default function UserTemplates() {
       clearSelection()
       setBulkAction(null)
       queryClient.invalidateQueries({
-        queryKey: ['/api/user_templates'],
+        queryKey: ['/api/subscription_templates'],
       })
     } catch (error: any) {
       toast.error(t('error', { defaultValue: 'Error' }), {
@@ -227,7 +223,7 @@ export default function UserTemplates() {
     if (!canUpdateTemplates || !selectedEnableEligibleIds.length) return
 
     try {
-      const response = await bulkEnableUserTemplatesMutation.mutateAsync({
+      const response = await bulkEnableSubscriptionTemplatesMutation.mutateAsync({
         data: {
           ids: selectedEnableEligibleIds,
         },
@@ -241,7 +237,7 @@ export default function UserTemplates() {
       clearSelection()
       setBulkAction(null)
       queryClient.invalidateQueries({
-        queryKey: ['/api/user_templates'],
+        queryKey: ['/api/subscription_templates'],
       })
     } catch (error: any) {
       toast.error(t('error', { defaultValue: 'Error' }), {
@@ -250,11 +246,11 @@ export default function UserTemplates() {
     }
   }
 
-  const isCurrentlyLoading = isLoading || (isFetching && !userTemplates)
+  const isCurrentlyLoading = isLoading || (isFetching && !subscriptionTemplates)
   const isEmpty = !isCurrentlyLoading && (!filteredTemplates || filteredTemplates.length === 0) && !searchQuery.trim()
   const isSearchEmpty = !isCurrentlyLoading && (!filteredTemplates || filteredTemplates.length === 0) && searchQuery.trim() !== ''
   const selectedCount = selectedTemplateIds.length
-  const selectedTemplates = (userTemplates || []).filter(template => selectedTemplateIds.includes(template.id))
+  const selectedTemplates = (subscriptionTemplates || []).filter(template => selectedTemplateIds.includes(template.id))
   const selectedEnableEligibleIds = selectedTemplates.filter(template => template.is_disabled).map(template => template.id)
   const selectedDisableEligibleIds = selectedTemplates.filter(template => !template.is_disabled).map(template => template.id)
   const enableEligibleCount = selectedEnableEligibleIds.length
@@ -291,7 +287,7 @@ export default function UserTemplates() {
           : []),
       ]
     : []
-  const bulkActionConfigs: Record<BulkUserTemplateActionType, BulkActionDialogConfig> = {
+  const bulkActionConfigs: Record<BulkSubscriptionTemplateActionType, BulkActionDialogConfig> = {
     delete: {
       title: t('templates.bulkDeleteTitle', { defaultValue: 'Delete Selected User Templates' }),
       description: t('templates.bulkDeletePrompt', {
@@ -300,7 +296,7 @@ export default function UserTemplates() {
       }),
       actionLabel: t('delete'),
       onConfirm: handleBulkDelete,
-      isPending: bulkDeleteUserTemplatesMutation.isPending,
+      isPending: bulkDeleteSubscriptionTemplatesMutation.isPending,
       destructive: true,
     },
     enable: {
@@ -311,7 +307,7 @@ export default function UserTemplates() {
       }),
       actionLabel: t('enable'),
       onConfirm: handleBulkEnable,
-      isPending: bulkEnableUserTemplatesMutation.isPending,
+      isPending: bulkEnableSubscriptionTemplatesMutation.isPending,
     },
     disable: {
       title: t('templates.bulkDisableTitle', { defaultValue: 'Disable Selected User Templates' }),
@@ -321,7 +317,7 @@ export default function UserTemplates() {
       }),
       actionLabel: t('disable'),
       onConfirm: handleBulkDisable,
-      isPending: bulkDisableUserTemplatesMutation.isPending,
+      isPending: bulkDisableSubscriptionTemplatesMutation.isPending,
     },
   }
   const activeBulkActionConfig = bulkAction ? bulkActionConfigs[bulkAction] : null
@@ -376,7 +372,7 @@ export default function UserTemplates() {
               onSelectionChange={ids => setSelectedTemplateIds(ids.map(id => Number(id)))}
               showEmptyState={false}
               renderItem={template => (
-                <UserTemplate
+                <SubscriptionTemplate
                   onEdit={handleEdit}
                   template={template}
                   onToggleStatus={handleToggleStatus}
@@ -441,21 +437,21 @@ export default function UserTemplates() {
       </div>
 
       {(canCreateTemplates || canUpdateTemplates) && (
-        <UserTemplateModal
+        <SubscriptionTemplateModal
           isDialogOpen={isDialogOpen}
           onOpenChange={open => {
-            if (open && editingUserTemplate && !canUpdateTemplates) return
-            if (open && !editingUserTemplate && !canCreateTemplates) return
+            if (open && editingSubscriptionTemplate && !canUpdateTemplates) return
+            if (open && !editingSubscriptionTemplate && !canCreateTemplates) return
             if (!open) {
-              setEditingUserTemplate(null)
-              form.reset(userTemplateFormDefaultValues)
+              setEditingSubscriptionTemplate(null)
+              form.reset(subscriptionTemplateFormDefaultValues)
             }
             setIsDialogOpen(open)
           }}
           form={form}
-          editingUserTemplate={!!editingUserTemplate}
-          editingUserTemplateId={editingUserTemplate?.id}
-          editingUserTemplateDataLimit={editingUserTemplate?.data_limit}
+          editingSubscriptionTemplate={!!editingSubscriptionTemplate}
+          editingSubscriptionTemplateId={editingSubscriptionTemplate?.id}
+          editingSubscriptionTemplateDataLimit={editingSubscriptionTemplate?.data_limit}
         />
       )}
       {activeBulkActionConfig && (

@@ -57,7 +57,7 @@ func TestApplyConfigLiveKeepsOpenConnections(t *testing.T) {
 	back, err := New(
 		context.Background(),
 		xrayConfig,
-		[]*common.User{sessionUser("1.alice", aliceID, sessionTestInbound)},
+		[]*common.Subscription{sessionUser("1.alice", aliceID, sessionTestInbound)},
 		netutil.FindFreePort(),
 		netutil.FindFreePort(),
 		&config.Config{

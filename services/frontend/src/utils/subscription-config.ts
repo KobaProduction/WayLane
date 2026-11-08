@@ -1,5 +1,3 @@
-import { $fetch } from '@/service/http'
-
 export type SubscriptionContentFormat = 'links' | 'links_base64' | 'xray' | 'wireguard' | 'sing_box' | 'clash' | 'clash_meta' | 'outline'
 
 const WIREGUARD_PROTOCOL = 'wireguard://'
@@ -173,12 +171,6 @@ export const fetchSubscriptionBlobFromUrl = (url: string, timeoutMs = 8000) => f
 
 export const fetchSubscriptionContent = (subscribeUrl: string, format: SubscriptionContentFormat, timeoutMs = 8000) =>
   fetchSubscriptionContentFromUrl(buildSubscriptionFormatUrl(subscribeUrl, format), timeoutMs)
-
-export const fetchUserSubscriptionContent = (userId: number, format: SubscriptionContentFormat, timeoutMs = 8000) =>
-  $fetch<string, 'text'>(`/api/user/${userId}/subscription/${format}`, {
-    responseType: 'text',
-    timeout: timeoutMs,
-  })
 
 export const extractNameFromConfigUrl = (url: string): string | null => {
   const trimmedUrl = url.trim()

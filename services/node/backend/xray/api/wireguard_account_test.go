@@ -43,8 +43,8 @@ func TestWireguardKeyToHexRejectsInvalidKeys(t *testing.T) {
 func TestNewWireguardAccountNormalizesPSKAndMessage(t *testing.T) {
 	publicKey := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("P", 32)))
 	psk := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("S", 32)))
-	account, err := NewWireguardAccount(&common.User{
-		Email: "user@example.test",
+	account, err := NewWireguardAccount(&common.Subscription{
+		SubscriptionUuid: "user@example.test",
 		Proxies: &common.Proxy{Wireguard: &common.Wireguard{
 			PublicKey: publicKey, PreSharedKey: psk, PeerIps: []string{"10.0.0.2/32"},
 		}},
@@ -75,7 +75,7 @@ func TestNewWireguardAccountRejectsMalformedPeerIPs(t *testing.T) {
 		{"10.0.0.2"},
 		{"10.0.0.2/32", "bad"},
 	} {
-		user := &common.User{Proxies: &common.Proxy{Wireguard: &common.Wireguard{
+		user := &common.Subscription{Proxies: &common.Proxy{Wireguard: &common.Wireguard{
 			PublicKey: publicKey,
 			PeerIps:   peerIPs,
 		}}}

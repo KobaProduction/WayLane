@@ -15,12 +15,12 @@ import useDynamicErrorHandler from '@/hooks/use-dynamic-errors.ts'
 import {
   DataLimitResetStrategy,
   getGetGroupsSimpleQueryKey,
-  getGetUserTemplatesQueryKey,
-  getGetUserTemplatesSimpleQueryKey,
+  getGetSubscriptionTemplatesQueryKey,
+  getGetSubscriptionTemplatesSimpleQueryKey,
   ShadowsocksMethods,
-  useCreateUserTemplate,
-  useModifyUserTemplate,
-  UserStatusCreate,
+  useCreateSubscriptionTemplate,
+  useModifySubscriptionTemplate,
+  SubscriptionStatusCreate,
 } from '@/service/api'
 import { formatBytes, formGigabytesToBytes } from '@/utils/formatByte'
 import { queryClient } from '@/utils/query-client.ts'
@@ -30,15 +30,15 @@ import { UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { ChevronDown, FileUser, Pencil } from 'lucide-react'
-import { userTemplateFormDefaultValues, type UserTemplatesFromValueInput } from '@/features/templates/forms/user-template-form'
+import { subscriptionTemplateFormDefaultValues, type SubscriptionTemplatesFromValueInput } from '@/features/templates/forms/subscription-template-form'
 
-interface UserTemplatesModalprops {
+interface SubscriptionTemplatesModalprops {
   isDialogOpen: boolean
   onOpenChange: (open: boolean) => void
-  form: UseFormReturn<UserTemplatesFromValueInput>
-  editingUserTemplate: boolean
-  editingUserTemplateId?: number
-  editingUserTemplateDataLimit?: number | null
+  form: UseFormReturn<SubscriptionTemplatesFromValueInput>
+  editingSubscriptionTemplate: boolean
+  editingSubscriptionTemplateId?: number
+  editingSubscriptionTemplateDataLimit?: number | null
 }
 
 type StatusSelectItemProps = {
@@ -60,9 +60,9 @@ const StatusSelect = ({ value, onValueChange, placeholder, children }: { value?:
     if (!statusValue) return placeholder || t('status.active', { defaultValue: 'Active' })
 
     switch (statusValue) {
-      case UserStatusCreate.active:
+      case SubscriptionStatusCreate.active:
         return t('status.active', { defaultValue: 'Active' })
-      case UserStatusCreate.on_hold:
+      case SubscriptionStatusCreate.on_hold:
         return t('status.on_hold', { defaultValue: 'On Hold' })
       default:
         return placeholder || t('status.active', { defaultValue: 'Active' })
@@ -94,9 +94,9 @@ const StatusSelect = ({ value, onValueChange, placeholder, children }: { value?:
 const StatusSelectItem = ({ value, children, onSelect }: StatusSelectItemProps) => {
   const getDotColor = () => {
     switch (value) {
-      case UserStatusCreate.active:
+      case SubscriptionStatusCreate.active:
         return 'bg-green-500'
-      case UserStatusCreate.on_hold:
+      case SubscriptionStatusCreate.on_hold:
         return 'bg-violet-500'
       default:
         return 'bg-gray-500'
@@ -116,14 +116,14 @@ const StatusSelectItem = ({ value, children, onSelect }: StatusSelectItemProps) 
   )
 }
 
-export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, editingUserTemplate, editingUserTemplateId, editingUserTemplateDataLimit }: UserTemplatesModalprops) {
+export default function SubscriptionTemplateModal({ isDialogOpen, onOpenChange, form, editingSubscriptionTemplate, editingSubscriptionTemplateId, editingSubscriptionTemplateDataLimit }: SubscriptionTemplatesModalprops) {
   const dir = useDirDetection()
   const { admin } = useAdmin()
   const { t } = useTranslation()
   const canUseResetStrategy = admin?.role?.features?.can_use_reset_strategy !== false
-  const addUserTemplateMutation = useCreateUserTemplate()
+  const addSubscriptionTemplateMutation = useCreateSubscriptionTemplate()
   const handleError = useDynamicErrorHandler()
-  const modifyUserTemplateMutation = useModifyUserTemplate()
+  const modifySubscriptionTemplateMutation = useModifySubscriptionTemplate()
   const [timeType, setTimeType] = useState<TimeUnit>('seconds')
   const [expireDurationUnit, setExpireDurationUnit] = useState<TimeUnit>('days')
   const [loading, setLoading] = useState(false)
@@ -137,12 +137,12 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
   }, [isDialogOpen])
 
   useEffect(() => {
-    if (!isDialogOpen || editingUserTemplate) return
-    form.reset(userTemplateFormDefaultValues)
+    if (!isDialogOpen || editingSubscriptionTemplate) return
+    form.reset(subscriptionTemplateFormDefaultValues)
     setExpireDurationUnit('days')
     setTimeType('seconds')
     prevStatusForSyncRef.current = undefined
-  }, [isDialogOpen, editingUserTemplate, form])
+  }, [isDialogOpen, editingSubscriptionTemplate, form])
 
   useEffect(() => {
     if (!isDialogOpen) {
@@ -168,7 +168,7 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
     }
     if (prevStatusForSyncRef.current === status) return
     prevStatusForSyncRef.current = status
-    if (status === UserStatusCreate.on_hold) {
+    if (status === SubscriptionStatusCreate.on_hold) {
       form.clearErrors('on_hold_timeout')
       void form.trigger('expire_duration')
     } else {
@@ -179,24 +179,22 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
     }
   }, [status, form, isDialogOpen])
 
-  const onSubmit = async (values: UserTemplatesFromValueInput) => {
+  const onSubmit = async (values: SubscriptionTemplatesFromValueInput) => {
     setLoading(true)
     try {
-      const status = values.status ?? UserStatusCreate.active
+      const status = values.status ?? SubscriptionStatusCreate.active
       const normalizedDataLimitGb = Number(values.data_limit ?? 0)
       const hasDataLimit = Number.isFinite(normalizedDataLimitGb) && normalizedDataLimitGb > 0
       const normalizedHwidLimit = values.hwid_limit == null ? null : Number(values.hwid_limit)
-      // Build payload according to UserTemplateCreate interface
+      // Build payload according to SubscriptionTemplateCreate interface
       const submitData = {
         name: values.name,
-        data_limit: hasDataLimit ? formGigabytesToBytes(normalizedDataLimitGb, editingUserTemplate ? editingUserTemplateDataLimit : undefined) : 0,
+        data_limit: hasDataLimit ? formGigabytesToBytes(normalizedDataLimitGb, editingSubscriptionTemplate ? editingSubscriptionTemplateDataLimit : undefined) : 0,
         hwid_limit: normalizedHwidLimit == null ? null : Number.isFinite(normalizedHwidLimit) ? Math.floor(normalizedHwidLimit) : null,
         expire_duration: values.expire_duration,
-        username_prefix: values.username_prefix || '',
-        username_suffix: values.username_suffix || '',
         group_ids: values.groups, // map groups to group_ids
         status,
-        on_hold_timeout: status === UserStatusCreate.on_hold ? values.on_hold_timeout : undefined,
+        on_hold_timeout: status === SubscriptionStatusCreate.on_hold ? values.on_hold_timeout : undefined,
         data_limit_reset_strategy: canUseResetStrategy && hasDataLimit ? values.data_limit_reset_strategy : DataLimitResetStrategy.no_reset,
         reset_usages: values.reset_usages,
         extra_settings: values.method
@@ -206,9 +204,9 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
           : undefined,
       }
 
-      if (editingUserTemplate && editingUserTemplateId) {
-        await modifyUserTemplateMutation.mutateAsync({
-          templateId: editingUserTemplateId,
+      if (editingSubscriptionTemplate && editingSubscriptionTemplateId) {
+        await modifySubscriptionTemplateMutation.mutateAsync({
+          templateId: editingSubscriptionTemplateId,
           data: submitData,
         })
         toast.success(
@@ -218,19 +216,19 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
           }),
         )
       } else {
-        await addUserTemplateMutation.mutateAsync({
+        await addSubscriptionTemplateMutation.mutateAsync({
           data: submitData,
         })
         toast.success(
           t('templates.createSuccess', {
             name: values.name,
-            defaultValue: 'User Templates «{name}» has been created successfully',
+            defaultValue: 'Subscription template «{name}» has been created successfully',
           }),
         )
       }
       // Invalidate both template list variants used across pages/modals.
-      queryClient.invalidateQueries({ queryKey: getGetUserTemplatesQueryKey() })
-      queryClient.invalidateQueries({ queryKey: getGetUserTemplatesSimpleQueryKey() })
+      queryClient.invalidateQueries({ queryKey: getGetSubscriptionTemplatesQueryKey() })
+      queryClient.invalidateQueries({ queryKey: getGetSubscriptionTemplatesSimpleQueryKey() })
       onOpenChange(false)
       form.reset()
     } catch (error: any) {
@@ -239,8 +237,6 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
         'data_limit',
         'hwid_limit',
         'expire_duration',
-        'username_prefix',
-        'username_suffix',
         'groups',
         'status',
         'on_hold_timeout',
@@ -259,10 +255,10 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
       <DialogContent className="h-auto max-w-[1000px]" onOpenAutoFocus={e => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {editingUserTemplate ? <Pencil className="h-5 w-5" /> : <FileUser className="h-5 w-5" />}
-            <span>{editingUserTemplate ? t('editUserTemplateModal.title') : t('userTemplateModal.title')}</span>
+            {editingSubscriptionTemplate ? <Pencil className="h-5 w-5" /> : <FileUser className="h-5 w-5" />}
+            <span>{editingSubscriptionTemplate ? t('editSubscriptionTemplateModal.title') : t('subscriptionTemplateModal.title')}</span>
           </DialogTitle>
-          <DialogDescription className="sr-only">{t('userTemplateModal.description', { defaultValue: 'Configure user template settings.' })}</DialogDescription>
+          <DialogDescription className="sr-only">{t('subscriptionTemplateModal.description', { defaultValue: 'Configure user template settings.' })}</DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
@@ -292,8 +288,8 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
                         <FormLabel>{t('templates.status')}</FormLabel>
                         <FormControl>
                           <StatusSelect value={field.value} onValueChange={field.onChange} placeholder={t('status.active', { defaultValue: 'Active' })}>
-                            <StatusSelectItem value={UserStatusCreate.active}>{t('status.active', { defaultValue: 'Active' })}</StatusSelectItem>
-                            <StatusSelectItem value={UserStatusCreate.on_hold}>{t('status.on_hold', { defaultValue: 'On Hold' })}</StatusSelectItem>
+                            <StatusSelectItem value={SubscriptionStatusCreate.active}>{t('status.active', { defaultValue: 'Active' })}</StatusSelectItem>
+                            <StatusSelectItem value={SubscriptionStatusCreate.on_hold}>{t('status.on_hold', { defaultValue: 'On Hold' })}</StatusSelectItem>
                           </StatusSelect>
                         </FormControl>
                       </FormItem>
@@ -310,7 +306,7 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
                       <FormControl>
                         <div className="relative">
                           <DecimalInput placeholder={t('templates.dataLimit')} value={field.value} emptyValue={0} zeroValue={0} onValueChange={value => field.onChange(value ?? 0)} className="pr-10" />
-                          <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm font-medium">{t('userDialog.gb', { defaultValue: 'GB' })}</span>
+                          <span className="text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm font-medium">{t('subscriptionDialog.gb', { defaultValue: 'GB' })}</span>
                         </div>
                       </FormControl>
                       {field.value !== null && field.value !== undefined && field.value > 0 && field.value < 1 && (
@@ -339,15 +335,15 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
                         <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder={t('userDialog.resetStrategyNo', { defaultValue: 'No' })} />
+                              <SelectValue placeholder={t('subscriptionDialog.resetStrategyNo', { defaultValue: 'No' })} />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value={DataLimitResetStrategy['no_reset']}>{t('userDialog.resetStrategyNo')}</SelectItem>
-                            <SelectItem value={DataLimitResetStrategy['day']}>{t('userDialog.resetStrategyDaily')}</SelectItem>
-                            <SelectItem value={DataLimitResetStrategy['week']}>{t('userDialog.resetStrategyWeekly')}</SelectItem>
-                            <SelectItem value={DataLimitResetStrategy['month']}>{t('userDialog.resetStrategyMonthly')}</SelectItem>
-                            <SelectItem value={DataLimitResetStrategy['year']}>{t('userDialog.resetStrategyAnnually')}</SelectItem>
+                            <SelectItem value={DataLimitResetStrategy['no_reset']}>{t('subscriptionDialog.resetStrategyNo')}</SelectItem>
+                            <SelectItem value={DataLimitResetStrategy['day']}>{t('subscriptionDialog.resetStrategyDaily')}</SelectItem>
+                            <SelectItem value={DataLimitResetStrategy['week']}>{t('subscriptionDialog.resetStrategyWeekly')}</SelectItem>
+                            <SelectItem value={DataLimitResetStrategy['month']}>{t('subscriptionDialog.resetStrategyMonthly')}</SelectItem>
+                            <SelectItem value={DataLimitResetStrategy['year']}>{t('subscriptionDialog.resetStrategyAnnually')}</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -447,7 +443,7 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
                       return toWholeSeconds(numValue, TIME_UNIT_SECONDS[type])
                     }
 
-                    if (status !== UserStatusCreate.on_hold) {
+                    if (status !== SubscriptionStatusCreate.on_hold) {
                       return <></>
                     }
                     return (
@@ -480,33 +476,6 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
                   }}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="username_prefix"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('templates.prefix')}</FormLabel>
-                      <FormControl>
-                        <Input type="text" placeholder={t('templates.prefix')} {...field} onChange={e => field.onChange(e.target.value)} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="username_suffix"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('templates.suffix')}</FormLabel>
-                      <FormControl>
-                        <Input type="text" placeholder={t('templates.suffix')} {...field} onChange={e => field.onChange(e.target.value)} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
               </div>
               <div className="w-full flex-1 space-y-4">
                 <FormField
@@ -518,7 +487,7 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder={t('userDialog.proxySettings.method', { defaultValue: 'Select Method' })} />
+                            <SelectValue placeholder={t('subscriptionDialog.proxySettings.method', { defaultValue: 'Select Method' })} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -540,8 +509,8 @@ export default function UserTemplateModal({ isDialogOpen, onOpenChange, form, ed
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 {t('cancel')}
               </Button>
-              <LoaderButton type="submit" isLoading={loading} loadingText={editingUserTemplate ? t('modifying', { defaultValue: 'Modifying...' }) : t('creating')}>
-                {editingUserTemplate ? t('modify', { defaultValue: 'Modify' }) : t('create')}
+              <LoaderButton type="submit" isLoading={loading} loadingText={editingSubscriptionTemplate ? t('modifying', { defaultValue: 'Modifying...' }) : t('creating')}>
+                {editingSubscriptionTemplate ? t('modify', { defaultValue: 'Modify' }) : t('create')}
               </LoaderButton>
             </div>
           </form>

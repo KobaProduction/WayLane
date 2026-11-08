@@ -45,15 +45,15 @@ func TestToCommonBalancerInfo(t *testing.T) {
 
 func TestBuildTestRouteRequest(t *testing.T) {
 	req := buildTestRouteRequest(&common.TestRouteRequest{
-		InboundTag:    "in",
-		Network:       "udp",
-		TargetIp:      "1.1.1.1",
-		TargetDomain:  "example.com",
-		TargetPort:    443,
-		Protocol:      "tls",
-		User:          "u",
-		Attributes:    map[string]string{"k": "v"},
-		PublishResult: true,
+		InboundTag:       "in",
+		Network:          "udp",
+		TargetIp:         "1.1.1.1",
+		TargetDomain:     "example.com",
+		TargetPort:       443,
+		Protocol:         "tls",
+		SubscriptionUuid: "u",
+		Attributes:       map[string]string{"k": "v"},
+		PublishResult:    true,
 	})
 	if req.RoutingContext.Network != xnet.Network_UDP {
 		t.Fatalf("network = %v, want UDP", req.RoutingContext.Network)

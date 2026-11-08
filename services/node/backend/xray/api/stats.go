@@ -48,7 +48,7 @@ func (x *XrayHandler) QueryStats(ctx context.Context, pattern string, reset bool
 	return resp, nil
 }
 
-func (x *XrayHandler) GetUserOnlineStats(ctx context.Context, email string) (*common.OnlineStatResponse, error) {
+func (x *XrayHandler) GetSubscriptionOnlineStats(ctx context.Context, email string) (*common.OnlineStatResponse, error) {
 	if email == "" {
 		return nil, errors.New("email required")
 	}
@@ -61,7 +61,7 @@ func (x *XrayHandler) GetUserOnlineStats(ctx context.Context, email string) (*co
 	return &common.OnlineStatResponse{Name: email, Value: resp.GetStat().GetValue()}, nil
 }
 
-func (x *XrayHandler) GetUserOnlineIpListStats(ctx context.Context, email string) (*common.StatsOnlineIpListResponse, error) {
+func (x *XrayHandler) GetSubscriptionOnlineIpListStats(ctx context.Context, email string) (*common.StatsOnlineIpListResponse, error) {
 	if email == "" {
 		return nil, errors.New("email required")
 	}

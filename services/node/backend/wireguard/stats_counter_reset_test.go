@@ -116,10 +116,10 @@ func newCounterTestWG(t *testing.T, client wgClient) *WireGuard {
 	}
 }
 
-func counterTestUser(email, publicKey, peerIP string) *common.User {
-	user := &common.User{
-		Email:   email,
-		Proxies: &common.Proxy{Wireguard: &common.Wireguard{PublicKey: publicKey}},
+func counterTestUser(email, publicKey, peerIP string) *common.Subscription {
+	user := &common.Subscription{
+		SubscriptionUuid: email,
+		Proxies:          &common.Proxy{Wireguard: &common.Wireguard{PublicKey: publicKey}},
 	}
 	if peerIP != "" {
 		user.Inbounds = []string{"wg-test"}
@@ -158,7 +158,7 @@ func TestPeerCounterResetsReportEachByteOnce(t *testing.T) {
 	}
 	sample := func() { wg.updateConnectedPeers(ctx) }
 	pull := func() {
-		resp, err := wg.GetStats(ctx, &common.StatRequest{Type: common.StatType_UsersStat, Reset_: true})
+		resp, err := wg.GetStats(ctx, &common.StatRequest{Type: common.StatType_SubscriptionsStat, Reset_: true})
 		if err != nil {
 			t.Fatalf("GetStats failed: %v", err)
 		}
@@ -178,7 +178,7 @@ func TestPeerCounterResetsReportEachByteOnce(t *testing.T) {
 		}
 	}
 
-	mustSync(wg.SyncUsers(ctx, []*common.User{keep, other}))
+	mustSync(wg.SyncSubscriptions(ctx, []*common.Subscription{keep, other}))
 	move(keys[0], 1000)
 	sample()
 	pull()
@@ -193,7 +193,7 @@ func TestPeerCounterResetsReportEachByteOnce(t *testing.T) {
 	move(keys[0], 25)
 	move(keys[1], 60)
 	kernel.ageHandshake(t, keys[1], time.Minute)
-	mustSync(wg.SyncUsers(ctx, []*common.User{keep, other, third}))
+	mustSync(wg.SyncSubscriptions(ctx, []*common.Subscription{keep, other, third}))
 	move(keys[0], 5000)
 	sample()
 	pull()
@@ -209,16 +209,16 @@ func TestPeerCounterResetsReportEachByteOnce(t *testing.T) {
 	// Removed and re-added before the panel pulled the pending delta.
 	move(keys[1], 300)
 	sample()
-	mustSync(wg.UpdateUsers(ctx, []*common.User{otherWithoutAccess}))
-	mustSync(wg.UpdateUsers(ctx, []*common.User{other}))
+	mustSync(wg.UpdateUsers(ctx, []*common.Subscription{otherWithoutAccess}))
+	mustSync(wg.UpdateUsers(ctx, []*common.Subscription{other}))
 	move(keys[1], 40)
 	sample()
 	pull()
 
 	// Removed, everything reported, then re-added.
-	mustSync(wg.UpdateUsers(ctx, []*common.User{otherWithoutAccess}))
+	mustSync(wg.UpdateUsers(ctx, []*common.Subscription{otherWithoutAccess}))
 	pull()
-	mustSync(wg.UpdateUsers(ctx, []*common.User{other}))
+	mustSync(wg.UpdateUsers(ctx, []*common.Subscription{other}))
 	move(keys[1], 7)
 	sample()
 	pull()

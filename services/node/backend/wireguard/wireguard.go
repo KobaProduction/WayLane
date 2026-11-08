@@ -112,13 +112,13 @@ func (wg *WireGuard) ensureRunningWithManagerLocked() error {
 }
 
 // New creates a new WireGuard backend instance
-func New(cfg *config.Config, wgConfig *Config, users []*common.User) (*WireGuard, error) {
+func New(cfg *config.Config, wgConfig *Config, users []*common.Subscription) (*WireGuard, error) {
 	return newWithManagerFactory(cfg, wgConfig, users, nil)
 }
 
 // newWithManagerFactory is an internal constructor seam for tests and controlled startup injection.
 // Keep unexported; production callers should use New(...).
-func newWithManagerFactory(cfg *config.Config, wgConfig *Config, users []*common.User, managerFactory newManagerFunc) (*WireGuard, error) {
+func newWithManagerFactory(cfg *config.Config, wgConfig *Config, users []*common.Subscription, managerFactory newManagerFunc) (*WireGuard, error) {
 	if managerFactory == nil {
 		if wgConfig != nil && wgConfig.Engine == "amneziawg" {
 			managerFactory = func(name string) (*Manager, error) {
@@ -246,7 +246,7 @@ func (wg *WireGuard) SubscribeLogs(ctx context.Context) <-chan string {
 
 // Restart applies a new configuration dynamically to the WireGuard interface without tearing it down.
 func (wg *WireGuard) Restart() error {
-	// syncMu prevents a concurrent SyncUser/UpdateUsers call from racing between
+	// syncMu prevents a concurrent SyncSubscription/UpdateUsers call from racing between
 	// the GetAll() snapshot and the ReplacePeers kernel call, which would silently
 	// roll back live peer changes.
 	wg.syncMu.Lock()
