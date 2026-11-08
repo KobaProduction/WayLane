@@ -4,7 +4,7 @@ import type { UseFormReturn } from 'react-hook-form'
 export const builtInVariableKeys = [
   'SERVER_IP',
   'SERVER_IPV6',
-  'USERNAME',
+  'SUBSCRIPTION_UUID',
   'DATA_USAGE',
   'DATA_LIMIT',
   'DATA_LEFT',

@@ -7,21 +7,21 @@ import useDirDetection from '@/hooks/use-dir-detection'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { createUserTemplate, useRemoveUserTemplate, UserTemplateCreate, UserTemplateResponse } from '@/service/api'
+import { createSubscriptionTemplate, useRemoveSubscriptionTemplate, SubscriptionTemplateCreate, SubscriptionTemplateResponse } from '@/service/api'
 import { queryClient } from '@/utils/query-client'
 import { translateHtml } from '@/utils/html-translation'
 
-interface UserTemplateActionsMenuProps {
-  template: UserTemplateResponse
-  onEdit: (template: UserTemplateResponse) => void
-  onToggleStatus: (template: UserTemplateResponse) => void
+interface SubscriptionTemplateActionsMenuProps {
+  template: SubscriptionTemplateResponse
+  onEdit: (template: SubscriptionTemplateResponse) => void
+  onToggleStatus: (template: SubscriptionTemplateResponse) => void
   canCreate?: boolean
   canUpdate?: boolean
   canDelete?: boolean
   className?: string
 }
 
-const DeleteAlertDialog = ({ userTemplate, isOpen, onClose, onConfirm }: { userTemplate: UserTemplateResponse; isOpen: boolean; onClose: () => void; onConfirm: () => void }) => {
+const DeleteAlertDialog = ({ subscriptionTemplate, isOpen, onClose, onConfirm }: { subscriptionTemplate: SubscriptionTemplateResponse; isOpen: boolean; onClose: () => void; onConfirm: () => void }) => {
   const { t } = useTranslation()
   const dir = useDirDetection()
 
@@ -29,9 +29,9 @@ const DeleteAlertDialog = ({ userTemplate, isOpen, onClose, onConfirm }: { userT
     <AlertDialog open={isOpen} onOpenChange={onClose}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t('templates.deleteUserTemplateTitle')}</AlertDialogTitle>
+          <AlertDialogTitle>{t('templates.deleteSubscriptionTemplateTitle')}</AlertDialogTitle>
           <AlertDialogDescription>
-            <span dir={dir} dangerouslySetInnerHTML={{ __html: translateHtml(t, 'templates.deleteUserTemplatePrompt', { name: userTemplate.name }) }} />
+            <span dir={dir} dangerouslySetInnerHTML={{ __html: translateHtml(t, 'templates.deleteSubscriptionTemplatePrompt', { name: subscriptionTemplate.name }) }} />
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -45,10 +45,10 @@ const DeleteAlertDialog = ({ userTemplate, isOpen, onClose, onConfirm }: { userT
   )
 }
 
-export default function UserTemplateActionsMenu({ template, onEdit, onToggleStatus, canCreate = true, canUpdate = true, canDelete = true, className }: UserTemplateActionsMenuProps) {
+export default function SubscriptionTemplateActionsMenu({ template, onEdit, onToggleStatus, canCreate = true, canUpdate = true, canDelete = true, className }: SubscriptionTemplateActionsMenuProps) {
   const { t } = useTranslation()
   const dir = useDirDetection()
-  const removeUserTemplateMutation = useRemoveUserTemplate()
+  const removeSubscriptionTemplateMutation = useRemoveSubscriptionTemplate()
   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
   const handleDeleteClick = (event: Event) => {
@@ -62,7 +62,7 @@ export default function UserTemplateActionsMenu({ template, onEdit, onToggleStat
     if (!canDelete) return
 
     try {
-      await removeUserTemplateMutation.mutateAsync({
+      await removeSubscriptionTemplateMutation.mutateAsync({
         templateId: template.id,
       })
       toast.success(t('success', { defaultValue: 'Success' }), {
@@ -72,7 +72,7 @@ export default function UserTemplateActionsMenu({ template, onEdit, onToggleStat
         }),
       })
       setDeleteDialogOpen(false)
-      queryClient.invalidateQueries({ queryKey: ['/api/user_templates'] })
+      queryClient.invalidateQueries({ queryKey: ['/api/subscription_templates'] })
     } catch (error) {
       toast.error(t('error', { defaultValue: 'Error' }), {
         description: t('templates.deleteFailed', {
@@ -87,18 +87,18 @@ export default function UserTemplateActionsMenu({ template, onEdit, onToggleStat
     if (!canCreate) return
 
     try {
-      const newTemplate: UserTemplateCreate = {
+      const newTemplate: SubscriptionTemplateCreate = {
         ...template,
         name: `${template.name} (copy)`,
       }
-      await createUserTemplate(newTemplate)
+      await createSubscriptionTemplate(newTemplate)
       toast.success(t('success', { defaultValue: 'Success' }), {
         description: t('templates.duplicateSuccess', {
           name: template.name,
           defaultValue: 'Template «{name}» has been duplicated successfully',
         }),
       })
-      queryClient.invalidateQueries({ queryKey: ['/api/user_templates'] })
+      queryClient.invalidateQueries({ queryKey: ['/api/subscription_templates'] })
     } catch (error) {
       toast.error(t('error', { defaultValue: 'Error' }), {
         description: t('templates.duplicateFailed', {
@@ -173,7 +173,7 @@ export default function UserTemplateActionsMenu({ template, onEdit, onToggleStat
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {canDelete && <DeleteAlertDialog userTemplate={template} isOpen={isDeleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} onConfirm={handleConfirmDelete} />}
+      {canDelete && <DeleteAlertDialog subscriptionTemplate={template} isOpen={isDeleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} onConfirm={handleConfirmDelete} />}
     </div>
   )
 }

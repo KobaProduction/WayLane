@@ -20,8 +20,8 @@ import { cn } from '@/lib/utils'
 import { queryClient } from '@/utils/query-client'
 import { AdminRoleResponse, getGetRolesQueryKey, getGetRolesSimpleQueryKey, useCreateRole, useDeleteRole, useGetRoles } from '@/service/api'
 
-import { BulkActionAlertDialog } from '@/features/users/components/bulk-action-alert-dialog'
-import { BulkActionItem, BulkActionsBar } from '@/features/users/components/bulk-actions-bar'
+import { BulkActionAlertDialog } from '@/components/common/bulk-action-alert-dialog'
+import { BulkActionItem, BulkActionsBar } from '@/components/common/bulk-actions-bar'
 
 import {
   AdminRoleFormValues,

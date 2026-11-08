@@ -1,19 +1,19 @@
 import { Users, UserCheck, Wifi, Download, Upload } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import type { SystemUsersStats } from '@/service/api'
+import type { SystemSubscriptionsStats } from '@/service/api'
 import { formatBytes } from '@/utils/formatByte'
 import { useTranslation } from 'react-i18next'
 
 /** Operational/business summary only. Host hardware monitoring lives in Grafana. */
-export default function DashboardStatistics({ usersData }: { usersData: SystemUsersStats | undefined }) {
+export default function DashboardStatistics({ usersData }: { usersData: SystemSubscriptionsStats | undefined }) {
   const { t } = useTranslation()
-  const total = Number(usersData?.total_user ?? 0)
-  const active = Number(usersData?.active_users ?? 0)
-  const online = Number(usersData?.online_users ?? 0)
+  const total = Number(usersData?.total_subscriptions ?? 0)
+  const active = Number(usersData?.active_subscriptions ?? 0)
+  const online = Number(usersData?.online_subscriptions ?? 0)
   const upload = Number(usersData?.incoming_bandwidth ?? 0)
   const download = Number(usersData?.outgoing_bandwidth ?? 0)
   const values = [
-    { label: t('dashboardOverview.totalUsers'), value: total.toLocaleString(), Icon: Users },
+    { label: t('dashboardOverview.totalSubscriptions'), value: total.toLocaleString(), Icon: Users },
     { label: t('dashboardOverview.active'), value: active.toLocaleString(), Icon: UserCheck },
     { label: t('dashboardOverview.online'), value: online.toLocaleString(), Icon: Wifi },
     { label: t('dashboardOverview.upload'), value: formatBytes(upload), Icon: Upload },

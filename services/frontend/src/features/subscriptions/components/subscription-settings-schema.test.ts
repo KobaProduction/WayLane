@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import { defaultSubscriptionRules } from './subscription-settings-schema'
+import { builtInVariableKeys, customVariablesSchema, defaultSubscriptionRules } from './subscription-settings-schema'
 
 const matchDefaultRule = (userAgent: string) =>
   defaultSubscriptionRules.find(rule => new RegExp(rule.pattern).test(userAgent))?.target
@@ -18,5 +18,18 @@ describe('default subscription rules', () => {
     expect(matchDefaultRule('InHive/1.0')).toBe('links_base64')
     expect(matchDefaultRule('unknown-client/1.0')).toBe('links_base64')
     expect(defaultSubscriptionRules.some(rule => /inhive/i.test(rule.pattern))).toBe(false)
+  })
+})
+
+
+describe('subscription UUID format variables', () => {
+  it('provides subscription UUID and does not offer retired subscriber usernames', () => {
+    expect(builtInVariableKeys).toContain('SUBSCRIPTION_UUID')
+    expect(builtInVariableKeys).not.toContain('USERNAME')
+  })
+
+  it('reserves SUBSCRIPTION_UUID while allowing UUID placeholders in custom values', () => {
+    expect(customVariablesSchema.safeParse([{ key: 'SUBSCRIPTION_UUID', value: 'override' }]).success).toBe(false)
+    expect(customVariablesSchema.safeParse([{ key: 'CUSTOM_HOST', value: '{SUBSCRIPTION_UUID}.example.com' }]).success).toBe(true)
   })
 })

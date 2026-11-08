@@ -12,7 +12,7 @@ import {
   type AdminSimple,
   type CoreSimple,
   type NodeUsageStat,
-  type UserUsageStat,
+  type SubscriptionUsageStat,
   useGetAdminUsageById,
   useGetAdminUsageByUsername,
   useGetAdminsSimple,
@@ -20,7 +20,7 @@ import {
   useGetNodesSimple,
   type NodeSimple,
   useGetUsage,
-  useGetUsersUsage,
+  useGetSubscriptionUsageMetrics,
 } from '@/service/api'
 import { formatBytes, formatGigabytes } from '@/utils/formatByte'
 import { getChartSeriesColor } from '@/utils/chart-colors'
@@ -66,7 +66,7 @@ type NodePieChartDataPoint = {
   fill: string
 }
 
-type UsageStat = NodeUsageStat | UserUsageStat
+type UsageStat = NodeUsageStat | SubscriptionUsageStat
 type UsageBreakdown = 'node' | 'core' | 'admin'
 type ChartSeries = {
   id: number
@@ -79,16 +79,16 @@ const NO_ADMIN_SERIES_ID = 0
 const OTHER_ADMINS_SERIES_ID = -2
 const MAX_ADMIN_SERIES = 9
 
-const isNodeUsageStat = (point: NodeUsageStat | UserUsageStat): point is NodeUsageStat => 'uplink' in point && 'downlink' in point
+const isNodeUsageStat = (point: NodeUsageStat | SubscriptionUsageStat): point is NodeUsageStat => 'uplink' in point && 'downlink' in point
 
-const getTrafficBytes = (point: NodeUsageStat | UserUsageStat) => {
+const getTrafficBytes = (point: NodeUsageStat | SubscriptionUsageStat) => {
   if ('total_traffic' in point) {
     return Number(point.total_traffic || 0)
   }
   return Number(point.uplink || 0) + Number(point.downlink || 0)
 }
 
-const getDirectionalTraffic = (point: NodeUsageStat | UserUsageStat) => {
+const getDirectionalTraffic = (point: NodeUsageStat | SubscriptionUsageStat) => {
   if (isNodeUsageStat(point) && !('total_traffic' in point)) {
     return {
       uplink: Number(point.uplink || 0),
@@ -287,7 +287,7 @@ export function AllNodesStackedBarChart() {
   const chartViewType = useChartViewType()
   const { admin } = useAdmin()
   const canBreakdownByCore = hasPermission(admin, 'cores', 'read_simple')
-  const canBreakdownByAdmin = hasScopeAll(admin, 'users', 'read') && hasPermission(admin, 'admins', 'read_simple')
+  const canBreakdownByAdmin = hasScopeAll(admin, 'subscriptions', 'read') && hasPermission(admin, 'admins', 'read_simple')
   const { data: nodesResponse } = useGetNodesSimple({ all: true }, { query: { enabled: true } })
   const { data: coresResponse } = useGetCoresSimple({ all: true }, { query: { enabled: canBreakdownByCore } })
   const { resolvedTheme } = useTheme()
@@ -374,7 +374,7 @@ export function AllNodesStackedBarChart() {
     data: adminBreakdownData,
     isLoading: isLoadingAdminBreakdown,
     error: adminBreakdownError,
-  } = useGetUsersUsage(adminBreakdownParams, {
+  } = useGetSubscriptionUsageMetrics(adminBreakdownParams, {
     query: {
       enabled: isAdminBreakdown,
       refetchInterval: 1000 * 60 * 5,

@@ -1,9 +1,9 @@
-import { AdminDetails, SystemUsersStats, useGetSystemUsersStats } from '@/service/api'
+import { AdminDetails, SystemSubscriptionsStats, useGetSystemSubscriptionsStats } from '@/service/api'
 import { UserCog, Users } from 'lucide-react'
 import { Suspense, lazy, useEffect, useState, type ComponentProps } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Skeleton } from '@/components/ui/skeleton'
-import UserStatisticsCard from './users-statistics-card'
+import SubscriptionStatisticsCard from './subscriptions-statistics-card'
 
 const DataUsageChart = lazy(() => import('./data-usage-chart'))
 
@@ -45,7 +45,7 @@ const AdminStatisticsCard = ({
   skipStatsFetch = false,
 }: {
   admin: DashboardAdmin | undefined
-  systemStats: SystemUsersStats | undefined
+  systemStats: SystemSubscriptionsStats | undefined
   showAdminInfo?: boolean
   currentAdmin?: AdminDetails | undefined
   skipStatsFetch?: boolean
@@ -58,7 +58,7 @@ const AdminStatisticsCard = ({
   const shouldFetchStats = !skipStatsFetch
 
   // Fetch system stats specific to this admin
-  const { data: adminSystemStats } = useGetSystemUsersStats(systemStatsParams, {
+  const { data: adminSystemStats } = useGetSystemSubscriptionsStats(systemStatsParams, {
     query: {
       enabled: shouldFetchStats,
       refetchInterval: 5000,
@@ -81,7 +81,7 @@ const AdminStatisticsCard = ({
           </div>
         </div>
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          <UserStatisticsCard data={statsToUse} />
+          <SubscriptionStatisticsCard data={statsToUse} />
           <DeferredDataUsageChart adminUsername={shouldScopeAdminData ? admin.username : undefined} />
         </div>
       </div>
@@ -89,7 +89,7 @@ const AdminStatisticsCard = ({
 
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-      <UserStatisticsCard data={statsToUse} />
+      <SubscriptionStatisticsCard data={statsToUse} />
       <DeferredDataUsageChart adminUsername={shouldScopeAdminData ? admin.username : undefined} />
     </div>
   )

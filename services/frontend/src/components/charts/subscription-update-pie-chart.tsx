@@ -13,14 +13,14 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { type ChartConfig, ChartContainer, ChartTooltip } from '@/components/ui/chart'
 import { Skeleton } from '@/components/ui/skeleton'
-import UserSubUpdateStatsModal from '@/features/users/dialogs/user-sub-update-stats-modal'
+import SubscriptionUpdateStatsModal from '@/features/subscriptions/dialogs/subscription-update-stats-modal'
 import useDirDetection from '@/hooks/use-dir-detection'
 import { useChartViewType } from '@/hooks/use-chart-view-type'
 import {
   Period,
-  type GetUsersSubUpdateChartParams,
-  type UserSubscriptionUpdateChartSegment,
-  useGetUsersSubUpdateChart,
+  type GetSubscriptionClientUpdateMetricsParams,
+  type SubscriptionUpdateChartSegment,
+  useGetSubscriptionClientUpdateMetrics,
 } from '@/service/api'
 import {
   CHART_PERIOD_OVERRIDE_AUTO,
@@ -42,12 +42,12 @@ import { EmptyState } from './empty-state'
 import PeriodSelector from './period-selector'
 import TimeSelector, { TRAFFIC_TIME_SELECTOR_SHORTCUTS } from './time-selector'
 
-interface UserSubUpdatePieChartProps {
-  username?: string
+interface SubscriptionUpdatePieChartProps {
+  subscriptionUuid?: string
   adminId?: number
 }
 
-type SegmentWithColor = UserSubscriptionUpdateChartSegment & {
+type SegmentWithColor = SubscriptionUpdateChartSegment & {
   key: string
   color: string
   count: number
@@ -207,7 +207,7 @@ function SeriesTooltip({
   )
 }
 
-function UserSubUpdatePieChart({ username, adminId }: UserSubUpdatePieChartProps) {
+function SubscriptionUpdatePieChart({ subscriptionUuid, adminId }: SubscriptionUpdatePieChartProps) {
   const { t, i18n } = useTranslation()
   const dir = useDirDetection()
   const { resolvedTheme } = useTheme()
@@ -249,14 +249,14 @@ function UserSubUpdatePieChart({ username, adminId }: UserSubUpdatePieChartProps
   const activePeriod = activeQueryRange.period
 
   const params = useMemo(() => {
-    const payload: GetUsersSubUpdateChartParams = {
+    const payload: GetSubscriptionClientUpdateMetricsParams = {
       period: activePeriod,
       start: activeQueryRange.startDate,
       end: activeQueryRange.endDate,
     }
 
-    if (username) {
-      payload.username = username
+    if (subscriptionUuid) {
+      payload.subscription_uuid = subscriptionUuid
     }
 
     if (selectedAdminId != null) {
@@ -264,9 +264,9 @@ function UserSubUpdatePieChart({ username, adminId }: UserSubUpdatePieChartProps
     }
 
     return payload
-  }, [username, selectedAdminId, activePeriod, activeQueryRange.startDate, activeQueryRange.endDate])
+  }, [subscriptionUuid, selectedAdminId, activePeriod, activeQueryRange.startDate, activeQueryRange.endDate])
 
-  const { data, isLoading, error } = useGetUsersSubUpdateChart(params, {
+  const { data, isLoading, error } = useGetSubscriptionClientUpdateMetrics(params, {
     query: {
       refetchInterval: 60_000,
     },
@@ -749,7 +749,7 @@ function UserSubUpdatePieChart({ username, adminId }: UserSubUpdatePieChartProps
       )}
     </Card>
 
-    <UserSubUpdateStatsModal
+    <SubscriptionUpdateStatsModal
       open={modalOpen}
       onClose={() => setModalOpen(false)}
       data={selectedData}
@@ -788,4 +788,4 @@ function LoadingState() {
   )
 }
 
-export default UserSubUpdatePieChart
+export default SubscriptionUpdatePieChart

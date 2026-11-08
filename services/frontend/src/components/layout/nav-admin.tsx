@@ -52,7 +52,7 @@ const getProgressPct = (used: number, total: number) => {
   return Math.min(100, Math.max(0, (used / total) * 100))
 }
 
-export function NavUser({
+export function NavAdmin({
   username,
   admin,
 }: {

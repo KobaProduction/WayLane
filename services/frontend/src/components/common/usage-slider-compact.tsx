@@ -27,7 +27,7 @@ const UsageSliderCompact: React.FC<UsageSliderProps> = ({ used, total = 0, statu
           {formatBytes(used)} / {isUnlimited ? <span className="font-system-ui">∞</span> : formatBytes(total)}
         </span>
         <div className={cn(isMobile ? 'block' : 'hidden md:block', 'leading-tight')}>
-          <span>{t('usersTable.total')}:</span> <span dir="ltr">{formatBytes(totalUsedTraffic || 0)}</span>
+          <span>{t('subscriptionsTable.total')}:</span> <span dir="ltr">{formatBytes(totalUsedTraffic || 0)}</span>
         </div>
       </div>
     </div>

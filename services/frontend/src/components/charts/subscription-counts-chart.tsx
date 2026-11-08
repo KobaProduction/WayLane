@@ -7,7 +7,7 @@ import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import AdminFilterCombobox from '@/components/common/admin-filter-combobox'
-import UserCountStatsModal from '@/features/users/dialogs/user-count-stats-modal'
+import SubscriptionCountStatsModal from '@/features/subscriptions/dialogs/subscription-count-stats-modal'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { type ChartConfig, ChartContainer, ChartTooltip } from '@/components/ui/chart'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import useDirDetection from '@/hooks/use-dir-detection'
 import { useChartViewType } from '@/hooks/use-chart-view-type'
-import { Period, UserCountMetric, type GetUsersCountMetricParams, type NodeSimple, type UserCountMetricStat, useGetUsersCountMetric } from '@/service/api'
+import { Period, SubscriptionCountMetric, type GetSubscriptionCountMetricsParams, type NodeSimple, type SubscriptionCountMetricStat, useGetSubscriptionCountMetrics } from '@/service/api'
 import {
   CHART_PERIOD_OVERRIDE_AUTO,
   type ChartPeriodOverride,
@@ -57,7 +57,7 @@ type CountPieDataPoint = {
   fill: string
 }
 
-type UserCountsChartProps = {
+type SubscriptionCountsChartProps = {
   nodeId?: number
   isSudo: boolean
   nodesData?: NodeSimple[]
@@ -179,12 +179,12 @@ function CountPieTooltip({ active, payload }: TooltipProps<number, string>) {
   )
 }
 
-export function UserCountsChart({ nodeId, isSudo, nodesData = [] }: UserCountsChartProps) {
+export function SubscriptionCountsChart({ nodeId, isSudo, nodesData = [] }: SubscriptionCountsChartProps) {
   const { t, i18n } = useTranslation()
   const dir = useDirDetection()
   const chartViewType = useChartViewType()
 
-  const [selectedMetric, setSelectedMetric] = useState<UserCountMetric>(UserCountMetric.online)
+  const [selectedMetric, setSelectedMetric] = useState<SubscriptionCountMetric>(SubscriptionCountMetric.online)
   const [chartView, setChartView] = useState<'bar' | 'pie'>('bar')
   const [selectedAdmin, setSelectedAdmin] = useState<string>('all')
   const [groupByNode, setGroupByNode] = useState(false)
@@ -208,13 +208,13 @@ export function UserCountsChart({ nodeId, isSudo, nodesData = [] }: UserCountsCh
   }, [showCustomRange, customRange, selectedTime, periodOverride])
 
   const activePeriod = activeQueryRange.period
-  const canGroupByNode = isSudo && nodeId === undefined && selectedMetric === UserCountMetric.online
+  const canGroupByNode = isSudo && nodeId === undefined && selectedMetric === SubscriptionCountMetric.online
   const effectiveGroupByNode = canGroupByNode && groupByNode
   const isNodeScopedCounts = nodeId !== undefined || effectiveGroupByNode
-  const effectiveMetric = isNodeScopedCounts ? UserCountMetric.online : selectedMetric
+  const effectiveMetric = isNodeScopedCounts ? SubscriptionCountMetric.online : selectedMetric
   const adminParam = useMemo(() => (isSudo && selectedAdmin !== 'all' ? [selectedAdmin] : undefined), [isSudo, selectedAdmin])
 
-  const metricParams = useMemo<GetUsersCountMetricParams>(
+  const metricParams = useMemo<GetSubscriptionCountMetricsParams>(
     () => ({
       period: activePeriod,
       start: activeQueryRange.startDate,
@@ -230,41 +230,41 @@ export function UserCountsChart({ nodeId, isSudo, nodesData = [] }: UserCountsCh
     data: metricCountsData,
     isLoading: isLoadingMetricCounts,
     error: metricCountsError,
-  } = useGetUsersCountMetric(effectiveMetric, metricParams, {
+  } = useGetSubscriptionCountMetrics(effectiveMetric, metricParams, {
     query: {
       refetchInterval: 1000 * 60 * 5,
     },
   })
 
-  const metricLabels = useMemo<Record<UserCountMetric, string>>(
+  const metricLabels = useMemo<Record<SubscriptionCountMetric, string>>(
     () => ({
-      [UserCountMetric.online]: t('statistics.onlineUsers', { defaultValue: 'Online Users' }),
-      [UserCountMetric.expired]: t('statistics.expiredUsers', { defaultValue: 'Expired Users' }),
-      [UserCountMetric.limited]: t('statistics.limitedUsers', { defaultValue: 'Limited Users' }),
+      [SubscriptionCountMetric.online]: t('statistics.onlineSubscriptions', { defaultValue: 'Online subscriptions' }),
+      [SubscriptionCountMetric.expired]: t('statistics.expiredSubscriptions', { defaultValue: 'Expired subscriptions' }),
+      [SubscriptionCountMetric.limited]: t('statistics.limitedSubscriptions', { defaultValue: 'Limited subscriptions' }),
     }),
     [t],
   )
 
-  const metricColors = useMemo<Record<UserCountMetric, string>>(
+  const metricColors = useMemo<Record<SubscriptionCountMetric, string>>(
     () => ({
-      [UserCountMetric.online]: 'hsl(var(--chart-2))',
-      [UserCountMetric.expired]: 'hsl(var(--chart-4))',
-      [UserCountMetric.limited]: 'hsl(var(--chart-5))',
+      [SubscriptionCountMetric.online]: 'hsl(var(--chart-2))',
+      [SubscriptionCountMetric.expired]: 'hsl(var(--chart-4))',
+      [SubscriptionCountMetric.limited]: 'hsl(var(--chart-5))',
     }),
     [],
   )
 
-  const metricIcons = useMemo<Record<UserCountMetric, LucideIcon>>(
+  const metricIcons = useMemo<Record<SubscriptionCountMetric, LucideIcon>>(
     () => ({
-      [UserCountMetric.online]: Wifi,
-      [UserCountMetric.expired]: TimerOff,
-      [UserCountMetric.limited]: Gauge,
+      [SubscriptionCountMetric.online]: Wifi,
+      [SubscriptionCountMetric.expired]: TimerOff,
+      [SubscriptionCountMetric.limited]: Gauge,
     }),
     [],
   )
 
   const renderMetricLabel = useCallback(
-    (metric: UserCountMetric, trigger = false) => {
+    (metric: SubscriptionCountMetric, trigger = false) => {
       const Icon = metricIcons[metric]
       if (trigger) {
         return (
@@ -296,7 +296,7 @@ export function UserCountsChart({ nodeId, isSudo, nodesData = [] }: UserCountsCh
     [nodesData, t],
   )
 
-  const metricStatsByGroup = useMemo(() => toStatsRecord<UserCountMetricStat>(metricCountsData?.stats), [metricCountsData?.stats])
+  const metricStatsByGroup = useMemo(() => toStatsRecord<SubscriptionCountMetricStat>(metricCountsData?.stats), [metricCountsData?.stats])
 
   const groupKeys = useMemo(() => {
     const keys = Object.keys(metricStatsByGroup)
@@ -459,8 +459,8 @@ export function UserCountsChart({ nodeId, isSudo, nodesData = [] }: UserCountsCh
   }, [chartView, effectiveGroupByNode])
 
   useEffect(() => {
-    if (isNodeScopedCounts && selectedMetric !== UserCountMetric.online) {
-      setSelectedMetric(UserCountMetric.online)
+    if (isNodeScopedCounts && selectedMetric !== SubscriptionCountMetric.online) {
+      setSelectedMetric(SubscriptionCountMetric.online)
     }
   }, [isNodeScopedCounts, selectedMetric])
 
@@ -551,14 +551,14 @@ export function UserCountsChart({ nodeId, isSudo, nodesData = [] }: UserCountsCh
                 </div>
               </div>
               {isNodeScopedCounts ? (
-                <div className="bg-muted/20 text-muted-foreground flex h-9 w-full items-center gap-1.5 rounded-md border px-3 text-xs sm:w-[204px]">{renderMetricLabel(UserCountMetric.online)}</div>
+                <div className="bg-muted/20 text-muted-foreground flex h-9 w-full items-center gap-1.5 rounded-md border px-3 text-xs sm:w-[204px]">{renderMetricLabel(SubscriptionCountMetric.online)}</div>
               ) : (
-                <Select value={selectedMetric} onValueChange={value => setSelectedMetric(value as UserCountMetric)}>
+                <Select value={selectedMetric} onValueChange={value => setSelectedMetric(value as SubscriptionCountMetric)}>
                   <SelectTrigger className="h-9 w-full text-xs sm:w-[204px]">{renderMetricLabel(selectedMetric, true)}</SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={UserCountMetric.online}>{renderMetricLabel(UserCountMetric.online)}</SelectItem>
-                    <SelectItem value={UserCountMetric.expired}>{renderMetricLabel(UserCountMetric.expired)}</SelectItem>
-                    <SelectItem value={UserCountMetric.limited}>{renderMetricLabel(UserCountMetric.limited)}</SelectItem>
+                    <SelectItem value={SubscriptionCountMetric.online}>{renderMetricLabel(SubscriptionCountMetric.online)}</SelectItem>
+                    <SelectItem value={SubscriptionCountMetric.expired}>{renderMetricLabel(SubscriptionCountMetric.expired)}</SelectItem>
+                    <SelectItem value={SubscriptionCountMetric.limited}>{renderMetricLabel(SubscriptionCountMetric.limited)}</SelectItem>
                   </SelectContent>
                 </Select>
               )}
@@ -773,7 +773,7 @@ export function UserCountsChart({ nodeId, isSudo, nodesData = [] }: UserCountsCh
         </CardContent>
       </Card>
 
-      <UserCountStatsModal
+      <SubscriptionCountStatsModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         data={selectedData}

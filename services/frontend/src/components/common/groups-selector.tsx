@@ -135,7 +135,7 @@ export default function GroupsSelector<T extends FieldValues>({ control, name, o
         </div>
         {selectedGroups.length > 0 && (
           <div className="text-muted-foreground text-sm">
-            {t('userDialog.selectedGroups', {
+            {t('subscriptionDialog.selectedGroups', {
               count: selectedGroups.length,
               defaultValue: '{{count}} groups selected',
             })}

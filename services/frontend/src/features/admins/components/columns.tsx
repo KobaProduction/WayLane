@@ -1,6 +1,6 @@
 import { AdminDetails } from '@/service/api'
 import { ColumnDef, Row, Table } from '@tanstack/react-table'
-import { ChevronDown, MoreVertical, Pen, Power, PowerOff, RefreshCw, Trash2, Users, UserCheck, UserMinus, UserRound, UserRoundKey, UserX } from 'lucide-react'
+import { ChevronDown, MoreVertical, Pen, Power, PowerOff, RefreshCw, Trash2, Users, UserRound, UserRoundKey } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { AdminStatusBadge } from './admin-status-badge'
@@ -18,9 +18,6 @@ interface ColumnSetupProps {
   onDelete?: (admin: AdminDetails) => void
   toggleStatus?: (admin: AdminDetails) => void
   onResetUsage?: (admin: AdminDetails) => void
-  onDisableAllActiveUsers?: (admin: AdminDetails) => void
-  onActivateAllDisabledUsers?: (admin: AdminDetails) => void
-  onRemoveAllUsers?: (admin: AdminDetails) => void
 }
 
 const createSortButton = (
@@ -72,9 +69,6 @@ export const setupColumns = ({
   onDelete,
   toggleStatus,
   onResetUsage,
-  onDisableAllActiveUsers,
-  onActivateAllDisabledUsers,
-  onRemoveAllUsers,
 }: ColumnSetupProps): ColumnDef<AdminDetails>[] => [
   {
     id: 'select',
@@ -136,7 +130,7 @@ export const setupColumns = ({
   },
   {
     id: 'status',
-    header: () => <div className="flex items-center text-xs capitalize">{t('usersTable.status')}</div>,
+    header: () => <div className="flex items-center text-xs capitalize">{t('subscriptionsTable.status')}</div>,
     cell: ({ row }) => {
       const status = getAdminStatus(row.original)
       return (
@@ -189,12 +183,7 @@ export const setupColumns = ({
     cell: ({ row }) => {
       const isOwnerTarget = isOwner(row.original)
       const nonDestructiveActionCount =
-        (onEdit ? 1 : 0) +
-        (onResetUsage ? 1 : 0) +
-        (!isOwnerTarget && toggleStatus ? 1 : 0) +
-        (!isOwnerTarget && onDisableAllActiveUsers ? 1 : 0) +
-        (!isOwnerTarget && onActivateAllDisabledUsers ? 1 : 0) +
-        (!isOwnerTarget && onRemoveAllUsers ? 1 : 0)
+        (onEdit ? 1 : 0) + (onResetUsage ? 1 : 0) + (!isOwnerTarget && toggleStatus ? 1 : 0)
       const canDeleteAdmin = !isOwnerTarget && row.original.username !== currentAdminUsername && !!onDelete
       const hasActions = nonDestructiveActionCount > 0 || canDeleteAdmin
 
@@ -243,43 +232,6 @@ export const setupColumns = ({
                 >
                   {isAdminDisabled(row.original) ? <Power className="mr-2 h-4 w-4" /> : <PowerOff className="mr-2 h-4 w-4" />}
                   {isAdminDisabled(row.original) ? t('enable') : t('disable')}
-                </DropdownMenuItem>
-              )}
-              {!isOwnerTarget && onDisableAllActiveUsers && (
-                <DropdownMenuItem
-                  onSelect={e => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onDisableAllActiveUsers(row.original)
-                  }}
-                >
-                  <UserMinus className="mr-2 h-4 w-4" />
-                  {t('admins.disableAllActiveUsers')}
-                </DropdownMenuItem>
-              )}
-              {!isOwnerTarget && onActivateAllDisabledUsers && (
-                <DropdownMenuItem
-                  onSelect={e => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onActivateAllDisabledUsers(row.original)
-                  }}
-                >
-                  <UserCheck className="mr-2 h-4 w-4" />
-                  {t('admins.activateAllDisabledUsers')}
-                </DropdownMenuItem>
-              )}
-              {!isOwnerTarget && onRemoveAllUsers && (
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onSelect={e => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onRemoveAllUsers(row.original)
-                  }}
-                >
-                  <UserX className="mr-2 h-4 w-4" />
-                  {t('admins.removeAllUsers')}
                 </DropdownMenuItem>
               )}
               {canDeleteAdmin && (

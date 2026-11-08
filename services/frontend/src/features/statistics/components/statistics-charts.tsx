@@ -1,19 +1,19 @@
 import { Skeleton } from '@/components/ui/skeleton'
-import { NodeRealtimeStats, NodeSimple, SystemResourceStats, SystemUsersStats, useRealtimeNodeStats } from '@/service/api'
+import { NodeRealtimeStats, NodeSimple, SystemResourceStats, SystemSubscriptionsStats, useRealtimeNodeStats } from '@/service/api'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CostumeBarChart } from '@/components/charts/costume-bar-chart'
 import { EmptyState } from '@/components/charts/empty-state'
-import UserSubUpdatePieChart from '@/components/charts/user-sub-update-pie-chart'
+import SubscriptionUpdatePieChart from '@/components/charts/subscription-update-pie-chart'
 import SystemStatisticsSection from './system-statistics-section'
 import { AllNodesStackedBarChart } from '@/components/charts/all-nodes-stacked-bar-chart'
 import { AreaCostumeChart } from '@/components/charts/area-costume-chart'
 import { BarChart3 } from 'lucide-react'
-import { UserCountsChart } from '@/components/charts/user-counts-chart'
+import { SubscriptionCountsChart } from '@/components/charts/subscription-counts-chart'
 
 interface StatisticsChartsProps {
   data?: SystemResourceStats
-  usersData?: SystemUsersStats
+  usersData?: SystemSubscriptionsStats
   isLoading: boolean
   error?: { message?: string } | null
   selectedServer: string
@@ -141,11 +141,11 @@ export default function StatisticsCharts({ data, usersData, isLoading, error, se
           </div>
         )}
         <div className="transform-gpu">
-          <UserCountsChart nodeId={selectedNodeId} isSudo={canViewNodeStats} nodesData={nodesData} />
+          <SubscriptionCountsChart nodeId={selectedNodeId} isSudo={canViewNodeStats} nodesData={nodesData} />
         </div>
         {actualSelectedServer === 'master' && (
           <div className="transform-gpu">
-            <UserSubUpdatePieChart />
+            <SubscriptionUpdatePieChart />
           </div>
         )}
         <div className="transform-gpu">

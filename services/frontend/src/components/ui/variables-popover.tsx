@@ -17,7 +17,7 @@ export interface CustomVariableDefinition {
 export const CUSTOM_VARIABLE_SAMPLE_VALUES: Record<string, string | number> = {
   SERVER_IP: '203.0.113.10',
   SERVER_IPV6: '[2001:db8::10]',
-  USERNAME: 'alice',
+  SUBSCRIPTION_UUID: '92ab38da-71d4-4f8b-af64-ae9d82c356f3',
   DATA_USAGE: '2 GB',
   DATA_LEFT: '8 GB',
   DATA_LIMIT: '10 GB',
@@ -31,7 +31,7 @@ export const CUSTOM_VARIABLE_SAMPLE_VALUES: Record<string, string | number> = {
   PROFILE_TITLE: 'Alice Profile',
   PROTOCOL: 'vless',
   TRANSPORT: 'ws',
-  url: 'https://example.com/sub/alice',
+  url: 'https://example.com/sub/92ab38da-71d4-4f8b-af64-ae9d82c356f3',
   format: 'links',
 }
 
@@ -95,7 +95,7 @@ export function VariablesPopover({
 
   const handleCopy = async (text: string) => {
     await copy(text)
-    toast.success(t('usersTable.copied'))
+    toast.success(t('subscriptionsTable.copied'))
   }
 
   const VariableItem = ({ variable, translationKey }: { variable: string; translationKey: string }) => (
@@ -131,7 +131,7 @@ export function VariablesPopover({
         </>
       )}
       {includeFormat && <VariableItem variable="{format}" translationKey="hostsDialog.variables.format" />}
-      <VariableItem variable="{USERNAME}" translationKey="hostsDialog.variables.username" />
+      <VariableItem variable="{SUBSCRIPTION_UUID}" translationKey="hostsDialog.variables.subscription_uuid" />
       <VariableItem variable="{DATA_USAGE}" translationKey="hostsDialog.variables.data_usage" />
       <VariableItem variable="{DATA_LEFT}" translationKey="hostsDialog.variables.data_left" />
       <VariableItem variable="{DATA_LIMIT}" translationKey="hostsDialog.variables.data_limit" />
@@ -191,7 +191,7 @@ export function VariablesList({
 
   const handleCopy = async (text: string) => {
     await copy(text)
-    toast.success(t('usersTable.copied'))
+    toast.success(t('subscriptionsTable.copied'))
   }
 
   const VariableItem = ({ variable, translationKey }: { variable: string; translationKey: string }) => (
@@ -214,7 +214,7 @@ export function VariablesList({
         </>
       )}
       {includeFormat && <VariableItem variable="{format}" translationKey="hostsDialog.variables.format" />}
-      <VariableItem variable="{USERNAME}" translationKey="hostsDialog.variables.username" />
+      <VariableItem variable="{SUBSCRIPTION_UUID}" translationKey="hostsDialog.variables.subscription_uuid" />
       <VariableItem variable="{DATA_USAGE}" translationKey="hostsDialog.variables.data_usage" />
       <VariableItem variable="{USAGE_PERCENTAGE}" translationKey="hostsDialog.variables.usage_percentage" />
       <VariableItem variable="{DATA_LEFT}" translationKey="hostsDialog.variables.data_left" />
@@ -250,7 +250,7 @@ export function CustomVariablesPopover({ customVariables, side = 'bottom', align
 
   const handleCopy = async (text: string) => {
     await copy(text)
-    toast.success(t('usersTable.copied'))
+    toast.success(t('subscriptionsTable.copied'))
   }
 
   return (

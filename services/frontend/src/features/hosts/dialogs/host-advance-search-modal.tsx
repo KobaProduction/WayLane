@@ -7,7 +7,7 @@ import { LoaderButton } from '@/components/ui/loader-button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { HostAdvanceSearchFormValues } from '@/features/hosts/forms/host-advance-search-form'
 import useDirDetection from '@/hooks/use-dir-detection'
-import { ProxyHostSecurity, UserStatus } from '@/service/api'
+import { ProxyHostSecurity, SubscriptionStatus } from '@/service/api'
 import { Search, X } from 'lucide-react'
 import type { UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -22,11 +22,11 @@ interface HostAdvanceSearchModalProps {
 }
 
 const statusOptions = [
-  { value: UserStatus.active, label: 'hostsDialog.status.active' },
-  { value: UserStatus.disabled, label: 'hostsDialog.status.disabled' },
-  { value: UserStatus.limited, label: 'hostsDialog.status.limited' },
-  { value: UserStatus.expired, label: 'hostsDialog.status.expired' },
-  { value: UserStatus.on_hold, label: 'hostsDialog.status.onHold' },
+  { value: SubscriptionStatus.active, label: 'hostsDialog.status.active' },
+  { value: SubscriptionStatus.disabled, label: 'hostsDialog.status.disabled' },
+  { value: SubscriptionStatus.limited, label: 'hostsDialog.status.limited' },
+  { value: SubscriptionStatus.expired, label: 'hostsDialog.status.expired' },
+  { value: SubscriptionStatus.on_hold, label: 'hostsDialog.status.onHold' },
 ] as const
 
 const securityOptions = [
@@ -88,7 +88,7 @@ export default function HostAdvanceSearchModal({ isDialogOpen, onOpenChange, for
 
                           <Select
                             value=""
-                            onValueChange={(value: UserStatus) => {
+                            onValueChange={(value: SubscriptionStatus) => {
                               if (!value) return
                               const current = field.value || []
                               if (!current.includes(value)) {

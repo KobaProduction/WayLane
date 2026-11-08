@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import { queryClient } from '@/utils/query-client'
 import { CoresSimpleResponse, NodeResponse, useReconnectNode, useRemoveNode, useResetNodeUsage, useSyncNode, useUpdateNode } from '@/service/api'
 import useDirDetection from '@/hooks/use-dir-detection'
-import UserOnlineStatsDialog from '@/features/users/dialogs/user-online-stats-modal'
+import SubscriptionOnlineStatsDialog from './subscription-online-stats-modal'
 import UpdateCoreDialog from '@/features/nodes/dialogs/update-core-modal'
 import UpdateGeofilesDialog from '@/features/nodes/dialogs/update-geofiles-modal'
 import { translateHtml } from '@/utils/html-translation'
@@ -539,7 +539,7 @@ export default function NodeActionsMenu({
         <div className="contents" onClick={e => e.stopPropagation()}>
           {canDelete && <DeleteAlertDialog node={node} isOpen={isDeleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} onConfirm={handleConfirmDelete} />}
           {canUpdate && <ResetUsageAlertDialog node={node} isOpen={isResetUsageDialogOpen} onClose={() => setResetUsageDialogOpen(false)} onConfirm={confirmResetUsage} isLoading={resettingUsage} />}
-          {canReadStats && <UserOnlineStatsDialog isOpen={showOnlineStats} onOpenChange={setShowOnlineStats} nodeId={node.id} nodeName={node.name} />}
+          {canReadStats && <SubscriptionOnlineStatsDialog isOpen={showOnlineStats} onOpenChange={setShowOnlineStats} nodeId={node.id} nodeName={node.name} />}
           {canUpdateCore && <UpdateCoreDialog node={node} isOpen={showUpdateCoreDialog} onOpenChange={setShowUpdateCoreDialog} />}
           {canUpdateCore && <UpdateGeofilesDialog node={node} isOpen={showUpdateGeofilesDialog} onOpenChange={setShowUpdateGeofilesDialog} />}
         </div>

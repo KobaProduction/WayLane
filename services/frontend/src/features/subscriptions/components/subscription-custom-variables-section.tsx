@@ -96,7 +96,7 @@ export function SubscriptionCustomVariablesSection({ form }: SubscriptionCustomV
                 <Textarea
                   value={variable.value}
                   onChange={event => updateVariable(index, { value: event.target.value })}
-                  placeholder="{USERNAME}.example.com"
+                  placeholder="{SUBSCRIPTION_UUID}.example.com"
                   className="min-h-[60px] resize-none font-mono text-xs"
                   rows={2}
                 />

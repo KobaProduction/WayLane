@@ -1,17 +1,11 @@
 import { useTranslation } from 'react-i18next'
 import type { AdminDetails } from '@/service/api'
 import {
-  useActivateAllDisabledUsersById,
-  useBulkActivateAllDisabledUsers,
   useBulkDeleteAdmins,
   useBulkDisableAdmins,
-  useBulkDisableAllActiveUsers,
   useBulkEnableAdmins,
-  useBulkRemoveAllUsers,
   useBulkResetAdminsUsage,
   useGetAdmins,
-  useDisableAllActiveUsersById,
-  useRemoveAllUsersById,
 } from '@/service/api'
 import { DataTable } from './data-table'
 import { setupColumns } from './columns'
@@ -20,15 +14,14 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { PaginationControls } from './filters'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import useDirDetection from '@/hooks/use-dir-detection'
-import { getAdminsPerPageLimitSize, setAdminsPerPageLimitSize } from '@/utils/userPreferenceStorage'
+import { getAdminsPerPageLimitSize, setAdminsPerPageLimitSize } from '@/utils/dashboardPreferenceStorage'
 import { toast } from 'sonner'
 import { useAdmin } from '@/hooks/use-admin'
-import { patchAdminInAdminsCache } from '@/utils/adminsCache'
 import { useQueryClient } from '@tanstack/react-query'
-import { BulkActionItem, BulkActionsBar } from '@/features/users/components/bulk-actions-bar'
-import { BulkActionAlertDialog } from '@/features/users/components/bulk-action-alert-dialog'
-import { Power, PowerOff, RefreshCw, Trash2, UserCheck, UserMinus, UserX } from 'lucide-react'
-import { hasPermission, hasScopeAll } from '@/utils/rbac'
+import { BulkActionItem, BulkActionsBar } from '@/components/common/bulk-actions-bar'
+import { BulkActionAlertDialog } from '@/components/common/bulk-action-alert-dialog'
+import { Power, PowerOff, RefreshCw, Trash2 } from 'lucide-react'
+import { hasPermission } from '@/utils/rbac'
 import { translateHtml } from '@/utils/html-translation'
 
 interface AdminFilters {
@@ -46,8 +39,7 @@ interface AdminsTableProps {
   onTotalAdminsChange?: (counts: { total: number; active: number; disabled: number; limited: number } | null) => void
 }
 
-type BulkUsersActionType = 'disable' | 'activate'
-type BulkAdminActionType = 'delete' | 'reset' | 'disable' | 'enable' | 'disableUsers' | 'activateUsers' | 'removeUsers'
+type BulkAdminActionType = 'delete' | 'reset' | 'disable' | 'enable'
 
 interface BulkActionDialogConfig {
   title: string
@@ -138,67 +130,6 @@ const ResetUsersUsageConfirmationDialog = ({ adminUsername, isOpen, onClose, onC
   )
 }
 
-const RemoveAllUsersConfirmationDialog = ({ adminUsername, isOpen, onClose, onConfirm }: { adminUsername: string; isOpen: boolean; onClose: () => void; onConfirm: () => void }) => {
-  const { t } = useTranslation()
-  const dir = useDirDetection()
-
-  return (
-    <AlertDialog open={isOpen} onOpenChange={onClose}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('admins.removeAllUsers')}</AlertDialogTitle>
-          <AlertDialogDescription className="flex items-center gap-2">
-            <span dir={dir} dangerouslySetInnerHTML={{ __html: translateHtml(t, 'removeAllUsers.prompt', { name: adminUsername }) }} />
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={onClose}>{t('cancel')}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            {t('confirm')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  )
-}
-
-const BulkUsersStatusConfirmationDialog = ({
-  adminUsername,
-  actionType,
-  isOpen,
-  onClose,
-  onConfirm,
-}: {
-  adminUsername: string
-  actionType: BulkUsersActionType
-  isOpen: boolean
-  onClose: () => void
-  onConfirm: () => void
-}) => {
-  const { t } = useTranslation()
-  const dir = useDirDetection()
-
-  const titleKey = actionType === 'disable' ? 'admins.disableAllActiveUsers' : 'admins.activateAllDisabledUsers'
-  const promptKey = actionType === 'disable' ? 'disableUsers.prompt' : 'activeUsers.prompt'
-
-  return (
-    <AlertDialog open={isOpen} onOpenChange={onClose}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t(titleKey)}</AlertDialogTitle>
-          <AlertDialogDescription className="flex items-center gap-2">
-            <span dir={dir} dangerouslySetInnerHTML={{ __html: translateHtml(t, promptKey, { name: adminUsername }) }} />
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={onClose}>{t('cancel')}</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>{t('confirm')}</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  )
-}
-
 export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetUsage, onTotalAdminsChange }: AdminsTableProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -206,9 +137,7 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
   const canUpdateAdmins = hasPermission(currentAdmin, 'admins', 'update')
   const canDeleteAdmins = hasPermission(currentAdmin, 'admins', 'delete')
   const canResetAdmins = hasPermission(currentAdmin, 'admins', 'reset_usage')
-  const canUpdateAllUsers = hasScopeAll(currentAdmin, 'users', 'update')
-  const canDeleteAllUsers = hasScopeAll(currentAdmin, 'users', 'delete')
-  const canUseBulkSelection = canUpdateAdmins || canDeleteAdmins || canResetAdmins || canUpdateAllUsers || canDeleteAllUsers
+  const canUseBulkSelection = canUpdateAdmins || canDeleteAdmins || canResetAdmins
   const [currentPage, setCurrentPage] = useState(0)
   const [itemsPerPage, setItemsPerPage] = useState(getAdminsPerPageLimitSize())
   const [isChangingPage, setIsChangingPage] = useState(false)
@@ -221,23 +150,16 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [statusToggleDialogOpen, setStatusToggleDialogOpen] = useState(false)
   const [resetUsersUsageDialogOpen, setResetUsersUsageDialogOpen] = useState(false)
-  const [bulkUsersStatusDialogOpen, setBulkUsersStatusDialogOpen] = useState(false)
-  const [removeAllUsersDialogOpen, setRemoveAllUsersDialogOpen] = useState(false)
   const [selectedAdminUsernames, setSelectedAdminUsernames] = useState<string[]>([])
   const [resetSelectionKey, setResetSelectionKey] = useState(0)
   const [bulkAction, setBulkAction] = useState<BulkAdminActionType | null>(null)
   const [adminToDelete, setAdminToDelete] = useState<AdminDetails | null>(null)
   const [adminToToggleStatus, setAdminToToggleStatus] = useState<AdminDetails | null>(null)
   const [adminToReset, setAdminToReset] = useState<AdminDetails | null>(null)
-  const [bulkUsersStatusAction, setBulkUsersStatusAction] = useState<{ admin: AdminDetails; actionType: BulkUsersActionType } | null>(null)
-  const [adminToRemoveAllUsers, setAdminToRemoveAllUsers] = useState<AdminDetails | null>(null)
   const bulkDeleteAdminsMutation = useBulkDeleteAdmins()
   const bulkResetAdminsUsageMutation = useBulkResetAdminsUsage()
   const bulkDisableAdminsMutation = useBulkDisableAdmins()
   const bulkEnableAdminsMutation = useBulkEnableAdmins()
-  const bulkDisableAllActiveUsersMutation = useBulkDisableAllActiveUsers()
-  const bulkActivateAllDisabledUsersMutation = useBulkActivateAllDisabledUsers()
-  const bulkRemoveAllUsersMutation = useBulkRemoveAllUsers()
 
   const {
     data: adminsResponse,
@@ -275,26 +197,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
       }
     }
   }, [adminsResponse, onTotalAdminsChange])
-  const disableAllActiveUsersMutation = useDisableAllActiveUsersById()
-  const activateAllDisabledUsersMutation = useActivateAllDisabledUsersById()
-  const removeAllUsersMutation = useRemoveAllUsersById()
-
-  const getAdminId = useCallback(
-    (admin: AdminDetails) => {
-      if (admin.id == null) {
-        toast.error(t('error', { defaultValue: 'Error' }), {
-          description: t('admins.missingId', {
-            name: admin.username,
-            defaultValue: 'Admin "{name}" is missing an id in the current response.',
-          }),
-        })
-        return null
-      }
-
-      return admin.id
-    },
-    [t],
-  )
 
   // Update filters when pagination changes
   useEffect(() => {
@@ -354,7 +256,7 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
 
   const invalidateAdminQueries = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['/api/admins'] })
-    queryClient.invalidateQueries({ queryKey: ['/api/users'] })
+    queryClient.invalidateQueries({ queryKey: ['waylane-product-subscriptions'] })
   }, [queryClient])
 
   const handleStatusToggleClick = (admin: AdminDetails) => {
@@ -374,88 +276,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
     }
   }
 
-  const handleRemoveAllUsersClick = (admin: AdminDetails) => {
-    setAdminToRemoveAllUsers(admin)
-    setRemoveAllUsersDialogOpen(true)
-  }
-
-  const handleDisableAllActiveUsersClick = (admin: AdminDetails) => {
-    setBulkUsersStatusAction({ admin, actionType: 'disable' })
-    setBulkUsersStatusDialogOpen(true)
-  }
-
-  const handleActivateAllDisabledUsersClick = (admin: AdminDetails) => {
-    setBulkUsersStatusAction({ admin, actionType: 'activate' })
-    setBulkUsersStatusDialogOpen(true)
-  }
-
-  const closeBulkUsersStatusDialog = () => {
-    setBulkUsersStatusDialogOpen(false)
-    setBulkUsersStatusAction(null)
-  }
-
-  const handleConfirmBulkUsersStatusAction = async () => {
-    if (!bulkUsersStatusAction) return
-
-    const { admin, actionType } = bulkUsersStatusAction
-    const adminId = getAdminId(admin)
-    if (adminId == null) return
-
-    try {
-      if (actionType === 'disable') {
-        await disableAllActiveUsersMutation.mutateAsync({ adminId })
-      } else {
-        await activateAllDisabledUsersMutation.mutateAsync({ adminId })
-      }
-
-      toast.success(t('success', { defaultValue: 'Success' }), {
-        description: t(actionType === 'disable' ? 'admins.disableAllActiveUsersSuccess' : 'admins.activateAllDisabledUsersSuccess', {
-          name: admin.username,
-          defaultValue:
-            actionType === 'disable'
-              ? `All active users under admin "${admin.username}" have been disabled successfully`
-              : `All disabled users under admin "${admin.username}" have been activated successfully`,
-        }),
-      })
-      closeBulkUsersStatusDialog()
-    } catch (error) {
-      toast.error(t('error', { defaultValue: 'Error' }), {
-        description: t(actionType === 'disable' ? 'admins.disableAllActiveUsersFailed' : 'admins.activateAllDisabledUsersFailed', {
-          name: admin.username,
-          defaultValue: actionType === 'disable' ? `Failed to disable all active users under admin "${admin.username}"` : `Failed to activate all disabled users under admin "${admin.username}"`,
-        }),
-      })
-    }
-  }
-
-  const handleConfirmRemoveAllUsers = async () => {
-    if (adminToRemoveAllUsers) {
-      const adminId = getAdminId(adminToRemoveAllUsers)
-      if (adminId == null) return
-
-      try {
-        await removeAllUsersMutation.mutateAsync({
-          adminId,
-        })
-        toast.success(t('success', { defaultValue: 'Success' }), {
-          description: t('admins.removeAllUsersSuccess', {
-            name: adminToRemoveAllUsers.username,
-            defaultValue: `All users under admin "{name}" have been removed successfully`,
-          }),
-        })
-        patchAdminInAdminsCache(queryClient, adminId, { total_users: 0 })
-        setRemoveAllUsersDialogOpen(false)
-        setAdminToRemoveAllUsers(null)
-      } catch (error) {
-        toast.error(t('error', { defaultValue: 'Error' }), {
-          description: t('admins.removeAllUsersFailed', {
-            name: adminToRemoveAllUsers.username,
-            defaultValue: `Failed to remove all users under admin "{name}"`,
-          }),
-        })
-      }
-    }
-  }
   const handleConfirmDelete = async () => {
     if (adminToDelete) {
       onDelete(adminToDelete)
@@ -624,81 +444,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
     }
   }
 
-  const handleBulkDisableUsers = async () => {
-    if (!selectedAdminIds.length) return
-
-    try {
-      const response = await bulkDisableAllActiveUsersMutation.mutateAsync({
-        data: {
-          ids: selectedAdminIds,
-        },
-      })
-      toast.success(t('success', { defaultValue: 'Success' }), {
-        description: t('admins.bulkDisableUsersSuccess', {
-          count: response.count,
-          defaultValue: 'All active users were disabled for {{count}} admins.',
-        }),
-      })
-      clearSelection()
-      setBulkAction(null)
-      invalidateAdminQueries()
-    } catch (error: any) {
-      toast.error(t('error', { defaultValue: 'Error' }), {
-        description: error?.data?.detail || error?.message || t('admins.bulkDisableUsersFailed', { defaultValue: 'Failed to disable active users for selected admins.' }),
-      })
-    }
-  }
-
-  const handleBulkActivateUsers = async () => {
-    if (!selectedAdminIds.length) return
-
-    try {
-      const response = await bulkActivateAllDisabledUsersMutation.mutateAsync({
-        data: {
-          ids: selectedAdminIds,
-        },
-      })
-      toast.success(t('success', { defaultValue: 'Success' }), {
-        description: t('admins.bulkActivateUsersSuccess', {
-          count: response.count,
-          defaultValue: 'All disabled users were activated for {{count}} admins.',
-        }),
-      })
-      clearSelection()
-      setBulkAction(null)
-      invalidateAdminQueries()
-    } catch (error: any) {
-      toast.error(t('error', { defaultValue: 'Error' }), {
-        description: error?.data?.detail || error?.message || t('admins.bulkActivateUsersFailed', { defaultValue: 'Failed to activate disabled users for selected admins.' }),
-      })
-    }
-  }
-
-  const handleBulkRemoveUsers = async () => {
-    if (!selectedAdminIds.length) return
-
-    try {
-      const response = await bulkRemoveAllUsersMutation.mutateAsync({
-        data: {
-          ids: selectedAdminIds,
-        },
-      })
-      toast.success(t('success', { defaultValue: 'Success' }), {
-        description: t('admins.bulkRemoveUsersSuccess', {
-          count: response.count,
-          defaultValue: 'All users removed for {{count}} admins.',
-        }),
-      })
-      clearSelection()
-      setBulkAction(null)
-      invalidateAdminQueries()
-    } catch (error: any) {
-      toast.error(t('error', { defaultValue: 'Error' }), {
-        description: error?.data?.detail || error?.message || t('admins.bulkRemoveUsersFailed', { defaultValue: 'Failed to remove users for selected admins.' }),
-      })
-    }
-  }
-
   const selectedCount = selectedAdminUsernames.length
   const enableEligibleCount = selectedEnableEligibleAdmins.length
   const disableEligibleCount = selectedDisableEligibleAdmins.length
@@ -746,33 +491,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
               } as BulkActionItem,
             ]
           : []),
-        ...(canUpdateAllUsers
-          ? [
-              {
-                key: 'disableUsers',
-                label: t('admins.disableAllActiveUsers'),
-                icon: UserMinus,
-                onClick: () => setBulkAction('disableUsers'),
-              } as BulkActionItem,
-              {
-                key: 'activateUsers',
-                label: t('admins.activateAllDisabledUsers'),
-                icon: UserCheck,
-                onClick: () => setBulkAction('activateUsers'),
-              } as BulkActionItem,
-            ]
-          : []),
-        ...(canDeleteAllUsers
-          ? [
-              {
-                key: 'removeUsers',
-                label: t('admins.removeAllUsers'),
-                icon: UserX,
-                onClick: () => setBulkAction('removeUsers'),
-                destructive: true,
-              } as BulkActionItem,
-            ]
-          : []),
       ]
     : []
   const bulkActionConfigs: Record<BulkAdminActionType, BulkActionDialogConfig> = {
@@ -817,37 +535,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
       onConfirm: handleBulkDisable,
       isPending: bulkDisableAdminsMutation.isPending,
     },
-    disableUsers: {
-      title: t('admins.bulkDisableUsersTitle', { defaultValue: 'Disable All Active Users for Selected Admins' }),
-      description: t('admins.bulkDisableUsersPrompt', {
-        count: selectedCount,
-        defaultValue: 'Are you sure you want to disable all active users for {{count}} selected admins?',
-      }),
-      actionLabel: t('admins.disableAllActiveUsers'),
-      onConfirm: handleBulkDisableUsers,
-      isPending: bulkDisableAllActiveUsersMutation.isPending,
-    },
-    activateUsers: {
-      title: t('admins.bulkActivateUsersTitle', { defaultValue: 'Activate All Disabled Users for Selected Admins' }),
-      description: t('admins.bulkActivateUsersPrompt', {
-        count: selectedCount,
-        defaultValue: 'Are you sure you want to activate all disabled users for {{count}} selected admins?',
-      }),
-      actionLabel: t('admins.activateAllDisabledUsers'),
-      onConfirm: handleBulkActivateUsers,
-      isPending: bulkActivateAllDisabledUsersMutation.isPending,
-    },
-    removeUsers: {
-      title: t('admins.bulkRemoveUsersTitle', { defaultValue: 'Remove All Users for Selected Admins' }),
-      description: t('admins.bulkRemoveUsersPrompt', {
-        count: selectedCount,
-        defaultValue: 'Are you sure you want to remove all users for {{count}} selected admins? This action cannot be undone.',
-      }),
-      actionLabel: t('admins.removeAllUsers'),
-      onConfirm: handleBulkRemoveUsers,
-      isPending: bulkRemoveAllUsersMutation.isPending,
-      destructive: true,
-    },
   }
   const activeBulkActionConfig = bulkAction ? bulkActionConfigs[bulkAction] : null
 
@@ -860,9 +547,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
     onDelete: canDeleteAdmins ? handleDeleteClick : undefined,
     toggleStatus: canUpdateAdmins ? handleStatusToggleClick : undefined,
     onResetUsage: canResetAdmins ? handleResetUsersUsageClick : undefined,
-    onDisableAllActiveUsers: canUpdateAllUsers ? handleDisableAllActiveUsersClick : undefined,
-    onActivateAllDisabledUsers: canUpdateAllUsers ? handleActivateAllDisabledUsersClick : undefined,
-    onRemoveAllUsers: canDeleteAllUsers ? handleRemoveAllUsersClick : undefined,
   })
 
   const isCurrentlyLoading = isLoading || (isFetching && !adminsResponse)
@@ -879,9 +563,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
         onDelete={canDeleteAdmins ? handleDeleteClick : undefined}
         onToggleStatus={canUpdateAdmins ? handleStatusToggleClick : undefined}
         onResetUsage={canResetAdmins ? handleResetUsersUsageClick : undefined}
-        onDisableAllActiveUsers={canUpdateAllUsers ? handleDisableAllActiveUsersClick : undefined}
-        onActivateAllDisabledUsers={canUpdateAllUsers ? handleActivateAllDisabledUsersClick : undefined}
-        onRemoveAllUsers={canDeleteAllUsers ? handleRemoveAllUsersClick : undefined}
         onSelectionChange={canUseBulkSelection ? setSelectedAdminUsernames : undefined}
         resetSelectionKey={resetSelectionKey}
         currentAdminUsername={currentAdmin?.username}
@@ -909,23 +590,6 @@ export default function AdminsTable({ onEdit, onDelete, onToggleStatus, onResetU
           onConfirm={handleConfirmResetUsersUsage}
           isOpen={resetUsersUsageDialogOpen}
           onClose={() => setResetUsersUsageDialogOpen(false)}
-        />
-      )}
-      {bulkUsersStatusAction && (
-        <BulkUsersStatusConfirmationDialog
-          adminUsername={bulkUsersStatusAction.admin.username}
-          actionType={bulkUsersStatusAction.actionType}
-          onConfirm={handleConfirmBulkUsersStatusAction}
-          isOpen={bulkUsersStatusDialogOpen}
-          onClose={closeBulkUsersStatusDialog}
-        />
-      )}
-      {adminToRemoveAllUsers && (
-        <RemoveAllUsersConfirmationDialog
-          adminUsername={adminToRemoveAllUsers.username}
-          onConfirm={handleConfirmRemoveAllUsers}
-          isOpen={removeAllUsersDialogOpen}
-          onClose={() => setRemoveAllUsersDialogOpen(false)}
         />
       )}
       {activeBulkActionConfig && (

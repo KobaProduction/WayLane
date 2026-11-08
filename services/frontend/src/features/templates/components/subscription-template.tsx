@@ -3,11 +3,11 @@ import { Infinity } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { formatBytes } from '@/utils/formatByte'
-import { UserTemplateResponse } from '@/service/api'
-import UserTemplateActionsMenu from './user-template-actions-menu'
+import { SubscriptionTemplateResponse } from '@/service/api'
+import SubscriptionTemplateActionsMenu from './subscription-template-actions-menu'
 import type { ReactNode } from 'react'
 
-const UserTemplate = ({
+const SubscriptionTemplate = ({
   template,
   onEdit,
   onToggleStatus,
@@ -17,9 +17,9 @@ const UserTemplate = ({
   selectionControl,
   selected = false,
 }: {
-  template: UserTemplateResponse
-  onEdit: (userTemplate: UserTemplateResponse) => void
-  onToggleStatus: (template: UserTemplateResponse) => void
+  template: SubscriptionTemplateResponse
+  onEdit: (subscriptionTemplate: SubscriptionTemplateResponse) => void
+  onToggleStatus: (template: SubscriptionTemplateResponse) => void
   canCreate?: boolean
   canUpdate?: boolean
   canDelete?: boolean
@@ -46,7 +46,7 @@ const UserTemplate = ({
             </div>
             <div className="text-muted-foreground mt-2 flex flex-col gap-y-1 text-sm">
               <p className="flex items-center gap-x-1">
-                {t('userDialog.dataLimit')}:{' '}
+                {t('subscriptionDialog.dataLimit')}:{' '}
                 <span dir="ltr">{!template.data_limit || template.data_limit === 0 ? <Infinity className="h-4 w-4" /> : formatBytes(template.data_limit ? template.data_limit : 0)}</span>
               </p>
               <p className="flex items-center gap-x-1">
@@ -67,7 +67,7 @@ const UserTemplate = ({
             </div>
           </div>
           <div onClick={event => event.stopPropagation()}>
-            <UserTemplateActionsMenu template={template} onEdit={onEdit} onToggleStatus={onToggleStatus} canCreate={canCreate} canUpdate={canUpdate} canDelete={canDelete} />
+            <SubscriptionTemplateActionsMenu template={template} onEdit={onEdit} onToggleStatus={onToggleStatus} canCreate={canCreate} canUpdate={canUpdate} canDelete={canDelete} />
           </div>
         </div>
       </div>
@@ -75,4 +75,4 @@ const UserTemplate = ({
   )
 }
 
-export default UserTemplate
+export default SubscriptionTemplate

@@ -2,23 +2,23 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Infinity } from 'lucide-react'
 import { ListColumn } from '@/components/common/list-generator'
-import { UserTemplateResponse } from '@/service/api'
-import UserTemplateActionsMenu from '@/features/templates/components/user-template-actions-menu'
+import { SubscriptionTemplateResponse } from '@/service/api'
+import SubscriptionTemplateActionsMenu from '@/features/templates/components/subscription-template-actions-menu'
 import { formatBytes } from '@/utils/formatByte'
 import { cn } from '@/lib/utils'
 
-interface UseUserTemplatesListColumnsProps {
-  onEdit: (template: UserTemplateResponse) => void
-  onToggleStatus: (template: UserTemplateResponse) => void
+interface UseSubscriptionTemplatesListColumnsProps {
+  onEdit: (template: SubscriptionTemplateResponse) => void
+  onToggleStatus: (template: SubscriptionTemplateResponse) => void
   canCreate?: boolean
   canUpdate?: boolean
   canDelete?: boolean
 }
 
-export const useUserTemplatesListColumns = ({ onEdit, onToggleStatus, canCreate = true, canUpdate = true, canDelete = true }: UseUserTemplatesListColumnsProps) => {
+export const useSubscriptionTemplatesListColumns = ({ onEdit, onToggleStatus, canCreate = true, canUpdate = true, canDelete = true }: UseSubscriptionTemplatesListColumnsProps) => {
   const { t } = useTranslation()
 
-  return useMemo<ListColumn<UserTemplateResponse>[]>(
+  return useMemo<ListColumn<SubscriptionTemplateResponse>[]>(
     () => [
       {
         id: 'name',
@@ -39,7 +39,7 @@ export const useUserTemplatesListColumns = ({ onEdit, onToggleStatus, canCreate 
       },
       {
         id: 'dataLimit',
-        header: t('userDialog.dataLimit', { defaultValue: 'Data Limit' }),
+        header: t('subscriptionDialog.dataLimit', { defaultValue: 'Data Limit' }),
         width: '1fr',
         cell: template => (
           <span dir="ltr" className="text-muted-foreground text-xs">
@@ -88,8 +88,8 @@ export const useUserTemplatesListColumns = ({ onEdit, onToggleStatus, canCreate 
               width: '64px',
               align: 'end' as const,
               hideOnMobile: true,
-              cell: (template: UserTemplateResponse) => (
-                <UserTemplateActionsMenu template={template} onEdit={onEdit} onToggleStatus={onToggleStatus} canCreate={canCreate} canUpdate={canUpdate} canDelete={canDelete} />
+              cell: (template: SubscriptionTemplateResponse) => (
+                <SubscriptionTemplateActionsMenu template={template} onEdit={onEdit} onToggleStatus={onToggleStatus} canCreate={canCreate} canUpdate={canUpdate} canDelete={canDelete} />
               ),
             },
           ]

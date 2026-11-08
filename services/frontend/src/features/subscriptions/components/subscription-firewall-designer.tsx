@@ -168,7 +168,7 @@ export function SubscriptionFirewallDesigner() {
           Секрет задаётся только в backend: WAYLANE_DEVICE_WEBHOOK_SECRET.
           Недоставленные события сохраняются в БД и автоматически повторяются каждые 30 секунд,
           когда наступает время следующей попытки (exponential backoff, максимум 10 попыток).
-          При необходимости можно подключить старый проверяющий Telegram-бота.
+          Уведомления о событиях устройств передаются внешним сервисам через webhook.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">

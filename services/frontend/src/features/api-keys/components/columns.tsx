@@ -3,7 +3,7 @@ import { MoreVertical, Trash2, Edit2, RotateCcw, KeyRound, UserRound } from 'luc
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
-import { APIKeyResponse, AdminBase, RolePermissions } from '@/service/api'
+import { APIKeyResponse, AdminDetails, RolePermissions } from '@/service/api'
 import { dateUtils } from '@/utils/dateFormatter'
 import { countEnabledPermissions } from '@/features/admin-roles/components/permission-editor'
 import { RolePermissionFormMap } from '@/features/admin-roles/forms/admin-role-form'
@@ -14,7 +14,7 @@ interface ColumnsProps {
   onEdit: (apiKey: APIKeyResponse) => void
   onDelete: (apiKey: APIKeyResponse) => void
   onRevoke: (apiKey: APIKeyResponse) => void
-  admins: AdminBase[]
+  admins: AdminDetails[]
 }
 
 function countEnabledResources(permissions: RolePermissions | undefined): number {
