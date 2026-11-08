@@ -18,16 +18,16 @@ class StatType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     Outbound: _ClassVar[StatType]
     Inbounds: _ClassVar[StatType]
     Inbound: _ClassVar[StatType]
-    UsersStat: _ClassVar[StatType]
-    UserStat: _ClassVar[StatType]
+    SubscriptionsStat: _ClassVar[StatType]
+    SubscriptionStat: _ClassVar[StatType]
 XRAY: BackendType
 WIREGUARD: BackendType
 Outbounds: StatType
 Outbound: StatType
 Inbounds: StatType
 Inbound: StatType
-UsersStat: StatType
-UserStat: StatType
+SubscriptionsStat: StatType
+SubscriptionStat: StatType
 
 class Empty(_message.Message):
     __slots__ = ()
@@ -44,18 +44,18 @@ class BaseInfoResponse(_message.Message):
     def __init__(self, started: _Optional[bool] = ..., core_version: _Optional[str] = ..., node_version: _Optional[str] = ...) -> None: ...
 
 class Backend(_message.Message):
-    __slots__ = ("type", "config", "users", "keep_alive", "exclude_inbounds")
+    __slots__ = ("type", "config", "subscriptions", "keep_alive", "exclude_inbounds")
     TYPE_FIELD_NUMBER: _ClassVar[int]
     CONFIG_FIELD_NUMBER: _ClassVar[int]
-    USERS_FIELD_NUMBER: _ClassVar[int]
+    SUBSCRIPTIONS_FIELD_NUMBER: _ClassVar[int]
     KEEP_ALIVE_FIELD_NUMBER: _ClassVar[int]
     EXCLUDE_INBOUNDS_FIELD_NUMBER: _ClassVar[int]
     type: BackendType
     config: str
-    users: _containers.RepeatedCompositeFieldContainer[User]
+    subscriptions: _containers.RepeatedCompositeFieldContainer[Subscription]
     keep_alive: int
     exclude_inbounds: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, type: _Optional[_Union[BackendType, str]] = ..., config: _Optional[str] = ..., users: _Optional[_Iterable[_Union[User, _Mapping]]] = ..., keep_alive: _Optional[int] = ..., exclude_inbounds: _Optional[_Iterable[str]] = ...) -> None: ...
+    def __init__(self, type: _Optional[_Union[BackendType, str]] = ..., config: _Optional[str] = ..., subscriptions: _Optional[_Iterable[_Union[Subscription, _Mapping]]] = ..., keep_alive: _Optional[int] = ..., exclude_inbounds: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Log(_message.Message):
     __slots__ = ("detail",)
@@ -253,31 +253,31 @@ class Proxy(_message.Message):
     masque: Masque
     def __init__(self, vmess: _Optional[_Union[Vmess, _Mapping]] = ..., vless: _Optional[_Union[Vless, _Mapping]] = ..., trojan: _Optional[_Union[Trojan, _Mapping]] = ..., shadowsocks: _Optional[_Union[Shadowsocks, _Mapping]] = ..., wireguard: _Optional[_Union[Wireguard, _Mapping]] = ..., hysteria: _Optional[_Union[Hysteria, _Mapping]] = ..., masque: _Optional[_Union[Masque, _Mapping]] = ...) -> None: ...
 
-class User(_message.Message):
-    __slots__ = ("email", "proxies", "inbounds")
-    EMAIL_FIELD_NUMBER: _ClassVar[int]
+class Subscription(_message.Message):
+    __slots__ = ("subscription_uuid", "proxies", "inbounds")
+    SUBSCRIPTION_UUID_FIELD_NUMBER: _ClassVar[int]
     PROXIES_FIELD_NUMBER: _ClassVar[int]
     INBOUNDS_FIELD_NUMBER: _ClassVar[int]
-    email: str
+    subscription_uuid: str
     proxies: Proxy
     inbounds: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, email: _Optional[str] = ..., proxies: _Optional[_Union[Proxy, _Mapping]] = ..., inbounds: _Optional[_Iterable[str]] = ...) -> None: ...
+    def __init__(self, subscription_uuid: _Optional[str] = ..., proxies: _Optional[_Union[Proxy, _Mapping]] = ..., inbounds: _Optional[_Iterable[str]] = ...) -> None: ...
 
-class Users(_message.Message):
-    __slots__ = ("users",)
-    USERS_FIELD_NUMBER: _ClassVar[int]
-    users: _containers.RepeatedCompositeFieldContainer[User]
-    def __init__(self, users: _Optional[_Iterable[_Union[User, _Mapping]]] = ...) -> None: ...
+class Subscriptions(_message.Message):
+    __slots__ = ("subscriptions",)
+    SUBSCRIPTIONS_FIELD_NUMBER: _ClassVar[int]
+    subscriptions: _containers.RepeatedCompositeFieldContainer[Subscription]
+    def __init__(self, subscriptions: _Optional[_Iterable[_Union[Subscription, _Mapping]]] = ...) -> None: ...
 
-class UsersChunk(_message.Message):
-    __slots__ = ("users", "index", "last")
-    USERS_FIELD_NUMBER: _ClassVar[int]
+class SubscriptionsChunk(_message.Message):
+    __slots__ = ("subscriptions", "index", "last")
+    SUBSCRIPTIONS_FIELD_NUMBER: _ClassVar[int]
     INDEX_FIELD_NUMBER: _ClassVar[int]
     LAST_FIELD_NUMBER: _ClassVar[int]
-    users: _containers.RepeatedCompositeFieldContainer[User]
+    subscriptions: _containers.RepeatedCompositeFieldContainer[Subscription]
     index: int
     last: bool
-    def __init__(self, users: _Optional[_Iterable[_Union[User, _Mapping]]] = ..., index: _Optional[int] = ..., last: _Optional[bool] = ...) -> None: ...
+    def __init__(self, subscriptions: _Optional[_Iterable[_Union[Subscription, _Mapping]]] = ..., index: _Optional[int] = ..., last: _Optional[bool] = ...) -> None: ...
 
 class RoutingRule(_message.Message):
     __slots__ = ("outbound_tag", "rule_tag")
@@ -308,7 +308,7 @@ class BalancerInfoResponse(_message.Message):
     def __init__(self, override_target: _Optional[str] = ..., principle_target: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class TestRouteRequest(_message.Message):
-    __slots__ = ("inbound_tag", "network", "target_ip", "target_domain", "target_port", "protocol", "user", "attributes", "field_selectors", "publish_result")
+    __slots__ = ("inbound_tag", "network", "target_ip", "target_domain", "target_port", "protocol", "subscription_uuid", "attributes", "field_selectors", "publish_result")
     class AttributesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -322,7 +322,7 @@ class TestRouteRequest(_message.Message):
     TARGET_DOMAIN_FIELD_NUMBER: _ClassVar[int]
     TARGET_PORT_FIELD_NUMBER: _ClassVar[int]
     PROTOCOL_FIELD_NUMBER: _ClassVar[int]
-    USER_FIELD_NUMBER: _ClassVar[int]
+    SUBSCRIPTION_UUID_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     FIELD_SELECTORS_FIELD_NUMBER: _ClassVar[int]
     PUBLISH_RESULT_FIELD_NUMBER: _ClassVar[int]
@@ -332,11 +332,11 @@ class TestRouteRequest(_message.Message):
     target_domain: str
     target_port: int
     protocol: str
-    user: str
+    subscription_uuid: str
     attributes: _containers.ScalarMap[str, str]
     field_selectors: _containers.RepeatedScalarFieldContainer[str]
     publish_result: bool
-    def __init__(self, inbound_tag: _Optional[str] = ..., network: _Optional[str] = ..., target_ip: _Optional[str] = ..., target_domain: _Optional[str] = ..., target_port: _Optional[int] = ..., protocol: _Optional[str] = ..., user: _Optional[str] = ..., attributes: _Optional[_Mapping[str, str]] = ..., field_selectors: _Optional[_Iterable[str]] = ..., publish_result: _Optional[bool] = ...) -> None: ...
+    def __init__(self, inbound_tag: _Optional[str] = ..., network: _Optional[str] = ..., target_ip: _Optional[str] = ..., target_domain: _Optional[str] = ..., target_port: _Optional[int] = ..., protocol: _Optional[str] = ..., subscription_uuid: _Optional[str] = ..., attributes: _Optional[_Mapping[str, str]] = ..., field_selectors: _Optional[_Iterable[str]] = ..., publish_result: _Optional[bool] = ...) -> None: ...
 
 class RouteResult(_message.Message):
     __slots__ = ("outbound_tag", "outbound_group_tags", "inbound_tag", "network", "target_domain")

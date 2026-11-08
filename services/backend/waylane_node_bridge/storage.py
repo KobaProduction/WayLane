@@ -6,7 +6,7 @@ from itertools import islice
 from typing import Any, Protocol
 from uuid import uuid4
 
-from waylane_node_bridge.common.service_pb2 import User
+from waylane_node_bridge.common.service_pb2 import Subscription
 
 
 @dataclass(slots=True)
@@ -35,7 +35,7 @@ class NodeConfig:
 @dataclass(slots=True)
 class ClaimedUser:
     token: str
-    user: User
+    user: Subscription
 
 
 class NodeRegistryProtocol(Protocol):
@@ -46,7 +46,7 @@ class NodeRegistryProtocol(Protocol):
 
 
 class UserSyncStoreProtocol(Protocol):
-    async def enqueue_users(self, node_id: str, users: list[User]) -> None: ...
+    async def enqueue_users(self, node_id: str, users: list[Subscription]) -> None: ...
 
     async def claim_users(
         self, node_id: str, worker_id: str, limit: int, lease_seconds: float
@@ -149,32 +149,32 @@ class InMemoryNodeRegistry:
 class InMemoryUserSyncStore:
     def __init__(self):
         # Keep the latest desired revision even while an older revision is leased.
-        self._pending: dict[str, dict[str, tuple[User, int]]] = {}
+        self._pending: dict[str, dict[str, tuple[Subscription, int]]] = {}
         self._claimed: dict[str, dict[str, tuple[str, int, float]]] = {}
         self._active: dict[str, dict[str, str]] = {}
         self._revision = 0
         self._fences: dict[str, tuple[str, float, int]] = {}
         self._lock = asyncio.Lock()
 
-    async def enqueue_users(self, node_id: str, users: list[User]) -> None:
+    async def enqueue_users(self, node_id: str, users: list[Subscription]) -> None:
         if not users:
             return
         async with self._lock:
             pending = self._pending.setdefault(node_id, {})
             for user in users:
                 self._revision += 1
-                pending[user.email] = (User.FromString(user.SerializeToString()), self._revision)
+                pending[user.subscription_uuid] = (Subscription.FromString(user.SerializeToString()), self._revision)
 
-    async def enqueue_users_if_absent(self, node_id: str, users: list[User]) -> None:
+    async def enqueue_users_if_absent(self, node_id: str, users: list[Subscription]) -> None:
         """Queue users that have nothing queued; a queued (newer or leased) entry is kept."""
         if not users:
             return
         async with self._lock:
             pending = self._pending.setdefault(node_id, {})
             for user in users:
-                if user.email not in pending:
+                if user.subscription_uuid not in pending:
                     self._revision += 1
-                    pending[user.email] = (User.FromString(user.SerializeToString()), self._revision)
+                    pending[user.subscription_uuid] = (Subscription.FromString(user.SerializeToString()), self._revision)
 
     def _expire_claims(self, node_id: str) -> None:
         claimed = self._claimed.setdefault(node_id, {})
@@ -206,7 +206,7 @@ class InMemoryUserSyncStore:
                 token = f"{worker_id}:{uuid4()}"
                 claimed[token] = (email, revision, until)
                 active[email] = token
-                result.append(ClaimedUser(token=token, user=User.FromString(user.SerializeToString())))
+                result.append(ClaimedUser(token=token, user=Subscription.FromString(user.SerializeToString())))
             return result
 
     async def ack_users(self, node_id: str, tokens: list[str]) -> None:

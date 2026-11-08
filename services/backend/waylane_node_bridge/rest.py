@@ -164,7 +164,7 @@ class Node(WayLaneNode):
         self,
         config: str,
         backend_type: service.BackendType,
-        users: list[service.User],
+        users: list[service.Subscription],
         keep_alive: int = 0,
         exclude_inbounds: list[str] | None = None,
         timeout: int | None = None,
@@ -186,7 +186,7 @@ class Node(WayLaneNode):
                     proto_message=service.Backend(
                         type=backend_type,
                         config=config,
-                        users=users,
+                        subscriptions=users,
                         keep_alive=keep_alive,
                         exclude_inbounds=exclude_inbounds,
                     ),
@@ -283,30 +283,30 @@ class Node(WayLaneNode):
             proto_response_class=service.LatencyResponse,
         )
 
-    async def get_user_online_stats(self, email: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+    async def get_subscription_online_stats(self, subscription_uuid: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
         timeout = timeout or self._default_timeout
         return await self._make_request(
             method="GET",
-            endpoint="stats/user/online",
+            endpoint="stats/subscription/online",
             timeout=timeout,
-            proto_message=service.StatRequest(name=email),
+            proto_message=service.StatRequest(name=subscription_uuid),
             proto_response_class=service.OnlineStatResponse,
         )
 
-    async def get_user_online_ip_list(
-        self, email: str, timeout: int | None = None
+    async def get_subscription_online_ip_list(
+        self, subscription_uuid: str, timeout: int | None = None
     ) -> service.StatsOnlineIpListResponse | None:
         timeout = timeout or self._default_timeout
         return await self._make_request(
             method="GET",
-            endpoint="stats/user/online_ip",
+            endpoint="stats/subscription/online_ip",
             timeout=timeout,
-            proto_message=service.StatRequest(name=email),
+            proto_message=service.StatRequest(name=subscription_uuid),
             proto_response_class=service.StatsOnlineIpListResponse,
         )
 
     async def sync_users(
-        self, users: list[service.User], flush_pending: bool = False, timeout: int | None = None
+        self, users: list[service.Subscription], flush_pending: bool = False, timeout: int | None = None
     ) -> service.Empty | None:
         timeout = timeout or self._default_timeout
         if flush_pending:
@@ -315,9 +315,9 @@ class Node(WayLaneNode):
         async with self._node_lock:
             response = await self._make_request(
                 method="PUT",
-                endpoint="users/sync",
+                endpoint="subscriptions/sync",
                 timeout=timeout,
-                proto_message=service.Users(users=users),
+                proto_message=service.Subscriptions(subscriptions=users),
                 proto_response_class=service.Empty,
             )
         self._clear_rejected_users()
@@ -325,12 +325,12 @@ class Node(WayLaneNode):
 
     async def sync_users_chunked(
         self,
-        users: list[service.User],
+        users: list[service.Subscription],
         chunk_size: int = 100,
         flush_pending: bool = False,
         timeout: int | None = None,
-    ) -> list[service.User]:
-        """Stream UsersChunk messages over HTTP/2 for large sync operations. Returns failed users."""
+    ) -> list[service.Subscription]:
+        """Stream SubscriptionsChunk messages over HTTP/2 for large sync operations. Returns failed users."""
         if chunk_size <= 0:
             raise NodeAPIError(code=-2, detail="chunk_size must be positive")
 
@@ -353,7 +353,7 @@ class Node(WayLaneNode):
         async def _iter_chunks():
             # Send a terminating empty chunk when no users are provided
             if not users:
-                chunk_bytes = self._serialize_protobuf(service.UsersChunk(index=0, last=True))
+                chunk_bytes = self._serialize_protobuf(service.SubscriptionsChunk(index=0, last=True))
                 yield _encode_varint(len(chunk_bytes)) + chunk_bytes
                 return
 
@@ -361,7 +361,7 @@ class Node(WayLaneNode):
             for index, start in enumerate(range(0, total_users, chunk_size)):
                 chunk_users = users[start : start + chunk_size]
                 chunk_bytes = self._serialize_protobuf(
-                    service.UsersChunk(users=chunk_users, index=index, last=start + chunk_size >= total_users)
+                    service.SubscriptionsChunk(subscriptions=chunk_users, index=index, last=start + chunk_size >= total_users)
                 )
                 # Length-prefix each protobuf chunk to preserve framing server-side
                 yield _encode_varint(len(chunk_bytes)) + chunk_bytes
@@ -370,7 +370,7 @@ class Node(WayLaneNode):
             try:
                 async with self._client.request(
                     method="PUT",
-                    url="users/sync/chunked",
+                    url="subscriptions/sync/chunked",
                     data=_iter_chunks(),
                     timeout=make_timeout(timeout),
                 ) as raw_response:
@@ -442,7 +442,7 @@ class Node(WayLaneNode):
                 target_domain=target_domain,
                 target_port=target_port,
                 protocol=protocol,
-                user=user,
+                subscription_uuid=user,
                 attributes=attributes or {},
                 field_selectors=field_selectors or [],
                 publish_result=publish_result,
@@ -490,21 +490,21 @@ class Node(WayLaneNode):
                 proto_response_class=service.Empty,
             )
 
-    async def _sync_batch_users(self, users: list[service.User]) -> list[service.User]:
+    async def _sync_batch_users(self, users: list[service.Subscription]) -> list[service.Subscription]:
         """Sync users individually via PUT user/sync. Returns failed users."""
         failed = []
         for user in users:
             try:
                 await self._make_request(
                     method="PUT",
-                    endpoint="user/sync",
+                    endpoint="subscription/sync",
                     timeout=self._internal_timeout,
                     proto_message=user,
                     proto_response_class=service.Empty,
                 )
             except Exception as e:
                 error_type = type(e).__name__
-                self.logger.warning(f"[{self.name}] Failed to sync user {user.email} | Error: {error_type} - {e!s}")
+                self.logger.warning(f"[{self.name}] Failed to sync user {user.subscription_uuid} | Error: {error_type} - {e!s}")
                 failed.append(user)
         return failed
 

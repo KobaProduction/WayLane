@@ -47,23 +47,23 @@ class NodeServiceBase(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def GetUserOnlineStats(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.StatRequest, waylane_node_bridge.common.service_pb2.OnlineStatResponse]') -> None:
+    async def GetSubscriptionOnlineStats(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.StatRequest, waylane_node_bridge.common.service_pb2.OnlineStatResponse]') -> None:
         pass
 
     @abc.abstractmethod
-    async def GetUserOnlineIpListStats(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.StatRequest, waylane_node_bridge.common.service_pb2.StatsOnlineIpListResponse]') -> None:
+    async def GetSubscriptionOnlineIpListStats(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.StatRequest, waylane_node_bridge.common.service_pb2.StatsOnlineIpListResponse]') -> None:
         pass
 
     @abc.abstractmethod
-    async def SyncUser(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.User, waylane_node_bridge.common.service_pb2.Empty]') -> None:
+    async def SyncSubscription(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.Subscription, waylane_node_bridge.common.service_pb2.Empty]') -> None:
         pass
 
     @abc.abstractmethod
-    async def SyncUsers(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.Users, waylane_node_bridge.common.service_pb2.Empty]') -> None:
+    async def SyncSubscriptions(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.Subscriptions, waylane_node_bridge.common.service_pb2.Empty]') -> None:
         pass
 
     @abc.abstractmethod
-    async def SyncUsersChunked(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.UsersChunk, waylane_node_bridge.common.service_pb2.Empty]') -> None:
+    async def SyncSubscriptionsChunked(self, stream: 'grpclib.server.Stream[waylane_node_bridge.common.service_pb2.SubscriptionsChunk, waylane_node_bridge.common.service_pb2.Empty]') -> None:
         pass
 
     @abc.abstractmethod
@@ -140,34 +140,34 @@ class NodeServiceBase(abc.ABC):
                 waylane_node_bridge.common.service_pb2.LatencyRequest,
                 waylane_node_bridge.common.service_pb2.LatencyResponse,
             ),
-            '/waylane.node.v1.NodeService/GetUserOnlineStats': grpclib.const.Handler(
-                self.GetUserOnlineStats,
+            '/waylane.node.v1.NodeService/GetSubscriptionOnlineStats': grpclib.const.Handler(
+                self.GetSubscriptionOnlineStats,
                 grpclib.const.Cardinality.UNARY_UNARY,
                 waylane_node_bridge.common.service_pb2.StatRequest,
                 waylane_node_bridge.common.service_pb2.OnlineStatResponse,
             ),
-            '/waylane.node.v1.NodeService/GetUserOnlineIpListStats': grpclib.const.Handler(
-                self.GetUserOnlineIpListStats,
+            '/waylane.node.v1.NodeService/GetSubscriptionOnlineIpListStats': grpclib.const.Handler(
+                self.GetSubscriptionOnlineIpListStats,
                 grpclib.const.Cardinality.UNARY_UNARY,
                 waylane_node_bridge.common.service_pb2.StatRequest,
                 waylane_node_bridge.common.service_pb2.StatsOnlineIpListResponse,
             ),
-            '/waylane.node.v1.NodeService/SyncUser': grpclib.const.Handler(
-                self.SyncUser,
+            '/waylane.node.v1.NodeService/SyncSubscription': grpclib.const.Handler(
+                self.SyncSubscription,
                 grpclib.const.Cardinality.STREAM_UNARY,
-                waylane_node_bridge.common.service_pb2.User,
+                waylane_node_bridge.common.service_pb2.Subscription,
                 waylane_node_bridge.common.service_pb2.Empty,
             ),
-            '/waylane.node.v1.NodeService/SyncUsers': grpclib.const.Handler(
-                self.SyncUsers,
+            '/waylane.node.v1.NodeService/SyncSubscriptions': grpclib.const.Handler(
+                self.SyncSubscriptions,
                 grpclib.const.Cardinality.UNARY_UNARY,
-                waylane_node_bridge.common.service_pb2.Users,
+                waylane_node_bridge.common.service_pb2.Subscriptions,
                 waylane_node_bridge.common.service_pb2.Empty,
             ),
-            '/waylane.node.v1.NodeService/SyncUsersChunked': grpclib.const.Handler(
-                self.SyncUsersChunked,
+            '/waylane.node.v1.NodeService/SyncSubscriptionsChunked': grpclib.const.Handler(
+                self.SyncSubscriptionsChunked,
                 grpclib.const.Cardinality.STREAM_UNARY,
-                waylane_node_bridge.common.service_pb2.UsersChunk,
+                waylane_node_bridge.common.service_pb2.SubscriptionsChunk,
                 waylane_node_bridge.common.service_pb2.Empty,
             ),
             '/waylane.node.v1.NodeService/ListRoutingRules': grpclib.const.Handler(
@@ -260,34 +260,34 @@ class NodeServiceStub:
             waylane_node_bridge.common.service_pb2.LatencyRequest,
             waylane_node_bridge.common.service_pb2.LatencyResponse,
         )
-        self.GetUserOnlineStats = grpclib.client.UnaryUnaryMethod(
+        self.GetSubscriptionOnlineStats = grpclib.client.UnaryUnaryMethod(
             channel,
-            '/waylane.node.v1.NodeService/GetUserOnlineStats',
+            '/waylane.node.v1.NodeService/GetSubscriptionOnlineStats',
             waylane_node_bridge.common.service_pb2.StatRequest,
             waylane_node_bridge.common.service_pb2.OnlineStatResponse,
         )
-        self.GetUserOnlineIpListStats = grpclib.client.UnaryUnaryMethod(
+        self.GetSubscriptionOnlineIpListStats = grpclib.client.UnaryUnaryMethod(
             channel,
-            '/waylane.node.v1.NodeService/GetUserOnlineIpListStats',
+            '/waylane.node.v1.NodeService/GetSubscriptionOnlineIpListStats',
             waylane_node_bridge.common.service_pb2.StatRequest,
             waylane_node_bridge.common.service_pb2.StatsOnlineIpListResponse,
         )
-        self.SyncUser = grpclib.client.StreamUnaryMethod(
+        self.SyncSubscription = grpclib.client.StreamUnaryMethod(
             channel,
-            '/waylane.node.v1.NodeService/SyncUser',
-            waylane_node_bridge.common.service_pb2.User,
+            '/waylane.node.v1.NodeService/SyncSubscription',
+            waylane_node_bridge.common.service_pb2.Subscription,
             waylane_node_bridge.common.service_pb2.Empty,
         )
-        self.SyncUsers = grpclib.client.UnaryUnaryMethod(
+        self.SyncSubscriptions = grpclib.client.UnaryUnaryMethod(
             channel,
-            '/waylane.node.v1.NodeService/SyncUsers',
-            waylane_node_bridge.common.service_pb2.Users,
+            '/waylane.node.v1.NodeService/SyncSubscriptions',
+            waylane_node_bridge.common.service_pb2.Subscriptions,
             waylane_node_bridge.common.service_pb2.Empty,
         )
-        self.SyncUsersChunked = grpclib.client.StreamUnaryMethod(
+        self.SyncSubscriptionsChunked = grpclib.client.StreamUnaryMethod(
             channel,
-            '/waylane.node.v1.NodeService/SyncUsersChunked',
-            waylane_node_bridge.common.service_pb2.UsersChunk,
+            '/waylane.node.v1.NodeService/SyncSubscriptionsChunked',
+            waylane_node_bridge.common.service_pb2.SubscriptionsChunk,
             waylane_node_bridge.common.service_pb2.Empty,
         )
         self.ListRoutingRules = grpclib.client.UnaryUnaryMethod(

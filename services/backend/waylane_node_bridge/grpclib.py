@@ -144,7 +144,7 @@ class Node(WayLaneNode):
         self,
         config: str,
         backend_type: service.BackendType,
-        users: list[service.User],
+        users: list[service.Subscription],
         keep_alive: int = 0,
         exclude_inbounds: list[str] | None = None,
         timeout: int | None = None,
@@ -157,7 +157,7 @@ class Node(WayLaneNode):
             raise NodeAPIError(code=-4, detail="Invalid node")
 
         req = service.Backend(
-            type=backend_type, config=config, users=users, keep_alive=keep_alive, exclude_inbounds=exclude_inbounds
+            type=backend_type, config=config, subscriptions=users, keep_alive=keep_alive, exclude_inbounds=exclude_inbounds
         )
 
         lease = await self._acquire_lifecycle_lease(LifecycleOperation.START)
@@ -264,26 +264,26 @@ class Node(WayLaneNode):
             timeout=timeout,
         )
 
-    async def get_user_online_stats(self, email: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+    async def get_subscription_online_stats(self, subscription_uuid: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
         timeout = timeout or self._default_timeout
         return await self._handle_grpc_request(
-            method=self._client.GetUserOnlineStats,
-            request=service.StatRequest(name=email),
+            method=self._client.GetSubscriptionOnlineStats,
+            request=service.StatRequest(name=subscription_uuid),
             timeout=timeout,
         )
 
-    async def get_user_online_ip_list(
-        self, email: str, timeout: int | None = None
+    async def get_subscription_online_ip_list(
+        self, subscription_uuid: str, timeout: int | None = None
     ) -> service.StatsOnlineIpListResponse | None:
         timeout = timeout or self._default_timeout
         return await self._handle_grpc_request(
-            method=self._client.GetUserOnlineIpListStats,
-            request=service.StatRequest(name=email),
+            method=self._client.GetSubscriptionOnlineIpListStats,
+            request=service.StatRequest(name=subscription_uuid),
             timeout=timeout,
         )
 
     async def sync_users(
-        self, users: list[service.User], flush_pending: bool = False, timeout: int | None = None
+        self, users: list[service.Subscription], flush_pending: bool = False, timeout: int | None = None
     ) -> service.Empty | None:
         timeout = timeout or self._default_timeout
         if flush_pending:
@@ -291,8 +291,8 @@ class Node(WayLaneNode):
 
         async with self._node_lock:
             response = await self._handle_grpc_request(
-                method=self._client.SyncUsers,
-                request=service.Users(users=users),
+                method=self._client.SyncSubscriptions,
+                request=service.Subscriptions(subscriptions=users),
                 timeout=timeout,
             )
         self._clear_rejected_users()
@@ -300,12 +300,12 @@ class Node(WayLaneNode):
 
     async def sync_users_chunked(
         self,
-        users: list[service.User],
+        users: list[service.Subscription],
         chunk_size: int = 100,
         flush_pending: bool = False,
         timeout: int | None = None,
-    ) -> list[service.User]:
-        """Send users via the client-streaming SyncUsersChunked RPC. Returns failed users."""
+    ) -> list[service.Subscription]:
+        """Send users via the client-streaming SyncSubscriptionsChunked RPC. Returns failed users."""
         if chunk_size <= 0:
             raise NodeAPIError(code=-2, detail="chunk_size must be positive")
 
@@ -315,10 +315,10 @@ class Node(WayLaneNode):
 
         async with self._node_lock:
             try:
-                async with self._client.SyncUsersChunked.open(metadata=self._metadata) as stream:
+                async with self._client.SyncSubscriptionsChunked.open(metadata=self._metadata) as stream:
                     if not users:
                         await asyncio.wait_for(
-                            stream.send_message(service.UsersChunk(index=0, last=True)),
+                            stream.send_message(service.SubscriptionsChunk(index=0, last=True)),
                             timeout=self._internal_timeout,
                         )
                     else:
@@ -327,7 +327,7 @@ class Node(WayLaneNode):
                             chunk_users = users[start : start + chunk_size]
                             is_last = start + chunk_size >= total_users
                             await asyncio.wait_for(
-                                stream.send_message(service.UsersChunk(users=chunk_users, index=index, last=is_last)),
+                                stream.send_message(service.SubscriptionsChunk(subscriptions=chunk_users, index=index, last=is_last)),
                                 timeout=self._internal_timeout,
                             )
 
@@ -389,7 +389,7 @@ class Node(WayLaneNode):
                 target_domain=target_domain,
                 target_port=target_port,
                 protocol=protocol,
-                user=user,
+                subscription_uuid=user,
                 attributes=attributes or {},
                 field_selectors=field_selectors or [],
                 publish_result=publish_result,
@@ -431,18 +431,18 @@ class Node(WayLaneNode):
                 timeout=timeout,
             )
 
-    async def _sync_batch_users(self, users: list[service.User]) -> list[service.User]:
-        """Sync users via gRPC SyncUser stream. Returns failed users."""
+    async def _sync_batch_users(self, users: list[service.Subscription]) -> list[service.Subscription]:
+        """Sync users via gRPC SyncSubscription stream. Returns failed users."""
         failed = []
         try:
-            async with self._client.SyncUser.open(metadata=self._metadata) as stream:
+            async with self._client.SyncSubscription.open(metadata=self._metadata) as stream:
                 for user in users:
                     try:
                         await asyncio.wait_for(stream.send_message(user), timeout=self._internal_timeout)
                     except Exception as e:
                         error_type = type(e).__name__
                         self.logger.warning(
-                            f"[{self.name}] Failed to sync user {user.email} | Error: {error_type} - {e!s}"
+                            f"[{self.name}] Failed to sync user {user.subscription_uuid} | Error: {error_type} - {e!s}"
                         )
                         failed.append(user)
                 await stream.end()
