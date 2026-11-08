@@ -7,6 +7,7 @@ from google.protobuf import (
   descriptor as _descriptor,
   descriptor_pool as _descriptor_pool,
   runtime_version as _runtime_version,
+  struct_pb2 as google_dot_protobuf_dot_struct__pb2,  # noqa: F401
   symbol_database as _symbol_database,
 )
 from google.protobuf.internal import builder as _builder
