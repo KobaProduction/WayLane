@@ -70,12 +70,12 @@ func (BackendType) EnumDescriptor() ([]byte, []int) {
 type StatType int32
 
 const (
-	StatType_Outbounds StatType = 0
-	StatType_Outbound  StatType = 1
-	StatType_Inbounds  StatType = 2
-	StatType_Inbound   StatType = 3
-	StatType_UsersStat StatType = 4
-	StatType_UserStat  StatType = 5
+	StatType_Outbounds         StatType = 0
+	StatType_Outbound          StatType = 1
+	StatType_Inbounds          StatType = 2
+	StatType_Inbound           StatType = 3
+	StatType_SubscriptionsStat StatType = 4
+	StatType_SubscriptionStat  StatType = 5
 )
 
 // Enum value maps for StatType.
@@ -85,16 +85,16 @@ var (
 		1: "Outbound",
 		2: "Inbounds",
 		3: "Inbound",
-		4: "UsersStat",
-		5: "UserStat",
+		4: "SubscriptionsStat",
+		5: "SubscriptionStat",
 	}
 	StatType_value = map[string]int32{
-		"Outbounds": 0,
-		"Outbound":  1,
-		"Inbounds":  2,
-		"Inbound":   3,
-		"UsersStat": 4,
-		"UserStat":  5,
+		"Outbounds":         0,
+		"Outbound":          1,
+		"Inbounds":          2,
+		"Inbound":           3,
+		"SubscriptionsStat": 4,
+		"SubscriptionStat":  5,
 	}
 )
 
@@ -226,7 +226,7 @@ type Backend struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Type            BackendType            `protobuf:"varint,1,opt,name=type,proto3,enum=waylane.node.v1.BackendType" json:"type,omitempty"`
 	Config          string                 `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
-	Users           []*User                `protobuf:"bytes,3,rep,name=users,proto3" json:"users,omitempty"`
+	Subscriptions   []*Subscription        `protobuf:"bytes,3,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
 	KeepAlive       uint64                 `protobuf:"varint,4,opt,name=keep_alive,json=keepAlive,proto3" json:"keep_alive,omitempty"`
 	ExcludeInbounds []string               `protobuf:"bytes,5,rep,name=exclude_inbounds,json=excludeInbounds,proto3" json:"exclude_inbounds,omitempty"`
 	unknownFields   protoimpl.UnknownFields
@@ -277,9 +277,9 @@ func (x *Backend) GetConfig() string {
 	return ""
 }
 
-func (x *Backend) GetUsers() []*User {
+func (x *Backend) GetSubscriptions() []*Subscription {
 	if x != nil {
-		return x.Users
+		return x.Subscriptions
 	}
 	return nil
 }
@@ -1008,7 +1008,7 @@ func (x *SystemStatsResponse) GetUptime() uint64 {
 	return 0
 }
 
-// User
+// Xray protocol-specific account credentials; VLESS/VMess id values remain Xray-defined UUIDs.
 type Vmess struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1441,29 +1441,31 @@ func (x *Proxy) GetMasque() *Masque {
 	return nil
 }
 
-type User struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
-	Proxies       *Proxy                 `protobuf:"bytes,2,opt,name=proxies,proto3" json:"proxies,omitempty"`
-	Inbounds      []string               `protobuf:"bytes,3,rep,name=inbounds,proto3" json:"inbounds,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+type Subscription struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Canonical WayLane subscription UUIDv4, independent of Xray account
+	// terminology. Xray adapters map it into their required `email` field.
+	SubscriptionUuid string   `protobuf:"bytes,1,opt,name=subscription_uuid,json=subscriptionUuid,proto3" json:"subscription_uuid,omitempty"`
+	Proxies          *Proxy   `protobuf:"bytes,2,opt,name=proxies,proto3" json:"proxies,omitempty"`
+	Inbounds         []string `protobuf:"bytes,3,rep,name=inbounds,proto3" json:"inbounds,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
-func (x *User) Reset() {
-	*x = User{}
+func (x *Subscription) Reset() {
+	*x = Subscription{}
 	mi := &file_common_service_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *User) String() string {
+func (x *Subscription) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*User) ProtoMessage() {}
+func (*Subscription) ProtoMessage() {}
 
-func (x *User) ProtoReflect() protoreflect.Message {
+func (x *Subscription) ProtoReflect() protoreflect.Message {
 	mi := &file_common_service_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1475,53 +1477,53 @@ func (x *User) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use User.ProtoReflect.Descriptor instead.
-func (*User) Descriptor() ([]byte, []int) {
+// Deprecated: Use Subscription.ProtoReflect.Descriptor instead.
+func (*Subscription) Descriptor() ([]byte, []int) {
 	return file_common_service_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *User) GetEmail() string {
+func (x *Subscription) GetSubscriptionUuid() string {
 	if x != nil {
-		return x.Email
+		return x.SubscriptionUuid
 	}
 	return ""
 }
 
-func (x *User) GetProxies() *Proxy {
+func (x *Subscription) GetProxies() *Proxy {
 	if x != nil {
 		return x.Proxies
 	}
 	return nil
 }
 
-func (x *User) GetInbounds() []string {
+func (x *Subscription) GetInbounds() []string {
 	if x != nil {
 		return x.Inbounds
 	}
 	return nil
 }
 
-type Users struct {
+type Subscriptions struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Users         []*User                `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+	Subscriptions []*Subscription        `protobuf:"bytes,1,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Users) Reset() {
-	*x = Users{}
+func (x *Subscriptions) Reset() {
+	*x = Subscriptions{}
 	mi := &file_common_service_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Users) String() string {
+func (x *Subscriptions) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Users) ProtoMessage() {}
+func (*Subscriptions) ProtoMessage() {}
 
-func (x *Users) ProtoReflect() protoreflect.Message {
+func (x *Subscriptions) ProtoReflect() protoreflect.Message {
 	mi := &file_common_service_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1533,41 +1535,41 @@ func (x *Users) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Users.ProtoReflect.Descriptor instead.
-func (*Users) Descriptor() ([]byte, []int) {
+// Deprecated: Use Subscriptions.ProtoReflect.Descriptor instead.
+func (*Subscriptions) Descriptor() ([]byte, []int) {
 	return file_common_service_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *Users) GetUsers() []*User {
+func (x *Subscriptions) GetSubscriptions() []*Subscription {
 	if x != nil {
-		return x.Users
+		return x.Subscriptions
 	}
 	return nil
 }
 
-type UsersChunk struct {
+type SubscriptionsChunk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Users         []*User                `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+	Subscriptions []*Subscription        `protobuf:"bytes,1,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
 	Index         uint64                 `protobuf:"varint,2,opt,name=index,proto3" json:"index,omitempty"`
 	Last          bool                   `protobuf:"varint,3,opt,name=last,proto3" json:"last,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *UsersChunk) Reset() {
-	*x = UsersChunk{}
+func (x *SubscriptionsChunk) Reset() {
+	*x = SubscriptionsChunk{}
 	mi := &file_common_service_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *UsersChunk) String() string {
+func (x *SubscriptionsChunk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*UsersChunk) ProtoMessage() {}
+func (*SubscriptionsChunk) ProtoMessage() {}
 
-func (x *UsersChunk) ProtoReflect() protoreflect.Message {
+func (x *SubscriptionsChunk) ProtoReflect() protoreflect.Message {
 	mi := &file_common_service_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1579,26 +1581,26 @@ func (x *UsersChunk) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use UsersChunk.ProtoReflect.Descriptor instead.
-func (*UsersChunk) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubscriptionsChunk.ProtoReflect.Descriptor instead.
+func (*SubscriptionsChunk) Descriptor() ([]byte, []int) {
 	return file_common_service_proto_rawDescGZIP(), []int{24}
 }
 
-func (x *UsersChunk) GetUsers() []*User {
+func (x *SubscriptionsChunk) GetSubscriptions() []*Subscription {
 	if x != nil {
-		return x.Users
+		return x.Subscriptions
 	}
 	return nil
 }
 
-func (x *UsersChunk) GetIndex() uint64 {
+func (x *SubscriptionsChunk) GetIndex() uint64 {
 	if x != nil {
 		return x.Index
 	}
 	return 0
 }
 
-func (x *UsersChunk) GetLast() bool {
+func (x *SubscriptionsChunk) GetLast() bool {
 	if x != nil {
 		return x.Last
 	}
@@ -1799,19 +1801,19 @@ func (x *BalancerInfoResponse) GetPrincipleTarget() []string {
 }
 
 type TestRouteRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	InboundTag     string                 `protobuf:"bytes,1,opt,name=inbound_tag,json=inboundTag,proto3" json:"inbound_tag,omitempty"`
-	Network        string                 `protobuf:"bytes,2,opt,name=network,proto3" json:"network,omitempty"` // "tcp" | "udp"
-	TargetIp       string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`
-	TargetDomain   string                 `protobuf:"bytes,4,opt,name=target_domain,json=targetDomain,proto3" json:"target_domain,omitempty"`
-	TargetPort     uint32                 `protobuf:"varint,5,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`
-	Protocol       string                 `protobuf:"bytes,6,opt,name=protocol,proto3" json:"protocol,omitempty"`
-	User           string                 `protobuf:"bytes,7,opt,name=user,proto3" json:"user,omitempty"`
-	Attributes     map[string]string      `protobuf:"bytes,8,rep,name=attributes,proto3" json:"attributes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	FieldSelectors []string               `protobuf:"bytes,9,rep,name=field_selectors,json=fieldSelectors,proto3" json:"field_selectors,omitempty"`
-	PublishResult  bool                   `protobuf:"varint,10,opt,name=publish_result,json=publishResult,proto3" json:"publish_result,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	InboundTag       string                 `protobuf:"bytes,1,opt,name=inbound_tag,json=inboundTag,proto3" json:"inbound_tag,omitempty"`
+	Network          string                 `protobuf:"bytes,2,opt,name=network,proto3" json:"network,omitempty"` // "tcp" | "udp"
+	TargetIp         string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`
+	TargetDomain     string                 `protobuf:"bytes,4,opt,name=target_domain,json=targetDomain,proto3" json:"target_domain,omitempty"`
+	TargetPort       uint32                 `protobuf:"varint,5,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`
+	Protocol         string                 `protobuf:"bytes,6,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	SubscriptionUuid string                 `protobuf:"bytes,7,opt,name=subscription_uuid,json=subscriptionUuid,proto3" json:"subscription_uuid,omitempty"`
+	Attributes       map[string]string      `protobuf:"bytes,8,rep,name=attributes,proto3" json:"attributes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	FieldSelectors   []string               `protobuf:"bytes,9,rep,name=field_selectors,json=fieldSelectors,proto3" json:"field_selectors,omitempty"`
+	PublishResult    bool                   `protobuf:"varint,10,opt,name=publish_result,json=publishResult,proto3" json:"publish_result,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TestRouteRequest) Reset() {
@@ -1886,9 +1888,9 @@ func (x *TestRouteRequest) GetProtocol() string {
 	return ""
 }
 
-func (x *TestRouteRequest) GetUser() string {
+func (x *TestRouteRequest) GetSubscriptionUuid() string {
 	if x != nil {
-		return x.User
+		return x.SubscriptionUuid
 	}
 	return ""
 }
@@ -2150,11 +2152,11 @@ const file_common_service_proto_rawDesc = "" +
 	"\x10BaseInfoResponse\x12\x18\n" +
 	"\astarted\x18\x01 \x01(\bR\astarted\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12!\n" +
-	"\fnode_version\x18\x03 \x01(\tR\vnodeVersion\"\xca\x01\n" +
+	"\fnode_version\x18\x03 \x01(\tR\vnodeVersion\"\xe2\x01\n" +
 	"\aBackend\x120\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1c.waylane.node.v1.BackendTypeR\x04type\x12\x16\n" +
-	"\x06config\x18\x02 \x01(\tR\x06config\x12+\n" +
-	"\x05users\x18\x03 \x03(\v2\x15.waylane.node.v1.UserR\x05users\x12\x1d\n" +
+	"\x06config\x18\x02 \x01(\tR\x06config\x12C\n" +
+	"\rsubscriptions\x18\x03 \x03(\v2\x1d.waylane.node.v1.SubscriptionR\rsubscriptions\x12\x1d\n" +
 	"\n" +
 	"keep_alive\x18\x04 \x01(\x04R\tkeepAlive\x12)\n" +
 	"\x10exclude_inbounds\x18\x05 \x03(\tR\x0fexcludeInbounds\"\x1d\n" +
@@ -2239,16 +2241,15 @@ const file_common_service_proto_rawDesc = "" +
 	"\vshadowsocks\x18\x04 \x01(\v2\x1c.waylane.node.v1.ShadowsocksR\vshadowsocks\x128\n" +
 	"\twireguard\x18\x05 \x01(\v2\x1a.waylane.node.v1.WireguardR\twireguard\x125\n" +
 	"\bhysteria\x18\x06 \x01(\v2\x19.waylane.node.v1.HysteriaR\bhysteria\x12/\n" +
-	"\x06masque\x18\a \x01(\v2\x17.waylane.node.v1.MasqueR\x06masque\"j\n" +
-	"\x04User\x12\x14\n" +
-	"\x05email\x18\x01 \x01(\tR\x05email\x120\n" +
+	"\x06masque\x18\a \x01(\v2\x17.waylane.node.v1.MasqueR\x06masque\"\x89\x01\n" +
+	"\fSubscription\x12+\n" +
+	"\x11subscription_uuid\x18\x01 \x01(\tR\x10subscriptionUuid\x120\n" +
 	"\aproxies\x18\x02 \x01(\v2\x16.waylane.node.v1.ProxyR\aproxies\x12\x1a\n" +
-	"\binbounds\x18\x03 \x03(\tR\binbounds\"4\n" +
-	"\x05Users\x12+\n" +
-	"\x05users\x18\x01 \x03(\v2\x15.waylane.node.v1.UserR\x05users\"c\n" +
-	"\n" +
-	"UsersChunk\x12+\n" +
-	"\x05users\x18\x01 \x03(\v2\x15.waylane.node.v1.UserR\x05users\x12\x14\n" +
+	"\binbounds\x18\x03 \x03(\tR\binbounds\"T\n" +
+	"\rSubscriptions\x12C\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2\x1d.waylane.node.v1.SubscriptionR\rsubscriptions\"\x83\x01\n" +
+	"\x12SubscriptionsChunk\x12C\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2\x1d.waylane.node.v1.SubscriptionR\rsubscriptions\x12\x14\n" +
 	"\x05index\x18\x02 \x01(\x04R\x05index\x12\x12\n" +
 	"\x04last\x18\x03 \x01(\bR\x04last\"K\n" +
 	"\vRoutingRule\x12!\n" +
@@ -2260,7 +2261,7 @@ const file_common_service_proto_rawDesc = "" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\"j\n" +
 	"\x14BalancerInfoResponse\x12'\n" +
 	"\x0foverride_target\x18\x01 \x01(\tR\x0eoverrideTarget\x12)\n" +
-	"\x10principle_target\x18\x02 \x03(\tR\x0fprincipleTarget\"\xc2\x03\n" +
+	"\x10principle_target\x18\x02 \x03(\tR\x0fprincipleTarget\"\xdb\x03\n" +
 	"\x10TestRouteRequest\x12\x1f\n" +
 	"\vinbound_tag\x18\x01 \x01(\tR\n" +
 	"inboundTag\x12\x18\n" +
@@ -2269,8 +2270,8 @@ const file_common_service_proto_rawDesc = "" +
 	"\rtarget_domain\x18\x04 \x01(\tR\ftargetDomain\x12\x1f\n" +
 	"\vtarget_port\x18\x05 \x01(\rR\n" +
 	"targetPort\x12\x1a\n" +
-	"\bprotocol\x18\x06 \x01(\tR\bprotocol\x12\x12\n" +
-	"\x04user\x18\a \x01(\tR\x04user\x12Q\n" +
+	"\bprotocol\x18\x06 \x01(\tR\bprotocol\x12+\n" +
+	"\x11subscription_uuid\x18\a \x01(\tR\x10subscriptionUuid\x12Q\n" +
 	"\n" +
 	"attributes\x18\b \x03(\v21.waylane.node.v1.TestRouteRequest.AttributesEntryR\n" +
 	"attributes\x12'\n" +
@@ -2297,14 +2298,14 @@ const file_common_service_proto_rawDesc = "" +
 	"\x06target\x18\x02 \x01(\tR\x06target*&\n" +
 	"\vBackendType\x12\b\n" +
 	"\x04XRAY\x10\x00\x12\r\n" +
-	"\tWIREGUARD\x10\x01*_\n" +
+	"\tWIREGUARD\x10\x01*o\n" +
 	"\bStatType\x12\r\n" +
 	"\tOutbounds\x10\x00\x12\f\n" +
 	"\bOutbound\x10\x01\x12\f\n" +
 	"\bInbounds\x10\x02\x12\v\n" +
-	"\aInbound\x10\x03\x12\r\n" +
-	"\tUsersStat\x10\x04\x12\f\n" +
-	"\bUserStat\x10\x052\x8c\f\n" +
+	"\aInbound\x10\x03\x12\x15\n" +
+	"\x11SubscriptionsStat\x10\x04\x12\x14\n" +
+	"\x10SubscriptionStat\x10\x052\xcc\f\n" +
 	"\vNodeService\x12F\n" +
 	"\x05Start\x12\x18.waylane.node.v1.Backend\x1a!.waylane.node.v1.BaseInfoResponse\"\x00\x128\n" +
 	"\x04Stop\x12\x16.waylane.node.v1.Empty\x1a\x16.waylane.node.v1.Empty\"\x00\x12J\n" +
@@ -2313,12 +2314,12 @@ const file_common_service_proto_rawDesc = "" +
 	"\x0eGetSystemStats\x12\x16.waylane.node.v1.Empty\x1a$.waylane.node.v1.SystemStatsResponse\"\x00\x12R\n" +
 	"\x0fGetBackendStats\x12\x16.waylane.node.v1.Empty\x1a%.waylane.node.v1.BackendStatsResponse\"\x00\x12I\n" +
 	"\bGetStats\x12\x1c.waylane.node.v1.StatRequest\x1a\x1d.waylane.node.v1.StatResponse\"\x00\x12Z\n" +
-	"\x13GetOutboundsLatency\x12\x1f.waylane.node.v1.LatencyRequest\x1a .waylane.node.v1.LatencyResponse\"\x00\x12Y\n" +
-	"\x12GetUserOnlineStats\x12\x1c.waylane.node.v1.StatRequest\x1a#.waylane.node.v1.OnlineStatResponse\"\x00\x12f\n" +
-	"\x18GetUserOnlineIpListStats\x12\x1c.waylane.node.v1.StatRequest\x1a*.waylane.node.v1.StatsOnlineIpListResponse\"\x00\x12=\n" +
-	"\bSyncUser\x12\x15.waylane.node.v1.User\x1a\x16.waylane.node.v1.Empty\"\x00(\x01\x12=\n" +
-	"\tSyncUsers\x12\x16.waylane.node.v1.Users\x1a\x16.waylane.node.v1.Empty\"\x00\x12K\n" +
-	"\x10SyncUsersChunked\x12\x1b.waylane.node.v1.UsersChunk\x1a\x16.waylane.node.v1.Empty\"\x00(\x01\x12S\n" +
+	"\x13GetOutboundsLatency\x12\x1f.waylane.node.v1.LatencyRequest\x1a .waylane.node.v1.LatencyResponse\"\x00\x12a\n" +
+	"\x1aGetSubscriptionOnlineStats\x12\x1c.waylane.node.v1.StatRequest\x1a#.waylane.node.v1.OnlineStatResponse\"\x00\x12n\n" +
+	" GetSubscriptionOnlineIpListStats\x12\x1c.waylane.node.v1.StatRequest\x1a*.waylane.node.v1.StatsOnlineIpListResponse\"\x00\x12M\n" +
+	"\x10SyncSubscription\x12\x1d.waylane.node.v1.Subscription\x1a\x16.waylane.node.v1.Empty\"\x00(\x01\x12M\n" +
+	"\x11SyncSubscriptions\x12\x1e.waylane.node.v1.Subscriptions\x1a\x16.waylane.node.v1.Empty\"\x00\x12[\n" +
+	"\x18SyncSubscriptionsChunked\x12#.waylane.node.v1.SubscriptionsChunk\x1a\x16.waylane.node.v1.Empty\"\x00(\x01\x12S\n" +
 	"\x10ListRoutingRules\x12\x16.waylane.node.v1.Empty\x1a%.waylane.node.v1.RoutingRulesResponse\"\x00\x12`\n" +
 	"\x0fGetBalancerInfo\x12$.waylane.node.v1.BalancerInfoRequest\x1a%.waylane.node.v1.BalancerInfoResponse\"\x00\x12N\n" +
 	"\tTestRoute\x12!.waylane.node.v1.TestRouteRequest\x1a\x1c.waylane.node.v1.RouteResult\"\x00\x12R\n" +
@@ -2365,9 +2366,9 @@ var file_common_service_proto_goTypes = []any{
 	(*Hysteria)(nil),                      // 21: waylane.node.v1.Hysteria
 	(*Masque)(nil),                        // 22: waylane.node.v1.Masque
 	(*Proxy)(nil),                         // 23: waylane.node.v1.Proxy
-	(*User)(nil),                          // 24: waylane.node.v1.User
-	(*Users)(nil),                         // 25: waylane.node.v1.Users
-	(*UsersChunk)(nil),                    // 26: waylane.node.v1.UsersChunk
+	(*Subscription)(nil),                  // 24: waylane.node.v1.Subscription
+	(*Subscriptions)(nil),                 // 25: waylane.node.v1.Subscriptions
+	(*SubscriptionsChunk)(nil),            // 26: waylane.node.v1.SubscriptionsChunk
 	(*RoutingRule)(nil),                   // 27: waylane.node.v1.RoutingRule
 	(*RoutingRulesResponse)(nil),          // 28: waylane.node.v1.RoutingRulesResponse
 	(*BalancerInfoRequest)(nil),           // 29: waylane.node.v1.BalancerInfoRequest
@@ -2382,7 +2383,7 @@ var file_common_service_proto_goTypes = []any{
 }
 var file_common_service_proto_depIdxs = []int32{
 	0,  // 0: waylane.node.v1.Backend.type:type_name -> waylane.node.v1.BackendType
-	24, // 1: waylane.node.v1.Backend.users:type_name -> waylane.node.v1.User
+	24, // 1: waylane.node.v1.Backend.subscriptions:type_name -> waylane.node.v1.Subscription
 	6,  // 2: waylane.node.v1.StatResponse.stats:type_name -> waylane.node.v1.Stat
 	1,  // 3: waylane.node.v1.StatRequest.type:type_name -> waylane.node.v1.StatType
 	36, // 4: waylane.node.v1.StatsOnlineIpListResponse.ips:type_name -> waylane.node.v1.StatsOnlineIpListResponse.IpsEntry
@@ -2394,9 +2395,9 @@ var file_common_service_proto_depIdxs = []int32{
 	20, // 10: waylane.node.v1.Proxy.wireguard:type_name -> waylane.node.v1.Wireguard
 	21, // 11: waylane.node.v1.Proxy.hysteria:type_name -> waylane.node.v1.Hysteria
 	22, // 12: waylane.node.v1.Proxy.masque:type_name -> waylane.node.v1.Masque
-	23, // 13: waylane.node.v1.User.proxies:type_name -> waylane.node.v1.Proxy
-	24, // 14: waylane.node.v1.Users.users:type_name -> waylane.node.v1.User
-	24, // 15: waylane.node.v1.UsersChunk.users:type_name -> waylane.node.v1.User
+	23, // 13: waylane.node.v1.Subscription.proxies:type_name -> waylane.node.v1.Proxy
+	24, // 14: waylane.node.v1.Subscriptions.subscriptions:type_name -> waylane.node.v1.Subscription
+	24, // 15: waylane.node.v1.SubscriptionsChunk.subscriptions:type_name -> waylane.node.v1.Subscription
 	27, // 16: waylane.node.v1.RoutingRulesResponse.rules:type_name -> waylane.node.v1.RoutingRule
 	37, // 17: waylane.node.v1.TestRouteRequest.attributes:type_name -> waylane.node.v1.TestRouteRequest.AttributesEntry
 	4,  // 18: waylane.node.v1.NodeService.Start:input_type -> waylane.node.v1.Backend
@@ -2407,11 +2408,11 @@ var file_common_service_proto_depIdxs = []int32{
 	2,  // 23: waylane.node.v1.NodeService.GetBackendStats:input_type -> waylane.node.v1.Empty
 	8,  // 24: waylane.node.v1.NodeService.GetStats:input_type -> waylane.node.v1.StatRequest
 	12, // 25: waylane.node.v1.NodeService.GetOutboundsLatency:input_type -> waylane.node.v1.LatencyRequest
-	8,  // 26: waylane.node.v1.NodeService.GetUserOnlineStats:input_type -> waylane.node.v1.StatRequest
-	8,  // 27: waylane.node.v1.NodeService.GetUserOnlineIpListStats:input_type -> waylane.node.v1.StatRequest
-	24, // 28: waylane.node.v1.NodeService.SyncUser:input_type -> waylane.node.v1.User
-	25, // 29: waylane.node.v1.NodeService.SyncUsers:input_type -> waylane.node.v1.Users
-	26, // 30: waylane.node.v1.NodeService.SyncUsersChunked:input_type -> waylane.node.v1.UsersChunk
+	8,  // 26: waylane.node.v1.NodeService.GetSubscriptionOnlineStats:input_type -> waylane.node.v1.StatRequest
+	8,  // 27: waylane.node.v1.NodeService.GetSubscriptionOnlineIpListStats:input_type -> waylane.node.v1.StatRequest
+	24, // 28: waylane.node.v1.NodeService.SyncSubscription:input_type -> waylane.node.v1.Subscription
+	25, // 29: waylane.node.v1.NodeService.SyncSubscriptions:input_type -> waylane.node.v1.Subscriptions
+	26, // 30: waylane.node.v1.NodeService.SyncSubscriptionsChunked:input_type -> waylane.node.v1.SubscriptionsChunk
 	2,  // 31: waylane.node.v1.NodeService.ListRoutingRules:input_type -> waylane.node.v1.Empty
 	29, // 32: waylane.node.v1.NodeService.GetBalancerInfo:input_type -> waylane.node.v1.BalancerInfoRequest
 	31, // 33: waylane.node.v1.NodeService.TestRoute:input_type -> waylane.node.v1.TestRouteRequest
@@ -2426,11 +2427,11 @@ var file_common_service_proto_depIdxs = []int32{
 	14, // 42: waylane.node.v1.NodeService.GetBackendStats:output_type -> waylane.node.v1.BackendStatsResponse
 	7,  // 43: waylane.node.v1.NodeService.GetStats:output_type -> waylane.node.v1.StatResponse
 	13, // 44: waylane.node.v1.NodeService.GetOutboundsLatency:output_type -> waylane.node.v1.LatencyResponse
-	9,  // 45: waylane.node.v1.NodeService.GetUserOnlineStats:output_type -> waylane.node.v1.OnlineStatResponse
-	10, // 46: waylane.node.v1.NodeService.GetUserOnlineIpListStats:output_type -> waylane.node.v1.StatsOnlineIpListResponse
-	2,  // 47: waylane.node.v1.NodeService.SyncUser:output_type -> waylane.node.v1.Empty
-	2,  // 48: waylane.node.v1.NodeService.SyncUsers:output_type -> waylane.node.v1.Empty
-	2,  // 49: waylane.node.v1.NodeService.SyncUsersChunked:output_type -> waylane.node.v1.Empty
+	9,  // 45: waylane.node.v1.NodeService.GetSubscriptionOnlineStats:output_type -> waylane.node.v1.OnlineStatResponse
+	10, // 46: waylane.node.v1.NodeService.GetSubscriptionOnlineIpListStats:output_type -> waylane.node.v1.StatsOnlineIpListResponse
+	2,  // 47: waylane.node.v1.NodeService.SyncSubscription:output_type -> waylane.node.v1.Empty
+	2,  // 48: waylane.node.v1.NodeService.SyncSubscriptions:output_type -> waylane.node.v1.Empty
+	2,  // 49: waylane.node.v1.NodeService.SyncSubscriptionsChunked:output_type -> waylane.node.v1.Empty
 	28, // 50: waylane.node.v1.NodeService.ListRoutingRules:output_type -> waylane.node.v1.RoutingRulesResponse
 	30, // 51: waylane.node.v1.NodeService.GetBalancerInfo:output_type -> waylane.node.v1.BalancerInfoResponse
 	32, // 52: waylane.node.v1.NodeService.TestRoute:output_type -> waylane.node.v1.RouteResult

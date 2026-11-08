@@ -24,10 +24,10 @@ var (
 )
 
 func testXrayPath(envName, fallback string) string {
-    if value := os.Getenv(envName); value != "" {
-        return value
-    }
-    return fallback
+	if value := os.Getenv(envName); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func TestXrayBackend(t *testing.T) {
@@ -45,8 +45,8 @@ func TestXrayBackend(t *testing.T) {
 	log.Println("xray config created")
 
 	// test HandlerServiceClient
-	user := &common.User{
-		Email: "test_user@example.com",
+	user := &common.Subscription{
+		SubscriptionUuid: "test_user@example.com",
 		Inbounds: []string{
 			"Shadowsocks 2022",
 			"VMESS TCP NOTLS",
@@ -74,8 +74,8 @@ func TestXrayBackend(t *testing.T) {
 		},
 	}
 
-	user2 := &common.User{
-		Email: "test_user1@example.com",
+	user2 := &common.Subscription{
+		SubscriptionUuid: "test_user1@example.com",
 		Inbounds: []string{
 			"VLESS TCP REALITY",
 			"VLESS TCP NOTLS",
@@ -111,7 +111,7 @@ func TestXrayBackend(t *testing.T) {
 	back, err := New(
 		context.Background(),
 		newConfig,
-		[]*common.User{user, user2},
+		[]*common.Subscription{user, user2},
 		netutil.FindFreePort(),
 		netutil.FindFreePort(),
 		cfg,
@@ -136,7 +136,7 @@ func TestXrayBackend(t *testing.T) {
 			stat.GetName(), stat.GetValue(), stat.GetType(), stat.GetLink())
 	}
 
-	if err = back.SyncUser(ctx1, user2); err != nil {
+	if err = back.SyncSubscription(ctx1, user2); err != nil {
 		t.Fatal(err)
 	}
 

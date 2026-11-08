@@ -22,15 +22,17 @@ type stubBackend struct {
 	statsBlocks bool // GetSysStats waits for its context to end
 }
 
-func (s *stubBackend) Started() bool { return s.started.Load() }
-func (s *stubBackend) Version() string { return "test" }
-func (s *stubBackend) SubscribeLogs(context.Context) <-chan string { return nil }
-func (s *stubBackend) Restart() error { return nil }
-func (s *stubBackend) Shutdown() { s.shutdowns.Add(1); s.started.Store(false) }
-func (s *stubBackend) SyncUser(context.Context, *common.User) error { return nil }
-func (s *stubBackend) SyncUsers(context.Context, []*common.User) error { return nil }
-func (s *stubBackend) UpdateUsers(context.Context, []*common.User) error { return nil }
-func (s *stubBackend) UpdateUsersAndRestart(context.Context, []*common.User) error { return nil }
+func (s *stubBackend) Started() bool                                                   { return s.started.Load() }
+func (s *stubBackend) Version() string                                                 { return "test" }
+func (s *stubBackend) SubscribeLogs(context.Context) <-chan string                     { return nil }
+func (s *stubBackend) Restart() error                                                  { return nil }
+func (s *stubBackend) Shutdown()                                                       { s.shutdowns.Add(1); s.started.Store(false) }
+func (s *stubBackend) SyncSubscription(context.Context, *common.Subscription) error    { return nil }
+func (s *stubBackend) SyncSubscriptions(context.Context, []*common.Subscription) error { return nil }
+func (s *stubBackend) UpdateUsers(context.Context, []*common.Subscription) error       { return nil }
+func (s *stubBackend) UpdateUsersAndRestart(context.Context, []*common.Subscription) error {
+	return nil
+}
 func (s *stubBackend) GetSysStats(ctx context.Context) (*common.BackendStatsResponse, error) {
 	s.statsCalls.Add(1)
 	if s.statsBlocks {
@@ -48,10 +50,10 @@ func (s *stubBackend) GetStats(context.Context, *common.StatRequest) (*common.St
 func (s *stubBackend) GetOutboundsLatency(context.Context, *common.LatencyRequest) (*common.LatencyResponse, error) {
 	return &common.LatencyResponse{}, nil
 }
-func (s *stubBackend) GetUserOnlineStats(context.Context, string) (*common.OnlineStatResponse, error) {
+func (s *stubBackend) GetSubscriptionOnlineStats(context.Context, string) (*common.OnlineStatResponse, error) {
 	return &common.OnlineStatResponse{}, nil
 }
-func (s *stubBackend) GetUserOnlineIpListStats(context.Context, string) (*common.StatsOnlineIpListResponse, error) {
+func (s *stubBackend) GetSubscriptionOnlineIpListStats(context.Context, string) (*common.StatsOnlineIpListResponse, error) {
 	return &common.StatsOnlineIpListResponse{}, nil
 }
 

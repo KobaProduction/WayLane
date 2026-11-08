@@ -291,7 +291,7 @@ func (c *Controller) StartBackend(ctx context.Context, backend *common.Backend) 
 		newBackend, err := xray.New(
 			ctx,
 			config,
-			backend.GetUsers(),
+			backend.GetSubscriptions(),
 			c.apiPort,
 			c.metricPort,
 			c.cfg,
@@ -306,7 +306,7 @@ func (c *Controller) StartBackend(ctx context.Context, backend *common.Backend) 
 		if err != nil {
 			return err
 		}
-		newBackend, err := wireguard.New(c.cfg, config, backend.GetUsers())
+		newBackend, err := wireguard.New(c.cfg, config, backend.GetSubscriptions())
 		if err != nil {
 			return err
 		}

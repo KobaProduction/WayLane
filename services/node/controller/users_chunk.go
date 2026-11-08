@@ -9,12 +9,12 @@ import (
 )
 
 // BuildUsersFromChunks orders chunked user payloads by their index and returns a single slice.
-func BuildUsersFromChunks(chunks map[uint64][]*common.User, lastIndex uint64, sawLast bool) ([]*common.User, error) {
+func BuildUsersFromChunks(chunks map[uint64][]*common.Subscription, lastIndex uint64, sawLast bool) ([]*common.Subscription, error) {
 	if !sawLast {
 		return nil, fmt.Errorf("missing final chunk indicator")
 	}
 
-	users := make([]*common.User, 0)
+	users := make([]*common.Subscription, 0)
 	for i := uint64(0); i <= lastIndex; i++ {
 		chunkUsers, ok := chunks[i]
 		if !ok {
@@ -31,8 +31,8 @@ func BuildUsersFromChunks(chunks map[uint64][]*common.User, lastIndex uint64, sa
 }
 
 // ApplyChunkedUserUpdate applies chunked user payloads as targeted deltas.
-// Full replacement sync is handled by SyncUsers; this path must not restart
+// Full replacement sync is handled by SyncSubscriptions; this path must not restart
 // the core for large queued user updates.
-func ApplyChunkedUserUpdate(ctx context.Context, back backend.Backend, users []*common.User) error {
+func ApplyChunkedUserUpdate(ctx context.Context, back backend.Backend, users []*common.Subscription) error {
 	return back.UpdateUsers(ctx, users)
 }

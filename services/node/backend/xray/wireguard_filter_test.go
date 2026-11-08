@@ -10,10 +10,10 @@ import (
 	"github.com/KobaProduction/waylane/services/node/common"
 )
 
-func testWireguardUser(peerIPs []string) *common.User {
-	return &common.User{
-		Email:    "peer@example.test",
-		Inbounds: []string{"wg-v4", "wg-v6"},
+func testWireguardUser(peerIPs []string) *common.Subscription {
+	return &common.Subscription{
+		SubscriptionUuid: "peer@example.test",
+		Inbounds:         []string{"wg-v4", "wg-v6"},
 		Proxies: &common.Proxy{Wireguard: &common.Wireguard{
 			PublicKey: base64.StdEncoding.EncodeToString([]byte(strings.Repeat("P", 32))),
 			PeerIps:   peerIPs,
@@ -29,15 +29,15 @@ func TestWireguardPeerIPsAreFilteredPerInbound(t *testing.T) {
 	v6 := &Inbound{Tag: "wg-v6", Protocol: Wireguard, Settings: map[string]any{"address": []any{"fd10::1/64"}}}
 	config := &Config{InboundConfigs: []*Inbound{v4, v6}}
 
-	config.syncUsers([]*common.User{user})
-	if got := v4.clients[user.Email].(*api.WireguardAccount).AllowedIPs; !slices.Equal(got, []string{"10.10.0.2/32"}) {
+	config.syncUsers([]*common.Subscription{user})
+	if got := v4.clients[user.SubscriptionUuid].(*api.WireguardAccount).AllowedIPs; !slices.Equal(got, []string{"10.10.0.2/32"}) {
 		t.Fatalf("startup IPv4 allowedIPs = %v", got)
 	}
-	if got := v6.clients[user.Email].(*api.WireguardAccount).AllowedIPs; !slices.Equal(got, []string{"fd10::2/128"}) {
+	if got := v6.clients[user.SubscriptionUuid].(*api.WireguardAccount).AllowedIPs; !slices.Equal(got, []string{"fd10::2/128"}) {
 		t.Fatalf("startup IPv6 allowedIPs = %v", got)
 	}
 
-	_, updates := config.buildInboundUpdates([]*common.User{user})
+	_, updates := config.buildInboundUpdates([]*common.Subscription{user})
 	for _, tc := range []struct {
 		tag  string
 		want string
@@ -60,7 +60,7 @@ func TestWireguardPeerIPsAreFilteredPerInbound(t *testing.T) {
 	}
 	for _, inbound := range config.InboundConfigs {
 		account, active := isActiveInbound(inbound, user.Inbounds, settings)
-		if !active || !slices.Equal(account.(*api.WireguardAccount).AllowedIPs, inbound.clients[user.Email].(*api.WireguardAccount).AllowedIPs) {
+		if !active || !slices.Equal(account.(*api.WireguardAccount).AllowedIPs, inbound.clients[user.SubscriptionUuid].(*api.WireguardAccount).AllowedIPs) {
 			t.Fatalf("single user account for %s = %#v, active = %t", inbound.Tag, account, active)
 		}
 	}
@@ -69,7 +69,7 @@ func TestWireguardPeerIPsAreFilteredPerInbound(t *testing.T) {
 func TestWireguardInboundOmitsPeersWithoutMatchingIPs(t *testing.T) {
 	inbound := &Inbound{Tag: "wg-v4", Protocol: Wireguard, Settings: map[string]any{"address": []any{"10.10.0.1/24"}}}
 	user := testWireguardUser([]string{"10.20.0.2/32"})
-	inbound.syncUsers([]*common.User{user})
+	inbound.syncUsers([]*common.Subscription{user})
 	if len(inbound.clients) != 0 {
 		t.Fatalf("startup clients = %v", inbound.clients)
 	}
@@ -81,7 +81,7 @@ func TestWireguardInboundOmitsPeersWithoutMatchingIPs(t *testing.T) {
 	if account, active := isActiveInbound(inbound, user.Inbounds, settings); active || account != nil {
 		t.Fatalf("single user account = %#v, active = %t", account, active)
 	}
-	_, updates := (&Config{InboundConfigs: []*Inbound{inbound}}).buildInboundUpdates([]*common.User{user})
+	_, updates := (&Config{InboundConfigs: []*Inbound{inbound}}).buildInboundUpdates([]*common.Subscription{user})
 	if len(updates[inbound.Tag].accounts) != 0 {
 		t.Fatalf("incremental accounts = %v", updates[inbound.Tag].accounts)
 	}

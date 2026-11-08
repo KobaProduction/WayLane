@@ -10,12 +10,12 @@ import (
 )
 
 func TestBuildUsersFromChunksOrdersByIndex(t *testing.T) {
-	chunks := map[uint64][]*common.User{
+	chunks := map[uint64][]*common.Subscription{
 		1: {
-			{Email: "second"},
+			{SubscriptionUuid: "second"},
 		},
 		0: {
-			{Email: "first"},
+			{SubscriptionUuid: "first"},
 		},
 	}
 
@@ -24,22 +24,22 @@ func TestBuildUsersFromChunksOrdersByIndex(t *testing.T) {
 		t.Fatalf("expected users to build successfully, got error: %v", err)
 	}
 
-	if len(users) != 2 || users[0].GetEmail() != "first" || users[1].GetEmail() != "second" {
+	if len(users) != 2 || users[0].GetSubscriptionUuid() != "first" || users[1].GetSubscriptionUuid() != "second" {
 		t.Fatalf("users not ordered by index: %#v", users)
 	}
 }
 
 func TestBuildUsersFromChunksMissingLast(t *testing.T) {
-	_, err := BuildUsersFromChunks(map[uint64][]*common.User{}, 0, false)
+	_, err := BuildUsersFromChunks(map[uint64][]*common.Subscription{}, 0, false)
 	if err == nil || !strings.Contains(err.Error(), "missing final chunk indicator") {
 		t.Fatalf("expected missing final chunk indicator error, got: %v", err)
 	}
 }
 
 func TestBuildUsersFromChunksMissingChunk(t *testing.T) {
-	chunks := map[uint64][]*common.User{
+	chunks := map[uint64][]*common.Subscription{
 		1: {
-			{Email: "only"},
+			{SubscriptionUuid: "only"},
 		},
 	}
 
@@ -56,21 +56,21 @@ type chunkUpdateBackend struct {
 	updatedUsers int
 }
 
-func (b *chunkUpdateBackend) UpdateUsers(_ context.Context, users []*common.User) error {
+func (b *chunkUpdateBackend) UpdateUsers(_ context.Context, users []*common.Subscription) error {
 	b.updateCalls++
 	b.updatedUsers = len(users)
 	return nil
 }
 
-func (b *chunkUpdateBackend) UpdateUsersAndRestart(_ context.Context, _ []*common.User) error {
+func (b *chunkUpdateBackend) UpdateUsersAndRestart(_ context.Context, _ []*common.Subscription) error {
 	b.restartCalls++
 	return nil
 }
 
 func TestApplyChunkedUserUpdateDoesNotRestartForLargeBatches(t *testing.T) {
-	users := make([]*common.User, 150)
+	users := make([]*common.Subscription, 150)
 	for i := range users {
-		users[i] = &common.User{Email: "user"}
+		users[i] = &common.Subscription{SubscriptionUuid: "user"}
 	}
 
 	fakeBackend := &chunkUpdateBackend{}
