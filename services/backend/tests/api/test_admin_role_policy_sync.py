@@ -24,11 +24,11 @@ class UnreachableNode:
     async def _supports_chunked_sync(self):
         return True, None
 
-    async def sync_users_chunked(self, users, chunk_size=100, flush_pending=False, timeout=None):
+    async def sync_subscriptions_chunked(self, users, chunk_size=100, flush_pending=False, timeout=None):
         self.chunked_calls += 1
         return list(users)
 
-    async def _sync_batch_users(self, users):
+    async def _sync_batch_subscriptions(self, users):
         return list(users)
 
 

@@ -10,8 +10,7 @@ from grpclib.exceptions import GRPCError, StreamTerminatedError
 from python_socks.async_.asyncio import Proxy
 
 from waylane_node_bridge.abstract_node import WayLaneNode
-from waylane_node_bridge.common import service_grpc
-from waylane_node_bridge.common import service_pb2 as service
+from waylane_node_bridge.common import service_grpc, service_pb2 as service
 from waylane_node_bridge.controller import FailedUsers, Health, NodeAPIError
 from waylane_node_bridge.storage import LifecycleOperation, LifecycleStatus
 from waylane_node_bridge.utils import format_host_for_url, grpc_to_http_status
@@ -157,7 +156,11 @@ class Node(WayLaneNode):
             raise NodeAPIError(code=-4, detail="Invalid node")
 
         req = service.Backend(
-            type=backend_type, config=config, subscriptions=users, keep_alive=keep_alive, exclude_inbounds=exclude_inbounds
+            type=backend_type,
+            config=config,
+            subscriptions=users,
+            keep_alive=keep_alive,
+            exclude_inbounds=exclude_inbounds,
         )
 
         lease = await self._acquire_lifecycle_lease(LifecycleOperation.START)
@@ -213,9 +216,7 @@ class Node(WayLaneNode):
                         self.logger.debug(
                             f"[{self.name}] Best-effort Stop request failed | Error: {type(e).__name__} - {e!s}"
                         )
-                    await self._release_lifecycle_lease(
-                        lease, LifecycleStatus.STOPPED, desired=LifecycleStatus.STOPPED
-                    )
+                    await self._release_lifecycle_lease(lease, LifecycleStatus.STOPPED, desired=LifecycleStatus.STOPPED)
             except BaseException:
                 await self._release_lifecycle_lease(lease, LifecycleStatus.BROKEN, desired=LifecycleStatus.STOPPED)
                 raise
@@ -264,7 +265,9 @@ class Node(WayLaneNode):
             timeout=timeout,
         )
 
-    async def get_subscription_online_stats(self, subscription_uuid: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+    async def get_subscription_online_stats(
+        self, subscription_uuid: str, timeout: int | None = None
+    ) -> service.OnlineStatResponse | None:
         timeout = timeout or self._default_timeout
         return await self._handle_grpc_request(
             method=self._client.GetSubscriptionOnlineStats,
@@ -282,12 +285,12 @@ class Node(WayLaneNode):
             timeout=timeout,
         )
 
-    async def sync_users(
+    async def sync_subscriptions(
         self, users: list[service.Subscription], flush_pending: bool = False, timeout: int | None = None
     ) -> service.Empty | None:
         timeout = timeout or self._default_timeout
         if flush_pending:
-            await self.flush_pending_users()
+            await self.flush_pending_subscriptions()
 
         async with self._node_lock:
             response = await self._handle_grpc_request(
@@ -298,7 +301,7 @@ class Node(WayLaneNode):
         self._clear_rejected_users()
         return response
 
-    async def sync_users_chunked(
+    async def sync_subscriptions_chunked(
         self,
         users: list[service.Subscription],
         chunk_size: int = 100,
@@ -311,7 +314,7 @@ class Node(WayLaneNode):
 
         timeout = timeout or self._default_timeout
         if flush_pending:
-            await self.flush_pending_users()
+            await self.flush_pending_subscriptions()
 
         async with self._node_lock:
             try:
@@ -327,7 +330,9 @@ class Node(WayLaneNode):
                             chunk_users = users[start : start + chunk_size]
                             is_last = start + chunk_size >= total_users
                             await asyncio.wait_for(
-                                stream.send_message(service.SubscriptionsChunk(subscriptions=chunk_users, index=index, last=is_last)),
+                                stream.send_message(
+                                    service.SubscriptionsChunk(subscriptions=chunk_users, index=index, last=is_last)
+                                ),
                                 timeout=self._internal_timeout,
                             )
 
@@ -402,7 +407,7 @@ class Node(WayLaneNode):
     ) -> service.Empty | None:
         timeout = timeout or self._default_timeout
         # Serialize state-changing routing calls under the node lock, like the other
-        # mutating ops (start/stop/sync_users), so a rule change can't race a
+        # mutating ops (start/stop/sync_subscriptions), so a rule change can't race a
         # concurrent core restart (read-only routing methods stay lock-free).
         async with self._node_lock:
             return await self._handle_grpc_request(
@@ -431,7 +436,7 @@ class Node(WayLaneNode):
                 timeout=timeout,
             )
 
-    async def _sync_batch_users(self, users: list[service.Subscription]) -> list[service.Subscription]:
+    async def _sync_batch_subscriptions(self, users: list[service.Subscription]) -> list[service.Subscription]:
         """Sync users via gRPC SyncSubscription stream. Returns failed users."""
         failed = []
         try:
@@ -513,7 +518,7 @@ class Node(WayLaneNode):
             self.logger.debug(f"[{self.name}] Health check task finished")
 
     @asynccontextmanager
-    async def stream_logs(self, max_queue_size: int = 1000) -> AsyncGenerator[asyncio.Queue[str | NodeAPIError], None]:
+    async def stream_logs(self, max_queue_size: int = 1000) -> AsyncGenerator[asyncio.Queue[str | NodeAPIError]]:
         """Context manager for streaming logs on-demand.
 
         Yields a queue that receives log messages in real-time.
@@ -564,7 +569,7 @@ class Node(WayLaneNode):
                         try:
                             log_queue.get_nowait()
                             await log_queue.put(log.detail)
-                        except (asyncio.QueueEmpty, asyncio.QueueFull):
+                        except asyncio.QueueEmpty, asyncio.QueueFull:
                             pass
             except asyncio.CancelledError:
                 self.logger.debug(f"[{self.name}] Log stream receive task cancelled")
@@ -618,7 +623,7 @@ class Node(WayLaneNode):
                         stream_task.cancel()
                         try:
                             await asyncio.wait_for(stream_task, timeout=1.0)
-                        except (TimeoutError, asyncio.CancelledError):
+                        except TimeoutError, asyncio.CancelledError:
                             pass
 
         except NodeAPIError:

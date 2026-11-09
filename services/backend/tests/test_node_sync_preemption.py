@@ -50,18 +50,18 @@ class _FakePGNode:
     async def _supports_chunked_sync(self):
         return self.chunked, "0.5.2"
 
-    async def sync_users_chunked(self, batch, chunk_size, flush_pending):
+    async def sync_subscriptions_chunked(self, batch, chunk_size, flush_pending):
         await self._wait_gate()
         self.delivered.append(list(batch))
         return []
 
-    async def _sync_batch_users(self, batch):
+    async def _sync_batch_subscriptions(self, batch):
         # Per-user fallback: on a stuck node every send waits for its own timeout.
         await self._wait_gate()
         self.delivered.append(list(batch))
         return []
 
-    async def sync_users(self, users, flush_pending=False):
+    async def sync_subscriptions(self, users, flush_pending=False):
         await self._wait_gate()
         self.full_syncs.append(list(users))
 
@@ -115,7 +115,7 @@ async def test_remove_node_cancels_stuck_per_user_fallback(manager: NodeManager)
 
     assert await manager.get_node(1) is None
     assert node.delivered == []
-    assert manager._user_sync_tasks == {}
+    assert manager._subscription_sync_tasks == {}
     # The cancelled delivery is logged for diagnosis, not reported as a failure.
     manager.logger.debug.assert_called_once()
     manager.logger.error.assert_not_called()
@@ -154,7 +154,7 @@ async def test_unchanged_reconnect_keeps_sync_but_connection_change_cancels_it(m
         await asyncio.wait_for(sync, TIMEOUT)
         assert node.delivered == []
         assert replacement.delivered == []
-    assert manager._user_sync_tasks == {}
+    assert manager._subscription_sync_tasks == {}
 
 
 @pytest.mark.asyncio
@@ -215,7 +215,7 @@ async def test_remove_node_preempts_full_sync_without_cancelling_caller(manager:
     with pytest.raises(SubscriptionSyncPreemptedError):
         await asyncio.wait_for(sync, TIMEOUT)
     assert node.full_syncs == []
-    assert manager._user_sync_tasks == {}
+    assert manager._subscription_sync_tasks == {}
 
 
 @pytest.mark.asyncio
@@ -224,14 +224,14 @@ async def test_cancelling_full_sync_caller_cancels_the_sync(manager: NodeManager
     node.gate = asyncio.Event()
     sync = asyncio.create_task(manager.sync_full(1, [object()]))
     await asyncio.wait_for(node.entered.wait(), TIMEOUT)
-    (child,) = manager._user_sync_tasks[1]
+    (child,) = manager._subscription_sync_tasks[1]
 
     sync.cancel()
     with pytest.raises(asyncio.CancelledError):
         await sync
 
     assert child.cancelled()
-    assert manager._user_sync_tasks == {}
+    assert manager._subscription_sync_tasks == {}
     # The per-node lock was released with the cancelled sync.
     assert await asyncio.wait_for(manager.update_node(_make_node(1, name="renamed")), TIMEOUT) is not node
 
@@ -241,7 +241,7 @@ async def test_sync_node_subscriptions_maps_preemption_to_conflict(monkeypatch: 
     operator = NodeOperation(operator_type=OperatorType.API)
     db_node = SimpleNamespace(id=5, status=NodeStatus.connected, core_config_id=None)
     monkeypatch.setattr(operator, "get_validated_node", AsyncMock(return_value=db_node))
-    monkeypatch.setattr(operator, "_get_core_users_map", AsyncMock(return_value=({}, {1: []})))
+    monkeypatch.setattr(operator, "_get_core_subscriptions_map", AsyncMock(return_value=({}, {1: []})))
     monkeypatch.setattr(node_operation_module.node_manager, "get_node", AsyncMock(return_value=object()))
     monkeypatch.setattr(
         node_operation_module.node_manager,
@@ -270,7 +270,7 @@ async def test_sync_node_subscriptions_during_a_start_answers_conflict_without_m
     node = make_node("grpc")  # the real adapter, with its process-local fence
     monkeypatch.setitem(node_operation_module.node_manager._nodes, 99, node)
     monkeypatch.setattr(operator, "get_validated_node", AsyncMock(return_value=db_node))
-    monkeypatch.setattr(operator, "_get_core_users_map", AsyncMock(return_value=({}, {1: []})))
+    monkeypatch.setattr(operator, "_get_core_subscriptions_map", AsyncMock(return_value=({}, {1: []})))
     update_status = AsyncMock()
     monkeypatch.setattr(node_operation_module, "update_node_status", update_status)
 
@@ -293,7 +293,7 @@ async def test_sync_node_subscriptions_still_marks_the_node_on_a_node_error(monk
     operator = NodeOperation(operator_type=OperatorType.API)
     db_node = SimpleNamespace(id=5, status=NodeStatus.connected, core_config_id=None)
     monkeypatch.setattr(operator, "get_validated_node", AsyncMock(return_value=db_node))
-    monkeypatch.setattr(operator, "_get_core_users_map", AsyncMock(return_value=({}, {1: []})))
+    monkeypatch.setattr(operator, "_get_core_subscriptions_map", AsyncMock(return_value=({}, {1: []})))
     monkeypatch.setattr(node_operation_module.node_manager, "get_node", AsyncMock(return_value=object()))
     # A gRPC ABORTED from the node also maps to 409; it is still a node failure.
     monkeypatch.setattr(
@@ -319,7 +319,7 @@ async def test_sync_node_subscriptions_keeps_503_when_delivery_claims_outlive_th
     operator = NodeOperation(operator_type=OperatorType.API)
     db_node = SimpleNamespace(id=6, status=NodeStatus.connected, core_config_id=None)
     monkeypatch.setattr(operator, "get_validated_node", AsyncMock(return_value=db_node))
-    monkeypatch.setattr(operator, "_get_core_users_map", AsyncMock(return_value=({}, {1: []})))
+    monkeypatch.setattr(operator, "_get_core_subscriptions_map", AsyncMock(return_value=({}, {1: []})))
     monkeypatch.setattr(node_operation_module.node_manager, "get_node", AsyncMock(return_value=object()))
     # What capture_queued_work raises when claims are still active after the lease.
     stuck = FullSyncConflictError(

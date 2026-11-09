@@ -85,14 +85,14 @@ async def test_node_manager_bulk_user_sync_uses_bounded_chunked_batches(monkeypa
         async def _supports_chunked_sync(self):
             return True, "0.5.2"
 
-        async def sync_users_chunked(self, batch, chunk_size, flush_pending):
+        async def sync_subscriptions_chunked(self, batch, chunk_size, flush_pending):
             self.calls.append((len(batch), chunk_size, flush_pending))
             return []
 
     fake_node = FakeNode()
     monkeypatch.setattr("app.node.nats_settings.node_update_subscriptions_batch_size", 2)
 
-    await manager._sync_users_to_node(1, fake_node, users)
+    await manager._sync_subscriptions_to_node(1, fake_node, users)
 
     assert fake_node.calls == [(2, 2, False), (2, 2, False), (1, 1, False)]
 
@@ -111,14 +111,14 @@ async def test_node_manager_bulk_user_sync_falls_back_when_chunked_is_not_suppor
         async def _supports_chunked_sync(self):
             return False, "0.1.0"
 
-        async def _sync_batch_users(self, batch):
+        async def _sync_batch_subscriptions(self, batch):
             self.batch_calls.append(len(batch))
             return []
 
     fake_node = FakeNode()
     monkeypatch.setattr("app.node.nats_settings.node_update_subscriptions_batch_size", 2)
 
-    await manager._sync_users_to_node(1, fake_node, users)
+    await manager._sync_subscriptions_to_node(1, fake_node, users)
 
     assert fake_node.batch_calls == [2, 1]
 
@@ -136,7 +136,7 @@ async def test_full_sync_does_not_use_incomplete_bridge_fence():
             self.fence_calls += 1
             raise AssertionError("local sync must not enter the shared fence")
 
-        async def sync_users(self, users, flush_pending=False):
+        async def sync_subscriptions(self, users, flush_pending=False):
             self.sync_calls.append((users, flush_pending))
 
     fake_node = FakeNode()

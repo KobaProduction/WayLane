@@ -25,8 +25,8 @@ async def test_worker_accepts_subscription_commands_and_rejects_old_actions(monk
     worker = node_worker.NodeWorkerService()
     single = AsyncMock()
     batch = AsyncMock()
-    monkeypatch.setattr(node_worker.node_manager, "update_user", single)
-    monkeypatch.setattr(node_worker.node_manager, "update_users", batch)
+    monkeypatch.setattr(node_worker.node_manager, "update_subscription", single)
+    monkeypatch.setattr(node_worker.node_manager, "update_subscriptions", batch)
 
     assert {"update_subscription", "update_subscriptions", "sync_node_subscriptions"}.issubset(worker._command_handlers)
     assert {"update_user", "update_users", "sync_node_users"}.isdisjoint(worker._command_handlers)
@@ -42,6 +42,7 @@ async def test_worker_accepts_subscription_commands_and_rejects_old_actions(monk
     assert [item.subscription_uuid for item in batch.await_args.args[0]] == [subscription_uuid]
 
     await worker._dispatch_command("update_user", {"user": serialize_proto_message(message)})
+    await worker._dispatch_command("update_subscription", {"user": serialize_proto_message(message)})
     assert single.await_count == 1
 
 

@@ -28,14 +28,14 @@ class NodeConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "NodeConfig":
+    def from_dict(cls, data: dict[str, Any]) -> NodeConfig:
         return cls(**data)
 
 
 @dataclass(slots=True)
-class ClaimedUser:
+class ClaimedSubscription:
     token: str
-    user: Subscription
+    subscription: Subscription
 
 
 class NodeRegistryProtocol(Protocol):
@@ -45,19 +45,19 @@ class NodeRegistryProtocol(Protocol):
     async def list_nodes(self) -> list[str]: ...
 
 
-class UserSyncStoreProtocol(Protocol):
-    async def enqueue_users(self, node_id: str, users: list[Subscription]) -> None: ...
+class SubscriptionSyncStoreProtocol(Protocol):
+    async def enqueue_subscriptions(self, node_id: str, users: list[Subscription]) -> None: ...
 
-    async def claim_users(
+    async def claim_subscriptions(
         self, node_id: str, worker_id: str, limit: int, lease_seconds: float
-    ) -> list[ClaimedUser]: ...
+    ) -> list[ClaimedSubscription]: ...
 
-    async def ack_users(self, node_id: str, tokens: list[str]) -> list[str] | None: ...
-    async def requeue_users(self, node_id: str, claimed_users: list[ClaimedUser]) -> None: ...
+    async def ack_subscriptions(self, node_id: str, tokens: list[str]) -> list[str] | None: ...
+    async def requeue_subscriptions(self, node_id: str, claimed_users: list[ClaimedSubscription]) -> None: ...
     async def clear(self, node_id: str) -> None: ...
 
 
-class SnapshotUserSyncStoreProtocol(UserSyncStoreProtocol, Protocol):
+class SnapshotSubscriptionSyncStoreProtocol(SubscriptionSyncStoreProtocol, Protocol):
     """Optional shared coordination for full snapshots; all operations must be atomic."""
 
     async def begin_full_sync(self, node_id: str, worker_id: str, lease_seconds: float) -> str | None: ...
@@ -146,7 +146,7 @@ class InMemoryNodeRegistry:
             return list(self._nodes)
 
 
-class InMemoryUserSyncStore:
+class InMemorySubscriptionSyncStore:
     def __init__(self):
         # Keep the latest desired revision even while an older revision is leased.
         self._pending: dict[str, dict[str, tuple[Subscription, int]]] = {}
@@ -156,7 +156,7 @@ class InMemoryUserSyncStore:
         self._fences: dict[str, tuple[str, float, int]] = {}
         self._lock = asyncio.Lock()
 
-    async def enqueue_users(self, node_id: str, users: list[Subscription]) -> None:
+    async def enqueue_subscriptions(self, node_id: str, users: list[Subscription]) -> None:
         if not users:
             return
         async with self._lock:
@@ -165,7 +165,7 @@ class InMemoryUserSyncStore:
                 self._revision += 1
                 pending[user.subscription_uuid] = (Subscription.FromString(user.SerializeToString()), self._revision)
 
-    async def enqueue_users_if_absent(self, node_id: str, users: list[Subscription]) -> None:
+    async def enqueue_subscriptions_if_absent(self, node_id: str, users: list[Subscription]) -> None:
         """Queue users that have nothing queued; a queued (newer or leased) entry is kept."""
         if not users:
             return
@@ -174,7 +174,10 @@ class InMemoryUserSyncStore:
             for user in users:
                 if user.subscription_uuid not in pending:
                     self._revision += 1
-                    pending[user.subscription_uuid] = (Subscription.FromString(user.SerializeToString()), self._revision)
+                    pending[user.subscription_uuid] = (
+                        Subscription.FromString(user.SerializeToString()),
+                        self._revision,
+                    )
 
     def _expire_claims(self, node_id: str) -> None:
         claimed = self._claimed.setdefault(node_id, {})
@@ -188,7 +191,9 @@ class InMemoryUserSyncStore:
         _, until, generation = self._fences.get(node_id, ("", 0, 0))
         return until > time.monotonic(), generation
 
-    async def claim_users(self, node_id: str, worker_id: str, limit: int, lease_seconds: float) -> list[ClaimedUser]:
+    async def claim_subscriptions(
+        self, node_id: str, worker_id: str, limit: int, lease_seconds: float
+    ) -> list[ClaimedSubscription]:
         if limit <= 0:
             return []
         async with self._lock:
@@ -199,17 +204,19 @@ class InMemoryUserSyncStore:
             claimed = self._claimed.setdefault(node_id, {})
             active = self._active.setdefault(node_id, {})
             until = time.monotonic() + lease_seconds
-            result: list[ClaimedUser] = []
+            result: list[ClaimedSubscription] = []
             ready = (email for email in pending if email not in active)
             for email in islice(ready, limit):
                 user, revision = pending[email]
                 token = f"{worker_id}:{uuid4()}"
                 claimed[token] = (email, revision, until)
                 active[email] = token
-                result.append(ClaimedUser(token=token, user=Subscription.FromString(user.SerializeToString())))
+                result.append(
+                    ClaimedSubscription(token=token, subscription=Subscription.FromString(user.SerializeToString()))
+                )
             return result
 
-    async def ack_users(self, node_id: str, tokens: list[str]) -> None:
+    async def ack_subscriptions(self, node_id: str, tokens: list[str]) -> None:
         if not tokens:
             return
         async with self._lock:
@@ -225,7 +232,7 @@ class InMemoryUserSyncStore:
                     if email in pending and pending[email][1] == revision:
                         del pending[email]
 
-    async def requeue_users(self, node_id: str, claimed_users: list[ClaimedUser]) -> None:
+    async def requeue_subscriptions(self, node_id: str, claimed_users: list[ClaimedSubscription]) -> None:
         if not claimed_users:
             return
         async with self._lock:
@@ -376,13 +383,13 @@ class InMemoryNodeLifecycleCoordinator:
             self._states[node_id] = state
 
 
-_default_user_sync_store = InMemoryUserSyncStore()
+_default_subscription_sync_store = InMemorySubscriptionSyncStore()
 _default_lifecycle_coordinator = InMemoryNodeLifecycleCoordinator()
 
 
-def get_default_user_sync_store() -> InMemoryUserSyncStore:
+def get_default_subscription_sync_store() -> InMemorySubscriptionSyncStore:
     """Return the process-local store shared by default controller instances."""
-    return _default_user_sync_store
+    return _default_subscription_sync_store
 
 
 def get_default_lifecycle_coordinator() -> InMemoryNodeLifecycleCoordinator:

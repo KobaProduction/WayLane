@@ -28,7 +28,7 @@ from app.utils.logger import get_logger
 from config import nats_settings
 from waylane_node_bridge.common.service_pb2 import Subscription as WireSubscription
 from waylane_node_bridge.storage import (
-    ClaimedUser,
+    ClaimedSubscription,
     LifecycleLease,
     LifecycleOperation,
     LifecycleStatus,
@@ -126,7 +126,8 @@ class NatsSubscriptionSyncStore:
 
     def __init__(self, kv: CasKv):
         self._kv = kv
-        self._key_index = KvKeyIndex(kv)
+        self._update_listeners: dict[str, set[Callable[[], None]]] = {}
+        self._key_index = KvKeyIndex(kv, on_put=self._notify_pending_update)
         self._write_slots = asyncio.Semaphore(32)
         # key -> (revision, lease expiry) as last read for that revision, so
         # scans skip other workers' in-flight subscriptions (and quiescence polls skip
@@ -136,7 +137,30 @@ class NatsSubscriptionSyncStore:
         # application layer; markers stay queued until it succeeds.
         self.refresh_resolver: RefreshResolver | None = None
 
+    def subscribe_updates(self, node_id: str, callback: Callable[[], None]) -> Callable[[], None]:
+        """Wake only controllers attached to the node receiving a KV PUT."""
+        node_id = str(node_id)
+        callbacks = self._update_listeners.setdefault(node_id, set())
+        callbacks.add(callback)
+
+        def unsubscribe() -> None:
+            subscribers = self._update_listeners.get(node_id)
+            if subscribers is not None:
+                subscribers.discard(callback)
+                if not subscribers:
+                    self._update_listeners.pop(node_id, None)
+
+        return unsubscribe
+
+    def _notify_pending_update(self, key: str) -> None:
+        parts = key.split(".", 2)
+        if len(parts) != 3 or parts[0] != "p":
+            return
+        for callback in tuple(self._update_listeners.get(parts[1], ())):
+            callback()
+
     async def close(self) -> None:
+        self._update_listeners.clear()
         await self._key_index.close()
 
     async def has_pending(self, node_id: str) -> bool:
@@ -255,7 +279,7 @@ class NatsSubscriptionSyncStore:
             self._claims_seen[key] = (revision, 0.0)
             return
 
-    async def enqueue_users(self, node_id: str, subscriptions: list[WireSubscription]) -> None:
+    async def enqueue_subscriptions(self, node_id: str, subscriptions: list[WireSubscription]) -> None:
         if not subscriptions:
             return
         # Latest payload per subscription_uuid wins (dedupe across the batch first).
@@ -314,7 +338,7 @@ class NatsSubscriptionSyncStore:
 
     async def _claim_doc(
         self, key: str, doc: dict[str, Any], revision: int, worker_id: str, lease_seconds: float
-    ) -> ClaimedUser | None:
+    ) -> ClaimedSubscription | None:
         subscription_uuid, subscription_b64 = doc["subscription_uuid"], doc["subscription"]
         until = time.time() + lease_seconds
         claim_id = uuid4().hex
@@ -335,14 +359,14 @@ class NatsSubscriptionSyncStore:
             return None
         self._key_index.observe_put(key, claimed_revision)
         self._claims_seen[key] = (claimed_revision, until)
-        return ClaimedUser(
+        return ClaimedSubscription(
             token=self._token(key, claimed_revision, subscription_uuid, claim_id),
-            user=_decode_subscription(subscription_b64),
+            subscription=_decode_subscription(subscription_b64),
         )
 
     async def _resolve_refresh_markers(
         self, node_id: str, markers: dict[str, tuple[str, int]], worker_id: str, lease_seconds: float
-    ) -> list[ClaimedUser]:
+    ) -> list[ClaimedSubscription]:
         """Replace refresh markers with current payloads and claim them for delivery."""
         if not markers:
             return []
@@ -361,7 +385,7 @@ class NatsSubscriptionSyncStore:
                 "Refresh of %s subscription(s) for node %s failed; retrying later: %s", len(markers), node_id, exc
             )
             return []
-        claimed: list[ClaimedUser] = []
+        claimed: list[ClaimedSubscription] = []
         for subscription_uuid, (key, revision) in markers.items():
             subscription = payloads.get(subscription_uuid)
             if subscription is None:
@@ -385,14 +409,16 @@ class NatsSubscriptionSyncStore:
                 claimed.append(item)
         return claimed
 
-    async def claim_users(self, node_id: str, worker_id: str, limit: int, lease_seconds: float) -> list[ClaimedUser]:
+    async def claim_subscriptions(
+        self, node_id: str, worker_id: str, limit: int, lease_seconds: float
+    ) -> list[ClaimedSubscription]:
         if limit <= 0:
             return []
         # Apply the same batch budget as direct subscription updates. Large shared
         # claims can exceed the node RPC deadline and repeatedly requeue work.
         limit = min(limit, max(1, nats_settings.node_update_subscriptions_batch_size))
 
-        result: list[ClaimedUser] = []
+        result: list[ClaimedSubscription] = []
         markers: dict[str, tuple[str, int]] = {}
         entries = await self._key_index.entries(self._pending_prefix(node_id))
         if len(self._claims_seen) > len(entries) + 256:
@@ -454,7 +480,7 @@ class NatsSubscriptionSyncStore:
         # claimable immediately if it still carries our (preserved) claim.
         await self._release_claim(key, claim_id)
 
-    async def ack_users(self, node_id: str, tokens: list[str]) -> list[str]:
+    async def ack_subscriptions(self, node_id: str, tokens: list[str]) -> list[str]:
         """Acknowledge delivered claims; returns subscription_uuids whose latest state could not be confirmed."""
         if not tokens:
             return []
@@ -462,12 +488,15 @@ class NatsSubscriptionSyncStore:
         await self._run_bounded(lambda token: self._ack_one(node_id, token, unconfirmed), tokens)
         return unconfirmed
 
-    async def _requeue_one(self, node_id: str, item: ClaimedUser, failed: list[str]) -> None:
+    async def _requeue_one(self, node_id: str, item: ClaimedSubscription, failed: list[str]) -> None:
         parts = self._token_parts(node_id, item.token)
         if parts is None:
             return
         key, revision, _, claim_id = parts
-        value = {"subscription_uuid": item.user.subscription_uuid, "subscription": _encode_subscription(item.user)}
+        value = {
+            "subscription_uuid": item.subscription.subscription_uuid,
+            "subscription": _encode_subscription(item.subscription),
+        }
         self._ensure_value_size(key, value)
         try:
             new_revision = await self._kv.update(key, self._encode(value), last=revision)
@@ -476,13 +505,13 @@ class NatsSubscriptionSyncStore:
             # stale copy must not come back. Report it so the caller can repair
             # from the source of truth when needed.
             logger.debug("Requeue skipped for key=%s revision=%s: %s", key, revision, exc)
-            failed.append(item.user.subscription_uuid)
+            failed.append(item.subscription.subscription_uuid)
             await self._release_claim(key, claim_id)
             return
         self._key_index.observe_put(key, new_revision)
         self._claims_seen[key] = (new_revision, 0.0)
 
-    async def requeue_users(self, node_id: str, claimed_users: list[ClaimedUser]) -> list[str]:
+    async def requeue_subscriptions(self, node_id: str, claimed_users: list[ClaimedSubscription]) -> list[str]:
         """Return claimed payloads to the queue; returns subscription_uuids that could not be requeued."""
         if not claimed_users:
             return []
@@ -490,12 +519,12 @@ class NatsSubscriptionSyncStore:
         await self._run_bounded(lambda item: self._requeue_one(node_id, item, failed), claimed_users)
         return failed
 
-    async def _refresh_claimed_one(self, node_id: str, item: ClaimedUser) -> None:
+    async def _refresh_claimed_one(self, node_id: str, item: ClaimedSubscription) -> None:
         parts = self._token_parts(node_id, item.token)
         if parts is None:
             return
         key, revision, subscription_uuid, claim_id = parts
-        marker = {"subscription_uuid": subscription_uuid or item.user.subscription_uuid, "refresh": True}
+        marker = {"subscription_uuid": subscription_uuid or item.subscription.subscription_uuid, "refresh": True}
         try:
             new_revision = await self._kv.update(key, self._encode(marker), last=revision)
         except nats_js_errors.KeyWrongLastSequenceError:
@@ -507,7 +536,7 @@ class NatsSubscriptionSyncStore:
         self._key_index.observe_put(key, new_revision)
         self._claims_seen[key] = (new_revision, 0.0)
 
-    async def refresh_claimed(self, node_id: str, claimed_users: list[ClaimedUser]) -> None:
+    async def refresh_claimed(self, node_id: str, claimed_users: list[ClaimedSubscription]) -> None:
         """Turn delivered-but-unconfirmable claims into refresh markers.
 
         Used when a delivery crossed a full snapshot: replaying the delivered

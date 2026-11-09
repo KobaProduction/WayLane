@@ -121,7 +121,7 @@ async def test_deferred_core_reads_do_not_overlap_on_shared_session(monkeypatch)
 
     reads = AsyncMock(side_effect=read)
     monkeypatch.setattr(node_operation, "core_subscriptions", reads)
-    _, loaders = await NodeOperation._get_core_users_map(FakeDB(), {1, 2}, lazy=True)
+    _, loaders = await NodeOperation._get_core_subscriptions_map(FakeDB(), {1, 2}, lazy=True)
     reads.assert_not_awaited()
     result = await asyncio.gather(loaders[1](), loaders[2](), loaders[1](), loaders[2]())
     assert result == [["1"], ["2"], ["1"], ["2"]]

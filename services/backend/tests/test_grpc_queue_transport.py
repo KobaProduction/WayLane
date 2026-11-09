@@ -55,7 +55,7 @@ async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstr
         server_ca=certifi.contents(),
         api_key=str(uuid4()),
         node_id="transport",
-        user_sync_store=store,
+        subscription_sync_store=store,
     )
     node.channel.close()
     node.channel = Channel("127.0.0.1", port, ssl=False)
@@ -63,7 +63,7 @@ async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstr
     monkeypatch.setattr(node_operation, "needs_shared_bridge_memory", lambda: True)
     monkeypatch.setattr(nats_settings, "node_update_subscriptions_batch_size", 100)
     try:
-        await store.enqueue_users(
+        await store.enqueue_subscriptions(
             "transport", [service.Subscription(subscription_uuid=f"queued-{i}") for i in range(1200)]
         )
         await node.connect("0.5.4", "26.3.27")

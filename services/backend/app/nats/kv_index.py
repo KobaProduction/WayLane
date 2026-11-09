@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Callable
 
 from app.nats.kv_cas import CasKv, kv_list_keys
 from app.nats.kv_watch import watch_kv
@@ -19,8 +20,9 @@ logger = get_logger("nats-kv-index")
 class KvKeyIndex:
     SNAPSHOT_STALL_TIMEOUT = 30
 
-    def __init__(self, kv: CasKv):
+    def __init__(self, kv: CasKv, on_put: Callable[[str], None] | None = None):
         self._kv = kv
+        self._on_put = on_put
         self._keys: dict[str, dict[str, int]] = {}
         self._local_puts: dict[str, int] = {}
         self._last_revision = 0
@@ -93,6 +95,14 @@ class KvKeyIndex:
             if not keys:
                 del self._keys[prefix]
 
+    def _notify_put(self, key: str) -> None:
+        if self._on_put is not None:
+            try:
+                self._on_put(key)
+            except Exception:
+                # A consumer's wakeup handler must not kill the shared watcher.
+                logger.exception("Node sync key-index wakeup failed")
+
     async def _run(self) -> None:
         retry_delay = 0.5
         while not self._closed:
@@ -109,6 +119,12 @@ class KvKeyIndex:
                     if entry is None:
                         self._ready.set()
                         retry_delay = 0.5
+                        # After reconnect, initial snapshots include keys written
+                        # while the watcher was unavailable. Wake once per node
+                        # prefix rather than once per historical KV revision.
+                        for known in self._keys.values():
+                            if known:
+                                self._notify_put(next(iter(known)))
                         continue
                     self._last_revision = max(self._last_revision, entry.revision)
                     if self._local_puts.get(entry.key, 0) > entry.revision:
@@ -124,6 +140,8 @@ class KvKeyIndex:
                                 del self._keys[prefix]
                     else:
                         self._keys.setdefault(prefix, {})[entry.key] = entry.revision
+                        if self._ready.is_set():
+                            self._notify_put(entry.key)
                 if not self._closed:
                     raise RuntimeError("NATS key watcher stopped")
             except asyncio.CancelledError:

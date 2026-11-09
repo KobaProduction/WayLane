@@ -233,9 +233,7 @@ class Node(WayLaneNode):
                         self.logger.debug(
                             f"[{self.name}] Best-effort stop request failed | Error: {type(e).__name__} - {e!s}"
                         )
-                    await self._release_lifecycle_lease(
-                        lease, LifecycleStatus.STOPPED, desired=LifecycleStatus.STOPPED
-                    )
+                    await self._release_lifecycle_lease(lease, LifecycleStatus.STOPPED, desired=LifecycleStatus.STOPPED)
             except BaseException:
                 await self._release_lifecycle_lease(lease, LifecycleStatus.BROKEN, desired=LifecycleStatus.STOPPED)
                 raise
@@ -283,7 +281,9 @@ class Node(WayLaneNode):
             proto_response_class=service.LatencyResponse,
         )
 
-    async def get_subscription_online_stats(self, subscription_uuid: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+    async def get_subscription_online_stats(
+        self, subscription_uuid: str, timeout: int | None = None
+    ) -> service.OnlineStatResponse | None:
         timeout = timeout or self._default_timeout
         return await self._make_request(
             method="GET",
@@ -305,12 +305,12 @@ class Node(WayLaneNode):
             proto_response_class=service.StatsOnlineIpListResponse,
         )
 
-    async def sync_users(
+    async def sync_subscriptions(
         self, users: list[service.Subscription], flush_pending: bool = False, timeout: int | None = None
     ) -> service.Empty | None:
         timeout = timeout or self._default_timeout
         if flush_pending:
-            await self.flush_pending_users()
+            await self.flush_pending_subscriptions()
 
         async with self._node_lock:
             response = await self._make_request(
@@ -323,7 +323,7 @@ class Node(WayLaneNode):
         self._clear_rejected_users()
         return response
 
-    async def sync_users_chunked(
+    async def sync_subscriptions_chunked(
         self,
         users: list[service.Subscription],
         chunk_size: int = 100,
@@ -336,7 +336,7 @@ class Node(WayLaneNode):
 
         timeout = timeout or self._default_timeout
         if flush_pending:
-            await self.flush_pending_users()
+            await self.flush_pending_subscriptions()
 
         def _encode_varint(value: int) -> bytes:
             encoded = bytearray()
@@ -361,7 +361,9 @@ class Node(WayLaneNode):
             for index, start in enumerate(range(0, total_users, chunk_size)):
                 chunk_users = users[start : start + chunk_size]
                 chunk_bytes = self._serialize_protobuf(
-                    service.SubscriptionsChunk(subscriptions=chunk_users, index=index, last=start + chunk_size >= total_users)
+                    service.SubscriptionsChunk(
+                        subscriptions=chunk_users, index=index, last=start + chunk_size >= total_users
+                    )
                 )
                 # Length-prefix each protobuf chunk to preserve framing server-side
                 yield _encode_varint(len(chunk_bytes)) + chunk_bytes
@@ -455,7 +457,7 @@ class Node(WayLaneNode):
     ) -> service.Empty | None:
         timeout = timeout or self._default_timeout
         # Serialize state-changing routing calls under the node lock, like the other
-        # mutating ops (start/stop/sync_users), so a rule change can't race a
+        # mutating ops (start/stop/sync_subscriptions), so a rule change can't race a
         # concurrent core restart (read-only routing methods stay lock-free).
         async with self._node_lock:
             return await self._make_request(
@@ -490,7 +492,7 @@ class Node(WayLaneNode):
                 proto_response_class=service.Empty,
             )
 
-    async def _sync_batch_users(self, users: list[service.Subscription]) -> list[service.Subscription]:
+    async def _sync_batch_subscriptions(self, users: list[service.Subscription]) -> list[service.Subscription]:
         """Sync users individually via PUT user/sync. Returns failed users."""
         failed = []
         for user in users:
@@ -504,7 +506,9 @@ class Node(WayLaneNode):
                 )
             except Exception as e:
                 error_type = type(e).__name__
-                self.logger.warning(f"[{self.name}] Failed to sync user {user.subscription_uuid} | Error: {error_type} - {e!s}")
+                self.logger.warning(
+                    f"[{self.name}] Failed to sync user {user.subscription_uuid} | Error: {error_type} - {e!s}"
+                )
                 failed.append(user)
         return failed
 
@@ -568,7 +572,7 @@ class Node(WayLaneNode):
             self.logger.debug(f"[{self.name}] Health check task finished")
 
     @asynccontextmanager
-    async def stream_logs(self, max_queue_size: int = 1000) -> AsyncGenerator[asyncio.Queue[str | NodeAPIError], None]:
+    async def stream_logs(self, max_queue_size: int = 1000) -> AsyncGenerator[asyncio.Queue[str | NodeAPIError]]:
         """Context manager for streaming logs on-demand.
 
         Yields a queue that receives log messages in real-time.
@@ -623,7 +627,7 @@ class Node(WayLaneNode):
                                 try:
                                     log_queue.get_nowait()
                                     await log_queue.put(line)
-                                except (asyncio.QueueEmpty, asyncio.QueueFull):
+                                except asyncio.QueueEmpty, asyncio.QueueFull:
                                     pass
             except asyncio.CancelledError:
                 self.logger.debug(f"[{self.name}] Log stream receive task cancelled")
@@ -681,7 +685,7 @@ class Node(WayLaneNode):
                     stream_task.cancel()
                     try:
                         await asyncio.wait_for(stream_task, timeout=1.0)
-                    except (TimeoutError, asyncio.CancelledError):
+                    except TimeoutError, asyncio.CancelledError:
                         pass
 
         except NodeAPIError:

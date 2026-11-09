@@ -25,10 +25,10 @@ WORKER = Path(__file__).with_name("node_delivery_process_worker.py")
 
 
 class Receiver:
-    """A node stand-in: full SyncUsers replaces the user set, chunked deltas merge into it."""
+    """A node stand-in: full SyncSubscriptions replaces the subscription set, chunked deltas merge into it."""
 
     def __init__(self):
-        self.users: dict[str, list[str]] = {}
+        self.subscriptions: dict[str, list[str]] = {}
         self.events: list[tuple[str, list[str]]] = []
         self.delta_landed = asyncio.Event()
         self.delay_prefix = "slow-"
@@ -36,30 +36,30 @@ class Receiver:
 
     def __mapping__(self):
         return {
-            "/waylane.node.v1.NodeService/SyncUsers": Handler(
+            "/waylane.node.v1.NodeService/SyncSubscriptions": Handler(
                 self.full, Cardinality.UNARY_UNARY, service.Subscriptions, service.Empty
             ),
-            "/waylane.node.v1.NodeService/SyncUsersChunked": Handler(
+            "/waylane.node.v1.NodeService/SyncSubscriptionsChunked": Handler(
                 self.chunked, Cardinality.STREAM_UNARY, service.SubscriptionsChunk, service.Empty
             ),
         }
 
     async def full(self, stream):
         request = await stream.recv_message()
-        self.users = {user.subscription_uuid: list(user.inbounds) for user in request.users}
-        self.events.append(("full", sorted(self.users)))
+        self.subscriptions = {user.subscription_uuid: list(user.inbounds) for user in request.subscriptions}
+        self.events.append(("full", sorted(self.subscriptions)))
         await stream.send_message(service.Empty())
 
     async def chunked(self, stream):
         users = []
         async for chunk in stream:
-            users.extend(chunk.users)
+            users.extend(chunk.subscriptions)
             if chunk.last:
                 break
         if any(user.subscription_uuid.startswith(self.delay_prefix) for user in users):
             await asyncio.sleep(self.delay_seconds)
         for user in users:
-            self.users[user.subscription_uuid] = list(user.inbounds)
+            self.subscriptions[user.subscription_uuid] = list(user.inbounds)
         self.events.append(("delta", [f"{user.subscription_uuid}={list(user.inbounds)}" for user in users]))
         self.delta_landed.set()
         await stream.send_message(service.Empty())
@@ -85,7 +85,7 @@ def make_local_node(store, node_id, port, worker_id):
         server_ca=certifi.contents(),
         api_key=str(uuid4()),
         node_id=node_id,
-        user_sync_store=store,
+        subscription_sync_store=store,
         worker_id=worker_id,
         sync_lease_seconds=3.0,
     )
@@ -142,7 +142,9 @@ class Database:
         await self.kv.put(self.key, json.dumps(self.state).encode())
 
     def snapshot(self):
-        return [service.Subscription(subscription_uuid=email, inbounds=inbounds) for email, inbounds in self.state.items()]
+        return [
+            service.Subscription(subscription_uuid=email, inbounds=inbounds) for email, inbounds in self.state.items()
+        ]
 
     async def resolve(self, _node, emails):
         return [service.Subscription(subscription_uuid=email, inbounds=self.state.get(email, [])) for email in emails]
@@ -165,7 +167,9 @@ async def test_delivery_from_another_process_crossing_a_snapshot_converges_to_la
             # v1 is committed and queued; the other process claims it and its RPC is slow.
             await database.set("slow-user", ["v1"])
             await database.set("other-user", ["stable"])
-            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["v1"])])
+            await writer.enqueue_subscriptions(
+                node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["v1"])]
+            )
             await asyncio.sleep(0.4)
             captured, active = await local.capture_queued(node_id)
             assert active == 1 and captured == {}
@@ -174,7 +178,9 @@ async def test_delivery_from_another_process_crossing_a_snapshot_converges_to_la
                 snapshot = database.snapshot()  # read after quiescence: contains v1
                 # An API edit commits and enqueues while the snapshot is being applied.
                 await database.set("slow-user", ["v2"])
-                await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["v2"])])
+                await writer.enqueue_subscriptions(
+                    node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["v2"])]
+                )
                 return snapshot
 
             await node.connect("0.5.4", "26.3.27")
@@ -183,11 +189,11 @@ async def test_delivery_from_another_process_crossing_a_snapshot_converges_to_la
             assert [kind for kind, _ in receiver.events[:2]] == ["delta", "full"]
             assert receiver.events[1] == ("full", ["other-user", "slow-user"])
             # The change made after the snapshot read was fenced, not lost, and lands after it.
-            await wait_until(lambda: receiver.users.get("slow-user") == ["v2"])
+            await wait_until(lambda: receiver.subscriptions.get("slow-user") == ["v2"])
             async with asyncio.timeout(20):
                 while (await local.capture_queued(node_id)) != ({}, 0):
                     await asyncio.sleep(0.05)
-            assert receiver.users == database.state
+            assert receiver.subscriptions == database.state
             # Nothing older than the snapshot was replayed after it.
             assert all(entries != ["slow-user=['v1']"] for kind, entries in receiver.events[2:] if kind == "delta")
         finally:
@@ -214,7 +220,9 @@ async def test_worker_process_that_dies_after_sending_and_before_acking_is_recov
         worker = await start_worker(jetstream, node_id, port, "worker-a", mode="die-after-send")
         try:
             await database.set("slow-user", ["delta"])  # the state every delivery reads
-            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["delta"])])
+            await writer.enqueue_subscriptions(
+                node_id, [service.Subscription(subscription_uuid="slow-user", inbounds=["delta"])]
+            )
             await asyncio.wait_for(receiver.delta_landed.wait(), 10)
             worker.stdin.write(b"die\n")
             await worker.stdin.drain()
@@ -229,7 +237,7 @@ async def test_worker_process_that_dies_after_sending_and_before_acking_is_recov
             await manager.sync_full(1, lambda: asyncio.sleep(0, result=[]), flush_pending=False)
             assert asyncio.get_running_loop().time() - started >= 2.0  # waited for the 3s lease
             # After the fence, the surviving record is delivered again on top of the snapshot.
-            await wait_until(lambda: receiver.users.get("slow-user") == ["delta"])
+            await wait_until(lambda: receiver.subscriptions.get("slow-user") == ["delta"])
             assert receiver.events[-2:] == [("full", []), ("delta", ["slow-user=['delta']"])]
         finally:
             await finish_worker(worker)
@@ -254,12 +262,16 @@ async def test_two_child_workers_deliver_a_shared_burst_without_loss_in_bounded_
         await jetstream.kv.put(database.key, json.dumps(database.state).encode())
         workers = [await start_worker(jetstream, node_id, port, f"worker-{index}", seconds="15") for index in range(2)]
         try:
-            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid=email, inbounds=["in"]) for email in expected])
+            await writer.enqueue_subscriptions(
+                node_id, [service.Subscription(subscription_uuid=email, inbounds=["in"]) for email in expected]
+            )
             # Wake the processes' lazy workers the way a sibling connect would: their
             # own health poll is not part of this test, so re-enqueue one user.
             await asyncio.sleep(0.2)
-            await writer.enqueue_users(node_id, [service.Subscription(subscription_uuid="user-0", inbounds=["in"])])
-            await wait_until(lambda: set(receiver.users) >= expected, timeout=40)
+            await writer.enqueue_subscriptions(
+                node_id, [service.Subscription(subscription_uuid="user-0", inbounds=["in"])]
+            )
+            await wait_until(lambda: set(receiver.subscriptions) >= expected, timeout=40)
             async with asyncio.timeout(20):
                 while (await writer.capture_queued(node_id)) != ({}, 0):
                     await asyncio.sleep(0.05)
@@ -271,7 +283,7 @@ async def test_two_child_workers_deliver_a_shared_burst_without_loss_in_bounded_
             assert all(count == 1 for email, count in counts.items() if email != "user-0")
             assert counts["user-0"] in (1, 2)  # re-enqueued once: at most one replay
             assert all(1 <= len(entries) <= 100 for kind, entries in receiver.events if kind == "delta")
-            assert receiver.users == database.state
+            assert receiver.subscriptions == database.state
         finally:
             for worker in workers:
                 await finish_worker(worker)

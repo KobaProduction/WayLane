@@ -15,7 +15,7 @@ from app.nats.kv_cas import MemoryCasKv, kv_get_json
 from app.node import NodeManager, bridge as bridge_module
 from app.node.bridge import create_node, register_refresh_handler
 from app.node.nats_memory import NatsSubscriptionSyncStore
-from waylane_node_bridge import Health, InMemoryUserSyncStore, NodeAPIError, NodeType
+from waylane_node_bridge import Health, InMemorySubscriptionSyncStore, NodeAPIError, NodeType
 from waylane_node_bridge.common.service_pb2 import Empty, Subscription
 from waylane_node_bridge.grpclib import Node as GrpcNode
 from waylane_node_bridge.rest import Node as RestNode
@@ -30,7 +30,7 @@ def make_node(transport, store=None, **kwargs):
         api_port=1,
         server_ca=certifi.contents(),
         api_key=str(uuid4()),
-        user_sync_store=store if store is not None else InMemoryUserSyncStore(),
+        subscription_sync_store=store if store is not None else InMemorySubscriptionSyncStore(),
         **kwargs,
     )
     node._sync_poll_interval = 0.005
@@ -85,10 +85,10 @@ def attach_fake_transport(monkeypatch, node, state: FakeNodeState):
             fake_state = getattr(self, "_fake_state", None)
             if fake_state is None:
                 return await originals[type(self).__mro__[-3]](self, *args, **kwargs)
-            if name == "sync_users":
+            if name == "sync_subscriptions":
                 users = args[0] if args else kwargs["users"]
                 if args[1] if len(args) > 1 else kwargs.get("flush_pending"):
-                    await self.flush_pending_users()
+                    await self.flush_pending_subscriptions()
                 async with self._node_lock:
                     return await fake_state.apply_snapshot(users)
             users = args[0] if args else kwargs["users"]
@@ -100,9 +100,9 @@ def attach_fake_transport(monkeypatch, node, state: FakeNodeState):
         for cls in originals:
             monkeypatch.setattr(cls, name, method)
 
-    fake("sync_users_chunked", with_lock=True)
-    fake("sync_users", with_lock=True)
-    fake("_sync_batch_users", with_lock=False)
+    fake("sync_subscriptions_chunked", with_lock=True)
+    fake("sync_subscriptions", with_lock=True)
+    fake("_sync_batch_subscriptions", with_lock=False)
     return state
 
 
@@ -119,12 +119,12 @@ async def test_explicit_per_user_fallback_still_uses_original_transport(monkeypa
     base = GrpcNode if transport == "grpc" else RestNode
     users = [Subscription(subscription_uuid="retry")]
     fallback = AsyncMock(return_value=users)
-    monkeypatch.setattr(base, "_sync_batch_users", fallback)
+    monkeypatch.setattr(base, "_sync_batch_subscriptions", fallback)
     chunked = AsyncMock(return_value=[])
-    monkeypatch.setattr(node, "sync_users_chunked", chunked)
+    monkeypatch.setattr(node, "sync_subscriptions_chunked", chunked)
     try:
         await node.connect("0.5.4", "26.3.27")
-        assert await node._sync_batch_users(users) is users
+        assert await node._sync_batch_subscriptions(users) is users
         fallback.assert_awaited_once_with(users)
         chunked.assert_not_awaited()
     finally:
@@ -137,12 +137,12 @@ async def test_queued_sync_keeps_legacy_node_protocol(monkeypatch, transport):
     node = make_node(transport)
     base = GrpcNode if transport == "grpc" else RestNode
     fallback = AsyncMock(return_value=[])
-    monkeypatch.setattr(base, "_sync_batch_users", fallback)
+    monkeypatch.setattr(base, "_sync_batch_subscriptions", fallback)
     chunked = AsyncMock(return_value=[])
-    monkeypatch.setattr(node, "sync_users_chunked", chunked)
+    monkeypatch.setattr(node, "sync_subscriptions_chunked", chunked)
     try:
         await node.connect("0.1.0", "26.3.27")
-        await node.update_users([Subscription(subscription_uuid="legacy")])
+        await node.update_subscriptions([Subscription(subscription_uuid="legacy")])
         await wait_until(lambda: fallback.await_count == 1)
         assert fallback.await_args.args[0][0].subscription_uuid == "legacy"
         chunked.assert_not_awaited()
@@ -159,7 +159,7 @@ async def test_update_enqueued_during_an_empty_claim_is_delivered_without_anothe
     node = make_node(transport, store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     old, new = Subscription(subscription_uuid="old"), Subscription(subscription_uuid="new")
-    await store.enqueue_users(node.node_id, [old])
+    await store.enqueue_subscriptions(node.node_id, [old])
     old_key = store._pending_key(node.node_id, old.subscription_uuid)
     reading_old, resume_old = asyncio.Event(), asyncio.Event()
     original_get = kv.get
@@ -174,10 +174,10 @@ async def test_update_enqueued_during_an_empty_claim_is_delivered_without_anothe
     try:
         await node.connect("0.5.4", "26.3.27")
         await asyncio.wait_for(reading_old.wait(), 2)
-        await node.update_user(new)
-        sibling = await store.claim_users(node.node_id, "sibling", limit=1, lease_seconds=30)
-        assert [item.user.subscription_uuid for item in sibling] == ["old"]
-        await store.ack_users(node.node_id, [item.token for item in sibling])
+        await node.update_subscription(new)
+        sibling = await store.claim_subscriptions(node.node_id, "sibling", limit=1, lease_seconds=30)
+        assert [item.subscription.subscription_uuid for item in sibling] == ["old"]
+        await store.ack_subscriptions(node.node_id, [item.token for item in sibling])
         resume_old.set()
         await wait_until(lambda: "new" in state.users)
         await asyncio.wait_for(node._sync_worker_task, 5)
@@ -202,7 +202,7 @@ async def test_update_that_races_the_idle_exit_restarts_delivery(monkeypatch):
         if calls == 1:
             # Simulate the idle timeout firing just as an update arrives: the
             # base loop returns while the wake signal is already set again.
-            await self.update_user(Subscription(subscription_uuid="late"))
+            await self.update_subscription(Subscription(subscription_uuid="late"))
             assert self._sync_worker_task is not None and not self._sync_worker_task.done()
             return
         await original(self)
@@ -225,7 +225,7 @@ async def test_repeated_updates_around_idle_exits_are_all_delivered(monkeypatch)
         await node.connect("0.5.4", "26.3.27")
         for number in range(60):
             await asyncio.sleep(0.008 + (number % 5) * 0.002)
-            await node.update_user(Subscription(subscription_uuid=f"u{number}"))
+            await node.update_subscription(Subscription(subscription_uuid=f"u{number}"))
         await wait_until(lambda: len(state.users) == 60)
     finally:
         await close_node(node)
@@ -236,8 +236,8 @@ async def test_worker_backs_off_then_recovers_from_store_errors_without_an_exter
     node = make_node("grpc")
     node._sync_poll_interval = 0.01
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
-    store = node._user_sync_store
-    original_claim = store.claim_users
+    store = node._subscription_sync_store
+    original_claim = store.claim_subscriptions
     failures = 0
     timeline = []
 
@@ -249,10 +249,10 @@ async def test_worker_backs_off_then_recovers_from_store_errors_without_an_exter
             raise RuntimeError("store unavailable")
         return await original_claim(*args, **kwargs)
 
-    monkeypatch.setattr(store, "claim_users", flaky_claim)
+    monkeypatch.setattr(store, "claim_subscriptions", flaky_claim)
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="u"))
+        await node.update_subscription(Subscription(subscription_uuid="u"))
         await wait_until(lambda: "u" in state.users, timeout=10)
         assert failures == 3
         gaps = [later - earlier for earlier, later in itertools.pairwise(timeline)]
@@ -280,7 +280,7 @@ async def test_transient_store_error_during_claim_does_not_strand_pending_work(m
 
     kv.update = flaky_update
     try:
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u")])
+        await store.enqueue_subscriptions(node.node_id, [Subscription(subscription_uuid="u")])
         await node.connect("0.5.4", "26.3.27")  # the connect wake is the only wake this work ever gets
         await wait_until(lambda: "u" in state.users, timeout=10)
         assert injected == 1
@@ -299,13 +299,16 @@ async def test_disconnect_keeps_queued_work_for_the_next_attachment(monkeypatch)
     state.gate = asyncio.Event()
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="in-flight"))
+        await node.update_subscription(Subscription(subscription_uuid="in-flight"))
         await asyncio.wait_for(state.delta_started.wait(), 2)
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued")])
+        await store.enqueue_subscriptions(node.node_id, [Subscription(subscription_uuid="queued")])
         await node.disconnect()  # cancels the worker mid-delivery; nothing is cleared
         state.gate.set()
         # The newer bridge releases its cancelled in-flight claim immediately.
-        assert {item.user.subscription_uuid for item in await store.claim_users(node.node_id, "inspector", 10, 0)} == {
+        assert {
+            item.subscription.subscription_uuid
+            for item in await store.claim_subscriptions(node.node_id, "inspector", 10, 0)
+        } == {
             "in-flight",
             "queued",
         }
@@ -334,7 +337,7 @@ async def test_delta_delivered_across_a_full_snapshot_is_reapplied_from_current_
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="u", inbounds=["delta"]))
+        await node.update_subscription(Subscription(subscription_uuid="u", inbounds=["delta"]))
         await asyncio.wait_for(state.delta_started.wait(), 2)  # claimed at generation 0, send in flight
         token = await store.begin_full_sync(node.node_id, "other-worker", 120)
         assert (await store.capture_queued(node.node_id))[1] == 1  # the in-flight claim is visible
@@ -362,7 +365,7 @@ async def test_worker_defers_claims_while_a_snapshot_is_fenced_and_resumes_after
     try:
         await node.connect("0.5.4", "26.3.27")
         token = await store.begin_full_sync(node.node_id, "other-worker", 120)
-        await node.update_user(Subscription(subscription_uuid="during"))
+        await node.update_subscription(Subscription(subscription_uuid="during"))
         await asyncio.sleep(0.1)
         assert state.deltas == []
         await store.end_full_sync(node.node_id, token)
@@ -386,11 +389,11 @@ async def test_unconfirmed_ack_leaves_a_marker_resolved_from_the_source_of_truth
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="u", inbounds=["old"]))
+        await node.update_subscription(Subscription(subscription_uuid="u", inbounds=["old"]))
         await asyncio.wait_for(state.delta_started.wait(), 2)
         # A newer state is queued while ours is in flight; it keeps our claim visible.
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["newer"])])
-        assert await store.claim_users(node.node_id, "other", 10, 30) == []
+        await store.enqueue_subscriptions(node.node_id, [Subscription(subscription_uuid="u", inbounds=["newer"])])
+        assert await store.claim_subscriptions(node.node_id, "other", 10, 30) == []
         # The entry vanishes underneath our acknowledgement (delivered elsewhere / drained).
         await kv.delete(store._pending_key(node.node_id, "u"))
         state.gate.set()  # our old payload lands last
@@ -427,11 +430,13 @@ async def test_sync_full_covers_users_created_after_the_snapshot_was_requested(m
     async def load_users():
         # The database read happens inside the fence; a user created right now
         # is either in this snapshot or still queued behind the fence.
-        await node.update_user(created)
+        await node.update_subscription(created)
         return [Subscription(subscription_uuid="existing", inbounds=["in"])]
 
     try:
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued-before", inbounds=["in"])])
+        await store.enqueue_subscriptions(
+            node.node_id, [Subscription(subscription_uuid="queued-before", inbounds=["in"])]
+        )
         await manager.sync_full(1, load_users, flush_pending=flush)
         assert state.snapshots == [["existing"]]
         assert "created-later" not in state.users  # queued behind the fence, not lost
@@ -466,9 +471,9 @@ async def test_failed_full_sync_leaves_queued_work_deliverable(monkeypatch, fail
         raise NodeAPIError(-1, "Request timed out")
 
     if failure == "rpc":
-        node.sync_users = failing_full
+        node.sync_subscriptions = failing_full
     try:
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["in"])])
+        await store.enqueue_subscriptions(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["in"])])
         await store.request_refresh(node.node_id, ["marked"])
         with pytest.raises((RuntimeError, NodeAPIError)):
             await manager.sync_full(1, load_users, flush_pending=True)
@@ -498,7 +503,7 @@ async def test_full_sync_waits_for_in_flight_delivery_before_reading_the_snapsho
 
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="slow"))
+        await node.update_subscription(Subscription(subscription_uuid="slow"))
         await asyncio.wait_for(state.delta_started.wait(), 2)
         sync = asyncio.create_task(manager.sync_full(1, load_users, flush_pending=True))
         await asyncio.sleep(0.1)
@@ -556,7 +561,7 @@ async def test_full_sync_that_loses_its_fence_lease_sends_and_retires_nothing(mo
         return [Subscription(subscription_uuid="snapshot", inbounds=["in"])]
 
     try:
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["in"])])
+        await store.enqueue_subscriptions(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["in"])])
         with pytest.raises(NodeAPIError) as info:
             await manager.sync_full(1, slow_loader, flush_pending=True)
         assert info.value.code == 409
@@ -578,9 +583,9 @@ async def test_full_sync_fails_closed_when_deliveries_never_quiesce(monkeypatch)
     monkeypatch.setattr(bridge_module, "FULL_SYNC_LEASE_SECONDS", 5.0)
     loaded = []
     try:
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["in"])])
+        await store.enqueue_subscriptions(node.node_id, [Subscription(subscription_uuid="u", inbounds=["in"])])
         # Another worker's claim keeps getting refreshed (its lease never lapses).
-        claimed = await other.claim_users(node.node_id, "other", 10, 60)
+        claimed = await other.claim_subscriptions(node.node_id, "other", 10, 60)
         assert len(claimed) == 1
         with pytest.raises(NodeAPIError) as info:
             await manager.sync_full(1, lambda: asyncio.sleep(0, result=loaded), flush_pending=True)
@@ -626,7 +631,7 @@ async def test_delivery_blocked_past_its_claim_lease_is_never_sent(monkeypatch, 
         await node.connect(node_version, "26.3.27")
         block = contextlib.nullcontext() if legacy else node._node_lock  # a Start/full-sync RPC holds the node lock
         async with block:
-            await node.update_user(Subscription(subscription_uuid="u", inbounds=["old"]))
+            await node.update_subscription(Subscription(subscription_uuid="u", inbounds=["old"]))
             await asyncio.sleep(0.3)  # claimed; the send is now blocked
             # A sibling's full snapshot begins: no further claims by this worker until it ends.
             token = await other.begin_full_sync(node.node_id, "other", 120)
@@ -638,11 +643,13 @@ async def test_delivery_blocked_past_its_claim_lease_is_never_sent(monkeypatch, 
                 assert await other.retire_captured(node.node_id, captured) == 1
                 expected = ["snapshot"]
             else:
-                await other.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["newer"])])
-                newer = await other.claim_users(node.node_id, "other", 10, 30)
-                assert [list(item.user.inbounds) for item in newer] == [["newer"]]
+                await other.enqueue_subscriptions(
+                    node.node_id, [Subscription(subscription_uuid="u", inbounds=["newer"])]
+                )
+                newer = await other.claim_subscriptions(node.node_id, "other", 10, 30)
+                assert [list(item.subscription.inbounds) for item in newer] == [["newer"]]
                 state.users["u"] = ["newer"]
-                assert await other.ack_users(node.node_id, [item.token for item in newer]) == []
+                assert await other.ack_subscriptions(node.node_id, [item.token for item in newer]) == []
                 expected = ["newer"]
         if legacy:
             state.gate.set()
@@ -668,7 +675,7 @@ async def test_slow_send_is_cut_before_its_claim_lease_expires(monkeypatch):
     state.gate = asyncio.Event()  # the stream never completes
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="u"))
+        await node.update_subscription(Subscription(subscription_uuid="u"))
         await asyncio.wait_for(state.delta_started.wait(), 2)
         deadline = node._delivery_deadline
         assert node._delivery_budget() > 0
@@ -703,16 +710,20 @@ async def test_in_memory_store_capture_holds_entries_and_settles_after_snapshot(
     node = make_node("grpc")
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     manager = await make_manager(node)
-    store = node._user_sync_store
-    await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="a"), Subscription(subscription_uuid="b")])
+    store = node._subscription_sync_store
+    await store.enqueue_subscriptions(
+        node.node_id, [Subscription(subscription_uuid="a"), Subscription(subscription_uuid="b")]
+    )
     try:
         captured = await node.capture_queued_work()
         assert set(captured) == {"a", "b"}
         await node.release_queued_work(captured)
-        assert {item.user.subscription_uuid for item in await store.claim_users(node.node_id, "x", 10, 0)} == {"a", "b"}
+        assert {
+            item.subscription.subscription_uuid for item in await store.claim_subscriptions(node.node_id, "x", 10, 0)
+        } == {"a", "b"}
         await asyncio.sleep(0.01)
         await manager.sync_full(1, lambda: asyncio.sleep(0, result=[]), flush_pending=True)
-        assert await store.claim_users(node.node_id, "x", 10, 30) == []
+        assert await store.claim_subscriptions(node.node_id, "x", 10, 30) == []
         assert state.snapshots == [[]]
     finally:
         await close_node(node)
@@ -728,7 +739,7 @@ async def test_bulk_updates_use_the_fenced_durable_queue(monkeypatch):
     try:
         await node.connect("0.5.4", "26.3.27")
         token = await store.begin_full_sync(node.node_id, "other", 120)
-        await manager._sync_users_to_node(
+        await manager._sync_subscriptions_to_node(
             1, node, [Subscription(subscription_uuid=f"bulk-{n}", inbounds=["in"]) for n in range(150)]
         )
         await asyncio.sleep(0.2)
@@ -764,8 +775,10 @@ async def test_bulk_state_committed_after_an_older_queued_payload_wins(monkeypat
 
     state.apply_delta = flaky_delta
     try:
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u", inbounds=["enabled-v1"])])
-        await manager._sync_users_to_node(1, node, [Subscription(subscription_uuid="u", inbounds=[])])  # disabled-v2
+        await store.enqueue_subscriptions(node.node_id, [Subscription(subscription_uuid="u", inbounds=["enabled-v1"])])
+        await manager._sync_subscriptions_to_node(
+            1, node, [Subscription(subscription_uuid="u", inbounds=[])]
+        )  # disabled-v2
         await node.connect("0.5.4", "26.3.27")
         await wait_until(lambda: "u" in state.users, timeout=10)
         assert state.users["u"] == [] and attempts == 2
@@ -788,10 +801,14 @@ async def test_refresh_request_never_displaces_a_queued_payload_or_an_active_cla
         )
     )
     try:
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="claimed", inbounds=["payload"])])
-        claimed = await other.claim_users(node.node_id, "other", 10, 30)
-        assert [item.user.subscription_uuid for item in claimed] == ["claimed"]
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["payload"])])
+        await store.enqueue_subscriptions(
+            node.node_id, [Subscription(subscription_uuid="claimed", inbounds=["payload"])]
+        )
+        claimed = await other.claim_subscriptions(node.node_id, "other", 10, 30)
+        assert [item.subscription.subscription_uuid for item in claimed] == ["claimed"]
+        await store.enqueue_subscriptions(
+            node.node_id, [Subscription(subscription_uuid="queued", inbounds=["payload"])]
+        )
         await node.request_refresh(
             [
                 Subscription(subscription_uuid="queued"),
@@ -815,7 +832,7 @@ async def test_refresh_request_never_displaces_a_queued_payload_or_an_active_cla
         # Delivery itself always sends the state read from the source of truth at send time.
         assert state.users["queued"] == ["db"] and state.users["fresh"] == ["db"]
         assert "claimed" not in state.users  # owned by the other worker
-        await other.ack_users(node.node_id, [item.token for item in claimed])
+        await other.ack_subscriptions(node.node_id, [item.token for item in claimed])
     finally:
         register_refresh_handler(None)
         await close_node(node)
@@ -840,10 +857,10 @@ async def test_edits_queued_in_reverse_commit_order_converge_to_the_database_sta
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(
+        await node.update_subscription(
             Subscription(subscription_uuid="u", inbounds=["v2"])
         )  # B's serialization, enqueued first
-        await node.update_user(
+        await node.update_subscription(
             Subscription(subscription_uuid="u", inbounds=[])
         )  # A's older serialization, enqueued last
         await wait_until(lambda: state.users.get("u") == ["v2"], timeout=10)
@@ -872,10 +889,10 @@ async def test_stale_single_update_after_a_bulk_update_converges(monkeypatch):
         )
     )
     try:
-        await manager._sync_users_to_node(
+        await manager._sync_subscriptions_to_node(
             1, node, [Subscription(subscription_uuid=f"u{n}", inbounds=["bulk-v2"]) for n in range(5)]
         )
-        await store.enqueue_users(
+        await store.enqueue_subscriptions(
             node.node_id, [Subscription(subscription_uuid="u2", inbounds=["single-v1"])]
         )  # older edit, later enqueue
         await node.connect("0.5.4", "26.3.27")
@@ -905,7 +922,7 @@ async def test_failed_current_state_read_requeues_the_batch_and_never_acknowledg
     register_refresh_handler(flaky)
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="u", inbounds=["queued"]))
+        await node.update_subscription(Subscription(subscription_uuid="u", inbounds=["queued"]))
         await wait_until(lambda: state.users.get("u") == ["db"], timeout=10)
         assert attempts == 2 and state.deltas == [["u"]]  # nothing was sent while the read was failing
         await asyncio.wait_for(node._sync_worker_task, 10)
@@ -991,7 +1008,7 @@ async def test_health_transitions_do_not_lose_queued_work(monkeypatch):
     try:
         await node.connect("0.5.4", "26.3.27")
         await node.set_health(Health.BROKEN)
-        await node.update_user(Subscription(subscription_uuid="while-broken"))
+        await node.update_subscription(Subscription(subscription_uuid="while-broken"))
         await asyncio.sleep(0.05)
         assert state.deltas == []
         await node.set_health(Health.HEALTHY)

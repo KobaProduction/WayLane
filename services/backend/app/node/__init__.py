@@ -29,8 +29,8 @@ class NodeManager:
         self._node_signatures: dict[int, tuple] = {}
         # keep_alive goes to Start, not to the bridge object; the heartbeat reads it here.
         self._keep_alives: dict[int, int] = {}
-        self._user_sync_locks: dict[int, asyncio.Lock] = {}
-        self._user_sync_tasks: dict[int, set[asyncio.Task]] = {}
+        self._subscription_sync_locks: dict[int, asyncio.Lock] = {}
+        self._subscription_sync_tasks: dict[int, set[asyncio.Task]] = {}
         self._lock = RWLock(fast=True)
         self.logger = get_logger("node-manager")
 
@@ -70,7 +70,7 @@ class NodeManager:
         }
         store, coordinator, worker_id = get_bridge_memory()
         if store is not None and coordinator is not None:
-            kwargs["user_sync_store"] = store
+            kwargs["subscription_sync_store"] = store
             kwargs["lifecycle_coordinator"] = coordinator
             kwargs["worker_id"] = worker_id
         return kwargs
@@ -86,30 +86,32 @@ class NodeManager:
         except Exception:
             pass
 
-    async def _cancel_user_syncs(self, node_id: int) -> None:
+    async def _cancel_subscription_syncs(self, node_id: int) -> None:
         current = asyncio.current_task()
-        tasks = [task for task in self._user_sync_tasks.get(node_id, ()) if task is not current and not task.done()]
+        tasks = [
+            task for task in self._subscription_sync_tasks.get(node_id, ()) if task is not current and not task.done()
+        ]
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    def _track_user_sync(self, node_id: int, task: asyncio.Task | None = None) -> asyncio.Task | None:
+    def _track_subscription_sync(self, node_id: int, task: asyncio.Task | None = None) -> asyncio.Task | None:
         if task is None:
             task = asyncio.current_task()
         if task is not None:
-            self._user_sync_tasks.setdefault(node_id, set()).add(task)
+            self._subscription_sync_tasks.setdefault(node_id, set()).add(task)
         return task
 
-    def _untrack_user_sync(self, node_id: int, task: asyncio.Task | None) -> None:
+    def _untrack_subscription_sync(self, node_id: int, task: asyncio.Task | None) -> None:
         if task is None:
             return
-        tasks = self._user_sync_tasks.get(node_id)
+        tasks = self._subscription_sync_tasks.get(node_id)
         if tasks is None:
             return
         tasks.discard(task)
         if not tasks:
-            self._user_sync_tasks.pop(node_id, None)
+            self._subscription_sync_tasks.pop(node_id, None)
 
     async def update_node(self, node: Node) -> WayLaneNode:
         await ensure_bridge_memory()
@@ -135,9 +137,9 @@ class NodeManager:
         # user deltas are not dropped; bulk deliveries release the lock between batches
         # and continue on the replacement object.
         if existing_signature != signature:
-            await self._cancel_user_syncs(node.id)
+            await self._cancel_subscription_syncs(node.id)
 
-        lock = self._user_sync_locks.setdefault(node.id, asyncio.Lock())
+        lock = self._subscription_sync_locks.setdefault(node.id, asyncio.Lock())
         async with lock:
             # Another update may have completed while this call was waiting.
             async with self._lock.reader_lock:
@@ -163,16 +165,16 @@ class NodeManager:
         return new_node
 
     async def remove_node(self, id: int, *, remote_stop: bool = True) -> None:
-        await self._cancel_user_syncs(id)
+        await self._cancel_subscription_syncs(id)
 
         # Keep the per-node lock identity stable for the lifetime of the manager so a
         # waiter cannot overlap a later operation through a newly-created lock.
-        lock = self._user_sync_locks.setdefault(id, asyncio.Lock())
+        lock = self._subscription_sync_locks.setdefault(id, asyncio.Lock())
         async with lock, self._lock.writer_lock:
             old_node: WayLaneNode | None = self._nodes.pop(id, None)
             self._node_signatures.pop(id, None)
             self._keep_alives.pop(id, None)
-            self._user_sync_tasks.pop(id, None)
+            self._subscription_sync_tasks.pop(id, None)
 
         # Do cleanup without holding the lock to avoid slow delete operations.
         asyncio.create_task(self._shutdown_node(old_node, remote_stop=remote_stop))
@@ -183,7 +185,7 @@ class NodeManager:
 
     async def stop_node_if_current(self, node_id: int, node: WayLaneNode) -> bool:
         """Stop a node only while it is still the manager's current connection."""
-        lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
+        lock = self._subscription_sync_locks.setdefault(node_id, asyncio.Lock())
         async with lock:
             if await self.get_node(node_id) is not node:
                 return False
@@ -247,7 +249,7 @@ class NodeManager:
             supports_chunked, _ = await supports_chunked_check()
 
         if supports_chunked:
-            users_to_sync = await node.sync_users_chunked(
+            users_to_sync = await node.sync_subscriptions_chunked(
                 batch,
                 chunk_size=len(batch),
                 flush_pending=False,
@@ -255,7 +257,7 @@ class NodeManager:
             if not users_to_sync:
                 return []
 
-        sync_batch_users = getattr(node, "_sync_batch_users", None)
+        sync_batch_users = getattr(node, "_sync_batch_subscriptions", None)
         if callable(sync_batch_users):
             users_to_sync = await sync_batch_users(users_to_sync)
 
@@ -273,11 +275,11 @@ class NodeManager:
         if failed_count:
             raise RuntimeError(f"failed to sync {failed_count}/{len(users)} users to node {node_id}")
 
-    async def _sync_users_to_node(self, node_id: int, node: WayLaneNode | None, users: list[ProtoSubscription]):
+    async def _sync_subscriptions_to_node(self, node_id: int, node: WayLaneNode | None, users: list[ProtoSubscription]):
         batch_size = max(1, nats_settings.node_update_subscriptions_batch_size)
-        lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
+        lock = self._subscription_sync_locks.setdefault(node_id, asyncio.Lock())
         failed_count = 0
-        task = self._track_user_sync(node_id)
+        task = self._track_subscription_sync(node_id)
 
         try:
             # The bridge exposes the fence methods on local nodes too, but the
@@ -292,7 +294,7 @@ class NodeManager:
             if self._supports_shared_sync(current_node):
                 # Bulk updates use the same durable, fenced delivery as single
                 # updates only when the shared-store protocol is available.
-                await current_node.update_users(users)
+                await current_node.update_subscriptions(users)
                 return
 
             for batch in self._chunk_users(users, batch_size):
@@ -305,7 +307,7 @@ class NodeManager:
                         return
                     failed_count += len(await self._sync_user_batch_to_node(current_node, batch))
         finally:
-            self._untrack_user_sync(node_id, task)
+            self._untrack_subscription_sync(node_id, task)
 
         if failed_count:
             raise RuntimeError(f"failed to sync {failed_count}/{len(users)} users to node {node_id}")
@@ -320,7 +322,7 @@ class NodeManager:
         ``SubscriptionSyncPreemptedError`` instead. Cancelling the caller still cancels the sync.
         """
         task = asyncio.create_task(sync)
-        self._track_user_sync(node_id, task)
+        self._track_subscription_sync(node_id, task)
         try:
             return await task
         except asyncio.CancelledError:
@@ -331,9 +333,9 @@ class NodeManager:
                 ) from None
             raise
         finally:
-            self._untrack_user_sync(node_id, task)
+            self._untrack_subscription_sync(node_id, task)
 
-    async def sync_users_batched(
+    async def sync_subscriptions_batched(
         self, node_id: int, node: WayLaneNode, users: list[ProtoSubscription], *, batch_size: int | None = None
     ) -> WayLaneNode | None:
         """Apply a large initial user set through bounded delta batches.
@@ -348,7 +350,7 @@ class NodeManager:
     async def _sync_users_batched(
         self, node_id: int, node: WayLaneNode, users: list[ProtoSubscription], *, batch_size: int | None
     ) -> WayLaneNode | None:
-        lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
+        lock = self._subscription_sync_locks.setdefault(node_id, asyncio.Lock())
         async with lock:
             if await self.get_node(node_id) is not node:
                 return None
@@ -403,7 +405,7 @@ class NodeManager:
         *,
         flush_pending: bool,
     ) -> WayLaneNode | None:
-        lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
+        lock = self._subscription_sync_locks.setdefault(node_id, asyncio.Lock())
         async with lock:
             node = await self.get_node(node_id)
             if node is None:
@@ -414,7 +416,7 @@ class NodeManager:
             if not self._supports_shared_sync(node):
                 if callable(users):
                     users = await users()
-                await node.sync_users(users, flush_pending=flush_pending)
+                await node.sync_subscriptions(users, flush_pending=flush_pending)
                 return node
             async with node.full_sync_fence() as held:
                 # Always wait for in-flight deliveries to settle; retire the
@@ -427,7 +429,7 @@ class NodeManager:
                         users = await users()
                     # A fence this worker no longer owns must not send or retire.
                     held.check()
-                    await node.sync_users(users, flush_pending=False)
+                    await node.sync_subscriptions(users, flush_pending=False)
                     held.check()
                 except BaseException:
                     await node.release_queued_work(captured)
@@ -444,7 +446,8 @@ class NodeManager:
             return
 
         results = await asyncio.gather(
-            *(self._sync_users_to_node(node_id, None, users) for node_id, _node in nodes), return_exceptions=True
+            *(self._sync_subscriptions_to_node(node_id, None, users) for node_id, _node in nodes),
+            return_exceptions=True,
         )
         for (node_id, _node), result in zip(nodes, results, strict=True):
             if isinstance(result, asyncio.CancelledError):
@@ -453,7 +456,7 @@ class NodeManager:
             elif isinstance(result, Exception):
                 self.logger.error("Failed to sync users to node %s: %s", node_id, result)
 
-    async def update_users(self, users: list[ProtoSubscription], *, await_dispatch: bool = False) -> None:
+    async def update_subscriptions(self, users: list[ProtoSubscription], *, await_dispatch: bool = False) -> None:
         """Queue a batch, optionally waiting so a producer cannot outrun node dispatch.
 
         Per-node failures are logged, never raised: a node that misses a batch gets a
@@ -464,12 +467,12 @@ class NodeManager:
         else:
             asyncio.create_task(self._update_users(users))
 
-    async def update_user(self, user: ProtoSubscription) -> None:
+    async def update_subscription(self, user: ProtoSubscription) -> None:
         nodes = await self._snapshot_nodes()
         if not nodes:
             return
 
-        results = await asyncio.gather(*(node.update_user(user) for node in nodes), return_exceptions=True)
+        results = await asyncio.gather(*(node.update_subscription(user) for node in nodes), return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
                 raise result

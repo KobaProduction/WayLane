@@ -5,8 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from waylane_node_bridge import NodeAPIError
-from waylane_node_bridge.common import service_pb2 as service
 
 from app.db.models import Node
 from app.models.core import CoreType
@@ -17,6 +15,8 @@ from app.operation.node import (
     WIREGUARD_START_BATCH_SIZE,
     NodeOperation,
 )
+from waylane_node_bridge import NodeAPIError
+from waylane_node_bridge.common import service_pb2 as service
 
 NODE_ID = 7
 STARTED = SimpleNamespace(node_version="0.5.4", core_version="1.0.0")
@@ -53,7 +53,7 @@ class _FakeNode:
     async def _supports_chunked_sync(self):
         return True, "0.5.4"
 
-    async def sync_users_chunked(self, batch, chunk_size, flush_pending):
+    async def sync_subscriptions_chunked(self, batch, chunk_size, flush_pending):
         self.calls.append(("batch", len(batch), chunk_size, flush_pending))
         if self.on_batch is not None:
             await self.on_batch(len([call for call in self.calls if call[0] == "batch"]))
@@ -66,9 +66,11 @@ def manager(monkeypatch: pytest.MonkeyPatch) -> NodeManager:
     monkeypatch.setattr(node_operation_module, "node_manager", manager)
     # A synthetic Xray core has no real TLS/CorePreset database; isolate
     # hydrators to test batching, not persistence schema.
-    from app.operation import tls_presets, core_presets
+    from app.operation import core_presets, tls_presets
+
     async def preserve_config(db, config, *args):
         return config
+
     monkeypatch.setattr(tls_presets, "hydrate_tls_config", preserve_config)
     monkeypatch.setattr(core_presets, "hydrate_core_preset_config", preserve_config)
     return manager
@@ -261,7 +263,7 @@ async def test_lifecycle_change_preempts_batched_start(managed: NodeManager, lif
     assert pg_node.calls.count(("stop",)) == 1
     if replacement is not None:
         assert replacement.calls == []
-    assert managed._user_sync_tasks == {}
+    assert managed._subscription_sync_tasks == {}
 
 
 @pytest.mark.asyncio

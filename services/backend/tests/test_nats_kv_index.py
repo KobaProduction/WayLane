@@ -192,3 +192,47 @@ async def test_missing_candidate_eviction_does_not_remove_a_newer_update():
         assert index._keys == {}
     finally:
         await index.close()
+
+
+async def test_put_notifications_wake_after_live_updates_and_snapshot_rebuild():
+    first = Watcher([entry("p.1.existing", 1), None])
+    after_reconnect = Watcher([entry("p.2.unseen", 5), None])
+    messages = []
+    index = KvKeyIndex(WatchedKv(first, after_reconnect), on_put=messages.append)
+    try:
+        assert await index.keys("p.1.") == ["p.1.existing"]
+        assert messages == ["p.1.existing"]
+        first.queue.put_nowait(entry("p.1.new", 2))
+        await eventually(lambda: "p.1.new" in messages)
+        first.queue.put_nowait(entry("p.1.new", 3, "DEL"))
+        await eventually(lambda: "p.1.new" not in index._keys.get("p.1.", {}))
+        assert messages == ["p.1.existing", "p.1.new"]
+
+        # A reconnect can recover writes from the new KV snapshot without
+        # another live change. Recovery must still wake the owning node.
+        first.queue.put_nowait(RuntimeError("connection dropped"))
+        await eventually(lambda: first.stopped)
+        assert await index.keys("p.2.") == ["p.2.unseen"]
+        assert messages[-1] == "p.2.unseen"
+    finally:
+        await index.close()
+
+
+async def test_callback_failure_does_not_terminate_shared_key_watcher():
+    watcher = Watcher([None])
+    observed = []
+
+    def notify(key):
+        observed.append(key)
+        raise RuntimeError("application callback failed")
+
+    index = KvKeyIndex(WatchedKv(watcher), on_put=notify)
+    try:
+        assert await index.keys("p.1.") == []
+        watcher.queue.put_nowait(entry("p.1.first", 1))
+        watcher.queue.put_nowait(entry("p.1.second", 2))
+        await eventually(lambda: observed == ["p.1.first", "p.1.second"])
+        assert await index.keys("p.1.") == ["p.1.first", "p.1.second"]
+        assert index._task is not None and not index._task.done()
+    finally:
+        await index.close()

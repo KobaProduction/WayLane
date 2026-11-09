@@ -62,8 +62,12 @@ node worker together only after confirming that pending work in the old bucket
 is drained or explicitly resolved. Establish a full current-subscription
 snapshot on each node and verify fencing/revocation before retiring the old
 bucket; do not discard outstanding credentials or delete KV data as a side
-effect of a code push. Real NATS state, DEV routing and VPN traffic require
-separate operational acceptance.
+effect of a code push. Live KV PUT notifications wake an attached node's lazy
+subscription worker even when another process writes the queue; disconnect
+unsubscribes, and watcher recovery replays existing keys after reconnect.
+This is event-driven and requires no additional NATS subject or polling loop.
+Real NATS state, DEV routing and VPN traffic require separate operational
+acceptance.
 
 
 ## Database migrations — existing PasarGuard databases are supported

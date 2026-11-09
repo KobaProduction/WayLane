@@ -105,7 +105,7 @@ def require_amnezia_node_version(version: str | None) -> None:
         raise ValueError("AmneziaWG requires WayLane node >=0.6.0")
 
 
-type CoreUsers = list | Callable[[], Awaitable[list]]
+type CoreSubscriptions = list | Callable[[], Awaitable[list]]
 
 logger = get_logger("node-operation")
 
@@ -279,16 +279,16 @@ class NodeOperation(BaseOperation):
         return True
 
     @staticmethod
-    async def _get_core_users_map(
+    async def _get_core_subscriptions_map(
         db: AsyncSession, core_ids: set[int], *, lazy: bool = False
-    ) -> tuple[dict[int, object | None], dict[int, CoreUsers]]:
+    ) -> tuple[dict[int, object | None], dict[int, CoreSubscriptions]]:
         if not core_ids:
             return {}, {}
 
         resolved_cores = await core_manager.get_cores(core_ids | {1})
         default_core = resolved_cores.get(1)
         cores_by_id: dict[int, object | None] = {}
-        users_by_core: dict[int, CoreUsers] = {}
+        users_by_core: dict[int, CoreSubscriptions] = {}
         loaded_users: dict[int, list] = {}
         load_lock = asyncio.Lock()
 
@@ -365,7 +365,7 @@ class NodeOperation(BaseOperation):
         pg_node: WayLaneNode,
         db_node: Node,
         core,
-        users: CoreUsers,
+        users: CoreSubscriptions,
         backend_type,
         *,
         force_start: bool = False,
@@ -445,7 +445,7 @@ class NodeOperation(BaseOperation):
                 info = await pg_node.start(**start_kwargs)
             if batch_wireguard_users:
                 try:
-                    synced_node = await node_manager.sync_users_batched(
+                    synced_node = await node_manager.sync_subscriptions_batched(
                         db_node.id, pg_node, users, batch_size=WIREGUARD_START_BATCH_SIZE
                     )
                     if synced_node is None:
@@ -485,7 +485,7 @@ class NodeOperation(BaseOperation):
 
     @staticmethod
     async def connect_node(
-        db_node: Node, core, users: CoreUsers, *, force_start: bool = False, stop_first: bool = True
+        db_node: Node, core, users: CoreSubscriptions, *, force_start: bool = False, stop_first: bool = True
     ) -> dict | None:
         """
         Connect to a node and return status result (does NOT update database).
@@ -940,7 +940,7 @@ class NodeOperation(BaseOperation):
             return
 
         core_ids = {node.core_config_id or 1 for node in nodes}
-        cores_by_id, users_by_core = await self._get_core_users_map(db, core_ids, lazy=True)
+        cores_by_id, users_by_core = await self._get_core_subscriptions_map(db, core_ids, lazy=True)
         sem = asyncio.Semaphore(CONNECT_CONCURRENCY)
 
         async def connect_single(node: Node) -> dict | None:
@@ -1043,7 +1043,7 @@ class NodeOperation(BaseOperation):
             return False
 
         core_id = db_node.core_config_id or 1
-        cores_by_id, users_by_core = await self._get_core_users_map(db, {core_id}, lazy=True)
+        cores_by_id, users_by_core = await self._get_core_subscriptions_map(db, {core_id}, lazy=True)
         core = cores_by_id.get(core_id)
         users = users_by_core.get(core_id, [])
 
@@ -1372,7 +1372,7 @@ class NodeOperation(BaseOperation):
             # Defer the snapshot read: sync_full takes it inside the node's
             # fence, after any queued deltas were drained, so nothing created
             # between the read and the flush can be lost.
-            _, users_by_core = await self._get_core_users_map(db, {core_id}, lazy=True)
+            _, users_by_core = await self._get_core_subscriptions_map(db, {core_id}, lazy=True)
             users = users_by_core.get(core_id, [])
             if await node_manager.sync_full(node_id, users, flush_pending=flush_subscriptions) is None:
                 await self.raise_error(message="Node is not connected", code=409)

@@ -85,7 +85,7 @@ async def test_local_bulk_connect_passes_stop_first_to_each_node(monkeypatch: py
     node = SimpleNamespace(id=7, name="n7", status=NodeStatus.connected, core_config_id=2)
     core = object()
     operation = bare_operation()
-    operation._get_core_users_map = AsyncMock(return_value=({2: core}, {2: []}))
+    operation._get_core_subscriptions_map = AsyncMock(return_value=({2: core}, {2: []}))
     monkeypatch.setattr(node_operation_module.node_manager, "update_node", AsyncMock())
     monkeypatch.setattr(node_operation_module, "bulk_update_node_status", AsyncMock())
     connect = AsyncMock(return_value=None)

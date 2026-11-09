@@ -28,14 +28,14 @@ async def test_v2_queue_document_uses_canonical_subscription_uuid_fields():
     subscription_uuid = str(uuid4())
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
-    await store.enqueue_users("1", [Subscription(subscription_uuid=subscription_uuid)])
+    await store.enqueue_subscriptions("1", [Subscription(subscription_uuid=subscription_uuid)])
     key = store._pending_key("1", subscription_uuid)
     document = json.loads(kv._data[key][0])
     assert set(document) == {"subscription_uuid", "subscription"}
     assert document["subscription_uuid"] == subscription_uuid
-    claimed = await store.claim_users("1", "worker", limit=1, lease_seconds=30)
-    assert [item.user.subscription_uuid for item in claimed] == [subscription_uuid]
-    await store.ack_users("1", [item.token for item in claimed])
+    claimed = await store.claim_subscriptions("1", "worker", limit=1, lease_seconds=30)
+    assert [item.subscription.subscription_uuid for item in claimed] == [subscription_uuid]
+    await store.ack_subscriptions("1", [item.token for item in claimed])
     assert not await store.has_pending("1")
 
 
@@ -45,9 +45,30 @@ async def test_old_claim_namespace_is_not_consumed_by_new_subscription_queue():
     store = NatsSubscriptionSyncStore(kv)
     await kv.create("c.1.abandoned", b"{}")
     assert not await store.has_pending("1")
-    assert await store.claim_users("1", "worker", limit=10, lease_seconds=30) == []
+    assert await store.claim_subscriptions("1", "worker", limit=10, lease_seconds=30) == []
     assert await store.capture_queued("1") == ({}, 0)
     assert "c.1.abandoned" in kv._data
+
+
+@pytest.mark.asyncio
+async def test_shared_store_update_notifications_are_per_node_and_unsubscribed_on_detach():
+    store = NatsSubscriptionSyncStore(MemoryCasKv())
+    first = []
+    second = []
+    release_first = store.subscribe_updates("1", lambda: first.append("woken"))
+    release_second = store.subscribe_updates("2", lambda: second.append("woken"))
+    store._notify_pending_update("p.1.deadbeef")
+    store._notify_pending_update("f.2.sync")
+    assert first == ["woken"] and second == []
+    store._notify_pending_update("p.2.deadbeef")
+    assert second == ["woken"]
+    release_first()
+    release_first()  # idempotent, no lingering listeners
+    store._notify_pending_update("p.1.another")
+    assert first == ["woken"]
+    release_second()
+    assert store._update_listeners == {}
+    await store.close()
 
 
 @pytest.mark.asyncio
@@ -55,8 +76,8 @@ async def test_has_pending_includes_leased_work_without_reading_values():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
     assert await store.has_pending("1") is False
-    await store.enqueue_users("1", [_user("a@example.com")])
-    claimed = await store.claim_users("1", "worker", limit=1, lease_seconds=30)
+    await store.enqueue_subscriptions("1", [_user("a@example.com")])
+    claimed = await store.claim_subscriptions("1", "worker", limit=1, lease_seconds=30)
     assert len(claimed) == 1
 
     async def unexpected_get(_key):
@@ -70,57 +91,60 @@ async def test_has_pending_includes_leased_work_without_reading_values():
 async def test_shared_queue_uses_configured_batch_budget_without_dropping_remainder(monkeypatch):
     monkeypatch.setattr("app.node.nats_memory.nats_settings.node_update_subscriptions_batch_size", 3)
     store = NatsSubscriptionSyncStore(MemoryCasKv())
-    await store.enqueue_users("1", [_user(f"user-{number}") for number in range(8)])
+    await store.enqueue_subscriptions("1", [_user(f"user-{number}") for number in range(8)])
     delivered = []
     for expected_size in (3, 3, 2):
-        claimed = await store.claim_users("1", "worker", limit=2000, lease_seconds=30)
+        claimed = await store.claim_subscriptions("1", "worker", limit=2000, lease_seconds=30)
         assert len(claimed) == expected_size
-        delivered.extend(item.user.subscription_uuid for item in claimed)
-        await store.ack_users("1", [item.token for item in claimed])
+        delivered.extend(item.subscription.subscription_uuid for item in claimed)
+        await store.ack_subscriptions("1", [item.token for item in claimed])
     assert len(set(delivered)) == 8
-    assert await store.claim_users("1", "worker", limit=2000, lease_seconds=30) == []
+    assert await store.claim_subscriptions("1", "worker", limit=2000, lease_seconds=30) == []
 
 
 @pytest.mark.asyncio
 async def test_subscription_sync_enqueue_claim_ack_is_exclusive():
     store = NatsSubscriptionSyncStore(MemoryCasKv())
-    await store.enqueue_users("1", [_user("a@example.com"), _user("b@example.com")])
+    await store.enqueue_subscriptions("1", [_user("a@example.com"), _user("b@example.com")])
 
-    first = await store.claim_users("1", "worker-a", limit=1, lease_seconds=30)
-    second = await store.claim_users("1", "worker-b", limit=10, lease_seconds=30)
+    first = await store.claim_subscriptions("1", "worker-a", limit=1, lease_seconds=30)
+    second = await store.claim_subscriptions("1", "worker-b", limit=10, lease_seconds=30)
 
     assert len(first) == 1
     assert len(second) == 1
-    assert {first[0].user.subscription_uuid, second[0].user.subscription_uuid} == {"a@example.com", "b@example.com"}
+    assert {first[0].subscription.subscription_uuid, second[0].subscription.subscription_uuid} == {
+        "a@example.com",
+        "b@example.com",
+    }
 
-    await store.ack_users("1", [first[0].token])
-    assert await store.claim_users("1", "worker-a", limit=10, lease_seconds=30) == []
+    await store.ack_subscriptions("1", [first[0].token])
+    assert await store.claim_subscriptions("1", "worker-a", limit=10, lease_seconds=30) == []
 
 
 @pytest.mark.asyncio
 async def test_subscription_sync_latest_email_wins_and_requeue_works():
     store = NatsSubscriptionSyncStore(MemoryCasKv())
-    await store.enqueue_users("1", [_user("a@example.com", "old")])
-    await store.enqueue_users("1", [_user("a@example.com", "new")])
+    await store.enqueue_subscriptions("1", [_user("a@example.com", "old")])
+    await store.enqueue_subscriptions("1", [_user("a@example.com", "new")])
 
-    claimed = await store.claim_users("1", "worker-a", limit=10, lease_seconds=30)
+    claimed = await store.claim_subscriptions("1", "worker-a", limit=10, lease_seconds=30)
     assert len(claimed) == 1
-    assert list(claimed[0].user.inbounds) == ["new"]
+    assert list(claimed[0].subscription.inbounds) == ["new"]
 
-    await store.requeue_users("1", claimed)
-    claimed_again = await store.claim_users("1", "worker-b", limit=10, lease_seconds=30)
-    assert [item.user.subscription_uuid for item in claimed_again] == ["a@example.com"]
+    await store.requeue_subscriptions("1", claimed)
+    claimed_again = await store.claim_subscriptions("1", "worker-b", limit=10, lease_seconds=30)
+    assert [item.subscription.subscription_uuid for item in claimed_again] == ["a@example.com"]
 
 
 @pytest.mark.asyncio
 async def test_subscription_sync_expired_claim_becomes_available():
     store = NatsSubscriptionSyncStore(MemoryCasKv())
-    await store.enqueue_users("1", [_user("a@example.com")])
-    await store.claim_users("1", "worker-a", limit=10, lease_seconds=0)
+    await store.enqueue_subscriptions("1", [_user("a@example.com")])
+    await store.claim_subscriptions("1", "worker-a", limit=10, lease_seconds=0)
     await asyncio.sleep(0.01)
 
-    claimed = await store.claim_users("1", "worker-b", limit=10, lease_seconds=30)
-    assert [item.user.subscription_uuid for item in claimed] == ["a@example.com"]
+    claimed = await store.claim_subscriptions("1", "worker-b", limit=10, lease_seconds=30)
+    assert [item.subscription.subscription_uuid for item in claimed] == ["a@example.com"]
 
 
 @pytest.mark.asyncio
@@ -128,12 +152,12 @@ async def test_subscription_sync_enqueue_shards_per_uuid_key():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
     users = [_user(f"user{i}@example.com") for i in range(50)]
-    await store.enqueue_users("1", users)
+    await store.enqueue_subscriptions("1", users)
 
     pending_keys = [key for key in kv._data if key.startswith("p.1.")]
     assert len(pending_keys) == 50
 
-    claimed = await store.claim_users("1", "worker-a", limit=50, lease_seconds=30)
+    claimed = await store.claim_subscriptions("1", "worker-a", limit=50, lease_seconds=30)
     assert len(claimed) == 50
     await store.clear("1")
     assert kv._data == {}
@@ -158,7 +182,7 @@ async def test_bulk_sync_bounds_concurrent_writes_across_nodes():
 
     kv.create = slow_create
     users = [_user(f"user{i}") for i in range(200)]
-    await asyncio.gather(*(store.enqueue_users(str(node), users) for node in range(4)))
+    await asyncio.gather(*(store.enqueue_subscriptions(str(node), users) for node in range(4)))
     assert len(kv._data) == 800
     assert 1 < peak <= 32
     assert active == 0
@@ -168,7 +192,7 @@ async def test_bulk_sync_bounds_concurrent_writes_across_nodes():
 async def test_claim_conflict_leaves_pending_entry_unclaimed():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
-    await store.enqueue_users("1", [_user("a@example.com")])
+    await store.enqueue_subscriptions("1", [_user("a@example.com")])
     original_update = kv.update
 
     async def _update(key: str, value: bytes, last: int | None = None) -> int:
@@ -177,24 +201,25 @@ async def test_claim_conflict_leaves_pending_entry_unclaimed():
         return await original_update(key, value, last=last)
 
     kv.update = _update  # type: ignore[method-assign]
-    assert await store.claim_users("1", "worker-a", limit=10, lease_seconds=30) == []
+    assert await store.claim_subscriptions("1", "worker-a", limit=10, lease_seconds=30) == []
     kv.update = original_update  # type: ignore[method-assign]
     pending = [json.loads(value) for key, (value, _) in kv._data.items() if key.startswith("p.1.")]
     assert pending == [{"subscription_uuid": "a@example.com", "subscription": pending[0]["subscription"]}]
     assert [
-        item.user.subscription_uuid for item in await store.claim_users("1", "worker-a", limit=10, lease_seconds=30)
+        item.subscription.subscription_uuid
+        for item in await store.claim_subscriptions("1", "worker-a", limit=10, lease_seconds=30)
     ] == ["a@example.com"]
 
 
 async def _inbounds_delivered_after(store, node, extra_claim_first: bool):
     delivered = []
     if extra_claim_first:
-        newer = await store.claim_users(node, "b", 1, 30)
-        delivered.extend(list(item.user.inbounds) for item in newer)
-        await store.ack_users(node, [item.token for item in newer])
-    remaining = await store.claim_users(node, "b", 10, 30)
-    delivered.extend(list(item.user.inbounds) for item in remaining)
-    await store.ack_users(node, [item.token for item in remaining])
+        newer = await store.claim_subscriptions(node, "b", 1, 30)
+        delivered.extend(list(item.subscription.inbounds) for item in newer)
+        await store.ack_subscriptions(node, [item.token for item in newer])
+    remaining = await store.claim_subscriptions(node, "b", 10, 30)
+    delivered.extend(list(item.subscription.inbounds) for item in remaining)
+    await store.ack_subscriptions(node, [item.token for item in remaining])
     return delivered
 
 
@@ -204,16 +229,16 @@ async def test_stale_claim_never_resurrects_a_newer_state(scenario):
     """An old enabled payload must not come back after a newer disable, even once the disable was acked."""
     kv = MemoryCasKv()
     first, second = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
-    await first.enqueue_users("1", [_user("u", "old-enabled")])
+    await first.enqueue_subscriptions("1", [_user("u", "old-enabled")])
     # A live claim stays visible across the newer enqueue, so the "newer acked first"
     # interleaving requires the old lease to have lapsed (slow or dead worker).
-    old = await first.claim_users("1", "a", 1, 30 if scenario == "retry_over_newer" else 0)
-    await second.enqueue_users("1", [Subscription(subscription_uuid="u", inbounds=[])])  # newer: disabled
+    old = await first.claim_subscriptions("1", "a", 1, 30 if scenario == "retry_over_newer" else 0)
+    await second.enqueue_subscriptions("1", [Subscription(subscription_uuid="u", inbounds=[])])  # newer: disabled
     if scenario == "retry_after_newer_acked":
         delivered = await _inbounds_delivered_after(second, "1", extra_claim_first=True)
         assert delivered == [[]]
     if scenario != "expired_over_newer":
-        assert await first.requeue_users("1", old) == ["u"]
+        assert await first.requeue_subscriptions("1", old) == ["u"]
     delivered = await _inbounds_delivered_after(second, "1", extra_claim_first=False)
     assert all(inbounds == [] for inbounds in delivered)
     assert not any(key.startswith("p.1.") for key in kv._data)
@@ -223,15 +248,17 @@ async def test_stale_claim_never_resurrects_a_newer_state(scenario):
 async def test_ack_reports_unconfirmed_only_when_entry_vanished():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
-    await store.enqueue_users("1", [_user("a"), _user("b")])
-    claimed = {item.user.subscription_uuid: item for item in await store.claim_users("1", "a", 10, 30)}
+    await store.enqueue_subscriptions("1", [_user("a"), _user("b")])
+    claimed = {item.subscription.subscription_uuid: item for item in await store.claim_subscriptions("1", "a", 10, 30)}
     # a newer payload replaces the claim of "a"; "b" is removed entirely (delivered elsewhere / drained)
-    await store.enqueue_users("1", [_user("a", "newer")])
+    await store.enqueue_subscriptions("1", [_user("a", "newer")])
     b_key = store._pending_key("1", "b")
     await kv.delete(b_key)
-    assert await store.ack_users("1", [claimed["a"].token, claimed["b"].token]) == ["b"]
-    remaining = await store.claim_users("1", "a", 10, 30)
-    assert [(item.user.subscription_uuid, list(item.user.inbounds)) for item in remaining] == [("a", ["newer"])]
+    assert await store.ack_subscriptions("1", [claimed["a"].token, claimed["b"].token]) == ["b"]
+    remaining = await store.claim_subscriptions("1", "a", 10, 30)
+    assert [(item.subscription.subscription_uuid, list(item.subscription.inbounds)) for item in remaining] == [
+        ("a", ["newer"])
+    ]
 
 
 @pytest.mark.asyncio
@@ -248,18 +275,20 @@ async def test_refresh_marker_is_resolved_by_cas_and_never_overwrites_a_newer_en
 
     store.refresh_resolver = resolver
     await store.request_refresh("1", ["u", "gone"])
-    claim = asyncio.create_task(store.claim_users("1", "a", 10, 30))
+    claim = asyncio.create_task(store.claim_subscriptions("1", "a", 10, 30))
     await resolver_started.wait()
     # An API update lands while the database read is in flight.
-    await store.enqueue_users("1", [_user("u", "api-newer")])
+    await store.enqueue_subscriptions("1", [_user("u", "api-newer")])
     resolver_release.set()
     claimed = await claim
-    assert [(item.user.subscription_uuid, list(item.user.inbounds)) for item in claimed] == [
+    assert [(item.subscription.subscription_uuid, list(item.subscription.inbounds)) for item in claimed] == [
         ("gone", ["database-read"])
     ]
-    await store.ack_users("1", [item.token for item in claimed])
-    again = await store.claim_users("1", "a", 10, 30)
-    assert [(item.user.subscription_uuid, list(item.user.inbounds)) for item in again] == [("u", ["api-newer"])]
+    await store.ack_subscriptions("1", [item.token for item in claimed])
+    again = await store.claim_subscriptions("1", "a", 10, 30)
+    assert [(item.subscription.subscription_uuid, list(item.subscription.inbounds)) for item in again] == [
+        ("u", ["api-newer"])
+    ]
 
 
 @pytest.mark.asyncio
@@ -275,7 +304,7 @@ async def test_refresh_marker_survives_resolver_failure_and_full_sync_capture():
 
     store.refresh_resolver = failing_resolver
     await store.request_refresh("1", ["u"])
-    assert await store.claim_users("1", "a", 10, 30) == []
+    assert await store.claim_subscriptions("1", "a", 10, 30) == []
     assert calls == 1
     # A full snapshot that fails leaves the marker where it was.
     captured, active = await store.capture_queued("1")
@@ -283,7 +312,8 @@ async def test_refresh_marker_survives_resolver_failure_and_full_sync_capture():
     assert any(key.startswith("p.1.") for key in kv._data)
     store.refresh_resolver = AsyncMock(return_value=[_user("u", "current")])
     assert [
-        (item.user.subscription_uuid, list(item.user.inbounds)) for item in await store.claim_users("1", "a", 10, 30)
+        (item.subscription.subscription_uuid, list(item.subscription.inbounds))
+        for item in await store.claim_subscriptions("1", "a", 10, 30)
     ] == [("u", ["current"])]
 
 
@@ -291,9 +321,9 @@ async def test_refresh_marker_survives_resolver_failure_and_full_sync_capture():
 async def test_refresh_claimed_turns_delivery_into_marker_unless_newer_state_exists():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
-    await store.enqueue_users("1", [_user("kept", "old"), _user("replaced", "old"), _user("gone", "old")])
-    claimed = {item.user.subscription_uuid: item for item in await store.claim_users("1", "a", 10, 30)}
-    await store.enqueue_users("1", [_user("replaced", "newer")])
+    await store.enqueue_subscriptions("1", [_user("kept", "old"), _user("replaced", "old"), _user("gone", "old")])
+    claimed = {item.subscription.subscription_uuid: item for item in await store.claim_subscriptions("1", "a", 10, 30)}
+    await store.enqueue_subscriptions("1", [_user("replaced", "newer")])
     await kv.delete(store._pending_key("1", "gone"))
     await store.refresh_claimed("1", list(claimed.values()))
     docs = {
@@ -306,7 +336,8 @@ async def test_refresh_claimed_turns_delivery_into_marker_unless_newer_state_exi
     assert "subscription" in docs["replaced"] and "refresh" not in docs["replaced"]
     store.refresh_resolver = AsyncMock(side_effect=lambda node, emails: [_user(email, "db") for email in emails])
     delivered = {
-        item.user.subscription_uuid: list(item.user.inbounds) for item in await store.claim_users("1", "a", 10, 30)
+        item.subscription.subscription_uuid: list(item.subscription.inbounds)
+        for item in await store.claim_subscriptions("1", "a", 10, 30)
     }
     assert delivered == {"kept": ["db"], "gone": ["db"], "replaced": ["newer"]}
 
@@ -317,9 +348,11 @@ async def test_refresh_marker_without_payload_is_retired_and_removal_is_delivere
     store = NatsSubscriptionSyncStore(kv)
     store.refresh_resolver = AsyncMock(return_value=[Subscription(subscription_uuid="deleted", inbounds=[])])
     await store.request_refresh("1", ["deleted", "unknown"])
-    claimed = await store.claim_users("1", "a", 10, 30)
-    assert [(item.user.subscription_uuid, list(item.user.inbounds)) for item in claimed] == [("deleted", [])]
-    await store.ack_users("1", [item.token for item in claimed])
+    claimed = await store.claim_subscriptions("1", "a", 10, 30)
+    assert [(item.subscription.subscription_uuid, list(item.subscription.inbounds)) for item in claimed] == [
+        ("deleted", [])
+    ]
+    await store.ack_subscriptions("1", [item.token for item in claimed])
     assert not any(key.startswith("p.1.") for key in kv._data)
 
 
@@ -327,28 +360,30 @@ async def test_refresh_marker_without_payload_is_retired_and_removal_is_delivere
 async def test_capture_is_non_destructive_and_retire_removes_only_captured_revisions():
     kv = MemoryCasKv()
     first, second = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
-    await first.enqueue_users("1", [_user("a"), _user("b"), _user("c")])
+    await first.enqueue_subscriptions("1", [_user("a"), _user("b"), _user("c")])
     await first.request_refresh("1", ["m"])
-    in_flight = await second.claim_users("1", "other-worker", 1, 30)
-    assert [item.user.subscription_uuid for item in in_flight] == ["a"]
+    in_flight = await second.claim_subscriptions("1", "other-worker", 1, 30)
+    assert [item.subscription.subscription_uuid for item in in_flight] == ["a"]
     captured, active = await first.capture_queued("1")
     assert active == 1  # "a" is being delivered by another worker
     assert set(captured) == {first._pending_key("1", email) for email in ("b", "c", "m")}
     assert len([key for key in kv._data if key.startswith("p.1.")]) == 4  # nothing deleted
     # Newer state for "b" arrives after the capture: it must survive retirement.
-    await second.enqueue_users("1", [_user("b", "newer")])
+    await second.enqueue_subscriptions("1", [_user("b", "newer")])
     assert await first.retire_captured("1", captured) == 2
     remaining = {key: json.loads(value) for key, (value, _) in kv._data.items() if key.startswith("p.1.")}
     assert {doc["subscription_uuid"] for doc in remaining.values()} == {"a", "b"}
-    await second.ack_users("1", [item.token for item in in_flight])
-    assert [list(item.user.inbounds) for item in await second.claim_users("1", "x", 10, 30)] == [["newer"]]
+    await second.ack_subscriptions("1", [item.token for item in in_flight])
+    assert [list(item.subscription.inbounds) for item in await second.claim_subscriptions("1", "x", 10, 30)] == [
+        ["newer"]
+    ]
 
 
 @pytest.mark.asyncio
 async def test_capture_reads_each_unchanged_entry_once():
     kv = MemoryCasKv()
     writer, store = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
-    await writer.enqueue_users("1", [_user(f"u{i}") for i in range(10)])  # written by another worker
+    await writer.enqueue_subscriptions("1", [_user(f"u{i}") for i in range(10)])  # written by another worker
     original_get = kv.get
     reads = 0
 
@@ -368,10 +403,13 @@ async def test_capture_reads_each_unchanged_entry_once():
 async def test_failed_snapshot_leaves_queue_intact_without_restore():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
-    await store.enqueue_users("1", [_user("a"), _user("b")])
+    await store.enqueue_subscriptions("1", [_user("a"), _user("b")])
     captured, _ = await store.capture_queued("1")
     # No retirement happened (snapshot read or RPC failed): everything is still deliverable.
-    assert {item.user.subscription_uuid for item in await store.claim_users("1", "a", 10, 30)} == {"a", "b"}
+    assert {item.subscription.subscription_uuid for item in await store.claim_subscriptions("1", "a", 10, 30)} == {
+        "a",
+        "b",
+    }
     assert len(captured) == 2
 
 
@@ -404,43 +442,43 @@ async def test_full_sync_fence_is_exclusive_keeps_generation_and_expires():
 async def test_old_token_cannot_release_the_same_workers_newer_claim():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
-    await store.enqueue_users("1", [_user("u", "v1")])
-    old = await store.claim_users("1", "a", 10, 0)  # lease already expired
+    await store.enqueue_subscriptions("1", [_user("u", "v1")])
+    old = await store.claim_subscriptions("1", "a", 10, 0)  # lease already expired
     await asyncio.sleep(0.01)
-    newer = await store.claim_users("1", "a", 10, 30)  # same worker re-claims
-    assert [item.user.subscription_uuid for item in newer] == ["u"] and newer[0].token != old[0].token
-    await store.enqueue_users("1", [_user("u", "v2")])  # preserves the live claim
-    assert await store.requeue_users("1", old) == ["u"]
-    assert await store.ack_users("1", [old[0].token]) == []
+    newer = await store.claim_subscriptions("1", "a", 10, 30)  # same worker re-claims
+    assert [item.subscription.subscription_uuid for item in newer] == ["u"] and newer[0].token != old[0].token
+    await store.enqueue_subscriptions("1", [_user("u", "v2")])  # preserves the live claim
+    assert await store.requeue_subscriptions("1", old) == ["u"]
+    assert await store.ack_subscriptions("1", [old[0].token]) == []
     docs = [json.loads(value) for key, (value, _) in kv._data.items() if key.startswith("p.1.")]
     assert docs[0]["claim"]["id"] == newer[0].token.rsplit(".", 1)[1]
-    assert await store.claim_users("1", "b", 10, 30) == []  # still owned by the live claim
-    assert await store.ack_users("1", [newer[0].token]) == []  # v2 replaced it: release, not drop
-    assert [list(item.user.inbounds) for item in await store.claim_users("1", "b", 10, 30)] == [["v2"]]
+    assert await store.claim_subscriptions("1", "b", 10, 30) == []  # still owned by the live claim
+    assert await store.ack_subscriptions("1", [newer[0].token]) == []  # v2 replaced it: release, not drop
+    assert [list(item.subscription.inbounds) for item in await store.claim_subscriptions("1", "b", 10, 30)] == [["v2"]]
 
 
 @pytest.mark.asyncio
 async def test_enqueue_keeps_in_flight_claim_visible_until_its_owner_settles():
     kv = MemoryCasKv()
     store = NatsSubscriptionSyncStore(kv)
-    await store.enqueue_users("1", [_user("u", "v1")])
-    in_flight = await store.claim_users("1", "a", 10, 30)
-    await store.enqueue_users("1", [_user("u", "v2")])
+    await store.enqueue_subscriptions("1", [_user("u", "v1")])
+    in_flight = await store.claim_subscriptions("1", "a", 10, 30)
+    await store.enqueue_subscriptions("1", [_user("u", "v2")])
     captured, active = await store.capture_queued("1")
     assert active == 1 and captured == {}
-    assert await store.claim_users("1", "b", 10, 30) == []
-    assert await store.ack_users("1", [item.token for item in in_flight]) == []
+    assert await store.claim_subscriptions("1", "b", 10, 30) == []
+    assert await store.ack_subscriptions("1", [item.token for item in in_flight]) == []
     captured, active = await store.capture_queued("1")
     assert active == 0 and len(captured) == 1
-    assert [list(item.user.inbounds) for item in await store.claim_users("1", "b", 10, 30)] == [["v2"]]
+    assert [list(item.subscription.inbounds) for item in await store.claim_subscriptions("1", "b", 10, 30)] == [["v2"]]
 
 
 @pytest.mark.asyncio
 async def test_scans_skip_other_workers_live_claims_without_reads():
     kv = MemoryCasKv()
     first, second = NatsSubscriptionSyncStore(kv), NatsSubscriptionSyncStore(kv)
-    await first.enqueue_users("1", [_user(f"u{i}") for i in range(20)])
-    assert len(await first.claim_users("1", "a", 100, 30)) == 20
+    await first.enqueue_subscriptions("1", [_user(f"u{i}") for i in range(20)])
+    assert len(await first.claim_subscriptions("1", "a", 100, 30)) == 20
     original_get = kv.get
     reads = 0
 
@@ -450,11 +488,11 @@ async def test_scans_skip_other_workers_live_claims_without_reads():
         return await original_get(key)
 
     kv.get = counting_get  # type: ignore[method-assign]
-    assert await second.claim_users("1", "b", 100, 30) == []
+    assert await second.claim_subscriptions("1", "b", 100, 30) == []
     assert reads == 20  # one read per foreign claim to learn its lease
-    assert await second.claim_users("1", "b", 100, 30) == []
+    assert await second.claim_subscriptions("1", "b", 100, 30) == []
     assert reads == 20  # cached until the lease expires or the entry changes
-    await first.ack_users("1", [])
+    await first.ack_subscriptions("1", [])
 
 
 @pytest.mark.asyncio

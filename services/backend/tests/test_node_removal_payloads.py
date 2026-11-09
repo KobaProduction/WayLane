@@ -29,7 +29,7 @@ from app.jobs import review_subscriptions
 from app.node import bridge as bridge_module, sync as node_sync
 from app.node.subscription import serialize_subscription
 from tests.test_node_bridge import FakeNodeState, attach_fake_transport, close_node, make_node, wait_until
-from waylane_node_bridge import InMemoryUserSyncStore
+from waylane_node_bridge import InMemorySubscriptionSyncStore
 from waylane_node_bridge.common.service_pb2 import Subscription as ProtoSubscription
 
 PUBLIC_KEY = "x3rO3jkvA0vlN8kHBXnCEW3OQ7bU+Z1tK1Ow4FbMexM="
@@ -167,7 +167,7 @@ async def test_deleted_subscription_refresh_carries_no_inbounds(maker):
 
 def _capturing_node(monkeypatch):
     """A real queued adapter whose transport records every delivered payload."""
-    node = make_node("grpc", InMemoryUserSyncStore())
+    node = make_node("grpc", InMemorySubscriptionSyncStore())
     seen: list[ProtoSubscription] = []
     state = FakeNodeState()
     original = state.apply_delta
@@ -185,7 +185,7 @@ async def _deliver(monkeypatch, queued: ProtoSubscription) -> ProtoSubscription:
     node, seen = _capturing_node(monkeypatch)
     try:
         await node.connect("0.5.4", "26.10.10")
-        await node.update_user(queued)
+        await node.update_subscription(queued)
         await wait_until(lambda: seen)
     finally:
         await close_node(node)

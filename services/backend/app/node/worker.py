@@ -143,14 +143,14 @@ class NodeWorkerService(BaseRpcService):
         if not subscription_dict:
             return
         proto_subscription = deserialize_proto_message(subscription_dict, ProtoSubscription)
-        await node_manager.update_user(proto_subscription)
+        await node_manager.update_subscription(proto_subscription)
 
     async def _update_subscriptions(self, data: dict):
         subscription_dicts = data.get("subscriptions") or []
         if not subscription_dicts:
             return
         proto_subscriptions = deserialize_proto_messages(subscription_dicts, ProtoSubscription)
-        await node_manager.update_users(proto_subscriptions)
+        await node_manager.update_subscriptions(proto_subscriptions)
 
     async def _update_node(self, data: dict):
         node_id = data.get("node_id")

@@ -252,7 +252,7 @@ class SubscriptionManagementOperation(BaseOperation):
             user.subscription_url = await self.generate_subscription_url(user, db_user)
         return user
 
-    async def update_user(
+    async def update_subscription(
         self, db_user: Subscription, include_subscription_url: bool = True
     ) -> SubscriptionNotificationResponse:
         await sync_subscription(db_user)
@@ -526,7 +526,7 @@ class SubscriptionManagementOperation(BaseOperation):
         except ValueError as exc:  # WireGuard subnet exhausted
             await self.raise_error(message=str(exc), code=400, db=db)
 
-        user = await self.update_user(db_user)
+        user = await self.update_subscription(db_user)
 
         logger.info(f'New subscription "{db_user.uuid}" added by admin "{admin.username}"')
 
@@ -694,7 +694,7 @@ class SubscriptionManagementOperation(BaseOperation):
             # enabled groups, status incl. implicit flips): no fan-out to nodes.
             user = await self.validate_subscription(db_user)
         else:
-            user = await self.update_user(db_user)
+            user = await self.update_subscription(db_user)
 
         logger.info(f'Subscription "{user.uuid}" with id "{db_user.uuid}" modified by admin "{admin.username}"')
 
@@ -732,7 +732,7 @@ class SubscriptionManagementOperation(BaseOperation):
             await db.commit()
             await load_subscription_attrs(db_user, load_admin_role=True)
 
-        user = await self.update_user(db_user)
+        user = await self.update_subscription(db_user)
 
         if user.status != old_status:
             asyncio.create_task(notification.subscription_status_change(user, admin))
@@ -898,7 +898,7 @@ class SubscriptionManagementOperation(BaseOperation):
             clean_chart_data = usage_settings.reset_user_usage_clean_chart_data
 
         db_user = await reset_subscription_data_usage(db=db, db_user=db_user, clean_chart_data=clean_chart_data)
-        user = await self.update_user(db_user)
+        user = await self.update_subscription(db_user)
 
         if emit_status_change_notification and user.status != old_status:
             asyncio.create_task(notification.subscription_status_change(user, admin))
@@ -953,7 +953,7 @@ class SubscriptionManagementOperation(BaseOperation):
     ) -> SubscriptionResponse:
         proxy_settings = await self._prepare_revoked_proxy_settings(db, db_user)
         db_user = await revoke_subscription_sub(db=db, db_user=db_user, proxy_settings=proxy_settings.dict())
-        user = await self.update_user(db_user)
+        user = await self.update_subscription(db_user)
 
         asyncio.create_task(notification.subscription_access_revoked(user, admin))
         logger.info(f'Subscription "{db_user.uuid}" subscription was revoked by admin "{admin.username}"')
@@ -1157,7 +1157,7 @@ class SubscriptionManagementOperation(BaseOperation):
             db_user=db_user,
             clean_chart_data=usage_settings.reset_user_usage_clean_chart_data,
         )
-        user = await self.update_user(db_user)
+        user = await self.update_subscription(db_user)
 
         if user.status != old_status:
             asyncio.create_task(notification.subscription_status_change(user, admin))

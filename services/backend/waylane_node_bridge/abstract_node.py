@@ -46,7 +46,9 @@ class WayLaneNode(Controller, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_subscription_online_stats(self, subscription_uuid: str, timeout: int | None = None) -> service.OnlineStatResponse | None:
+    async def get_subscription_online_stats(
+        self, subscription_uuid: str, timeout: int | None = None
+    ) -> service.OnlineStatResponse | None:
         raise NotImplementedError
 
     @abstractmethod
@@ -56,14 +58,18 @@ class WayLaneNode(Controller, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def sync_users(
+    async def sync_subscriptions(
         self, users: list[service.Subscription], flush_pending: bool = False, timeout: int | None = None
     ) -> service.Empty | None:
         raise NotImplementedError
 
     @abstractmethod
-    async def sync_users_chunked(
-        self, users: list[service.Subscription], chunk_size: int = 100, flush_pending: bool = False, timeout: int | None = None
+    async def sync_subscriptions_chunked(
+        self,
+        users: list[service.Subscription],
+        chunk_size: int = 100,
+        flush_pending: bool = False,
+        timeout: int | None = None,
     ) -> list[service.Subscription]:
         raise NotImplementedError
 
@@ -113,7 +119,7 @@ class WayLaneNode(Controller, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def _sync_batch_users(self, users: list[service.Subscription]) -> list[service.Subscription]:
+    async def _sync_batch_subscriptions(self, users: list[service.Subscription]) -> list[service.Subscription]:
         """Sync a batch of users individually. Returns list of failed users to requeue."""
         raise NotImplementedError
 

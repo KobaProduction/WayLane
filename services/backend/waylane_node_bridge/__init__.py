@@ -26,10 +26,10 @@ from waylane_node_bridge.controller import Health, NodeAPIError
 from waylane_node_bridge.grpclib import Node as GrpcNode
 from waylane_node_bridge.rest import Node as RestNode
 from waylane_node_bridge.storage import (
-    ClaimedUser,
+    ClaimedSubscription,
     InMemoryNodeLifecycleCoordinator,
     InMemoryNodeRegistry,
-    InMemoryUserSyncStore,
+    InMemorySubscriptionSyncStore,
     LifecycleLease,
     LifecycleOperation,
     LifecycleStatus,
@@ -37,8 +37,8 @@ from waylane_node_bridge.storage import (
     NodeLifecycleCoordinatorProtocol,
     NodeLifecycleState,
     NodeRegistryProtocol,
-    SnapshotUserSyncStoreProtocol,
-    UserSyncStoreProtocol,
+    SnapshotSubscriptionSyncStoreProtocol,
+    SubscriptionSyncStoreProtocol,
 )
 from waylane_node_bridge.utils import create_proxy, create_subscription
 
@@ -146,9 +146,7 @@ async def save_node_config(registry: NodeRegistryProtocol, node_id: str, config:
     await registry.upsert_node(node_id, config)
 
 
-async def create_node_from_registry(
-    registry: NodeRegistryProtocol, node_id: str, **runtime_overrides
-) -> WayLaneNode:
+async def create_node_from_registry(registry: NodeRegistryProtocol, node_id: str, **runtime_overrides) -> WayLaneNode:
     config = await registry.get_node(node_id)
     if config is None:
         raise KeyError(f"Node config not found: {node_id}")
@@ -156,11 +154,11 @@ async def create_node_from_registry(
 
 
 __all__ = [
-    "ClaimedUser",
+    "ClaimedSubscription",
     "Health",
     "InMemoryNodeLifecycleCoordinator",
     "InMemoryNodeRegistry",
-    "InMemoryUserSyncStore",
+    "InMemorySubscriptionSyncStore",
     "LifecycleLease",
     "LifecycleOperation",
     "LifecycleStatus",
@@ -170,9 +168,9 @@ __all__ = [
     "NodeLifecycleState",
     "NodeRegistryProtocol",
     "NodeType",
+    "SnapshotSubscriptionSyncStoreProtocol",
+    "SubscriptionSyncStoreProtocol",
     "WayLaneNode",
-    "SnapshotUserSyncStoreProtocol",
-    "UserSyncStoreProtocol",
     "create_node",
     "create_node_from_config",
     "create_node_from_registry",

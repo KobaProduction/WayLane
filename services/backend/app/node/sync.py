@@ -140,14 +140,14 @@ async def _blocked_admin_ids_for_subscriptions(users: list[Subscription]) -> set
 if runtime_settings.role.runs_node:
 
     async def _dispatch_subscription_update(proto_subscription):
-        await node_manager.update_user(proto_subscription)
+        await node_manager.update_subscription(proto_subscription)
 
     async def _dispatch_subscriptions_update(proto_subscriptions, *, await_dispatch: bool = False):
         """Dispatch a batch locally, optionally waiting for node queue acceptance."""
         if await_dispatch:
-            await node_manager.update_users(proto_subscriptions, await_dispatch=True)
+            await node_manager.update_subscriptions(proto_subscriptions, await_dispatch=True)
         else:
-            await node_manager.update_users(proto_subscriptions)
+            await node_manager.update_subscriptions(proto_subscriptions)
 
 else:
     # Preserve the existing internal NATS action names until API and worker

@@ -16,12 +16,12 @@ import certifi
 import nats
 from grpclib.client import Channel
 
-from waylane_node_bridge.common import service_grpc
-
+# A subprocess starts with tests/ on sys.path, not the owning backend root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.node.bridge import QueuedGrpcNode, register_refresh_handler
 from app.node.nats_memory import NatsSubscriptionSyncStore
+from waylane_node_bridge.common import service_grpc
 from waylane_node_bridge.common.service_pb2 import Subscription
 
 
@@ -38,7 +38,7 @@ async def main():
         server_ca=certifi.contents(),
         api_key=str(uuid4()),
         node_id=node_id,
-        user_sync_store=store,
+        subscription_sync_store=store,
         worker_id=worker_id,
         sync_lease_seconds=3.0,
     )

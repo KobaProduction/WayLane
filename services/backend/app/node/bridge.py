@@ -24,7 +24,7 @@ from waylane_node_bridge import Health, NodeAPIError, NodeType, WayLaneNode
 from waylane_node_bridge.common.service_pb2 import Subscription as WireSubscription
 from waylane_node_bridge.grpclib import Node as GrpcNode
 from waylane_node_bridge.rest import Node as RestNode
-from waylane_node_bridge.storage import ClaimedUser
+from waylane_node_bridge.storage import ClaimedSubscription
 
 _queued_sync: ContextVar[bool] = ContextVar("queued_node_subscription_sync", default=False)
 
@@ -120,9 +120,9 @@ class _QueuedBatchSync:
         # Wall-clock deadline of the batch currently being delivered: the claim
         # lease measured from before the claim was taken. Nothing is sent past it.
         self._delivery_deadline = 0.0
-        resolver = getattr(self._user_sync_store, "refresh_resolver", None)
-        if resolver is None and hasattr(self._user_sync_store, "refresh_resolver"):
-            self._user_sync_store.refresh_resolver = _resolve_refresh
+        resolver = getattr(self._subscription_sync_store, "refresh_resolver", None)
+        if resolver is None and hasattr(self._subscription_sync_store, "refresh_resolver"):
+            self._subscription_sync_store.refresh_resolver = _resolve_refresh
 
     # ------------------------------------------------------------------ transport
     def _delivery_budget(self) -> float:
@@ -171,32 +171,34 @@ class _QueuedBatchSync:
             for user in users
         ]
 
-    async def sync_users_chunked(self, users, chunk_size=100, flush_pending=False, timeout=None):
+    async def sync_subscriptions_chunked(self, users, chunk_size=100, flush_pending=False, timeout=None):
         if not _queued_sync.get() or not users:
-            return await super().sync_users_chunked(users, chunk_size, flush_pending, timeout)
+            return await super().sync_subscriptions_chunked(users, chunk_size, flush_pending, timeout)
 
         async def send():
             # The fresh read counts against the same delivery budget as the send.
             current = await self._current_state(users)
-            return await super(_QueuedBatchSync, self).sync_users_chunked(current, chunk_size, flush_pending, timeout)
+            return await super(_QueuedBatchSync, self).sync_subscriptions_chunked(
+                current, chunk_size, flush_pending, timeout
+            )
 
         return await self._within_delivery_deadline(users, send)
 
-    async def _sync_batch_users(self, users: list[WireSubscription]) -> list[WireSubscription]:
+    async def _sync_batch_subscriptions(self, users: list[WireSubscription]) -> list[WireSubscription]:
         # The bridge normally switches to per-user RPCs below 1000 users.
         # Bounded queue claims still need the efficient delta-batch endpoint.
         # Keep explicit per-user fallbacks outside the background worker intact.
         if not _queued_sync.get() or not users:
-            return await super()._sync_batch_users(users)
+            return await super()._sync_batch_subscriptions(users)
         supported, _ = await self._supports_chunked_sync()
         if supported:
-            return await self.sync_users_chunked(
+            return await self.sync_subscriptions_chunked(
                 users, chunk_size=min(100, len(users)), flush_pending=False, timeout=self._internal_timeout
             )
 
         async def send():
             current = await self._current_state(users)
-            return await super(_QueuedBatchSync, self)._sync_batch_users(current)
+            return await super(_QueuedBatchSync, self)._sync_batch_subscriptions(current)
 
         return await self._within_delivery_deadline(users, send)
 
@@ -217,11 +219,11 @@ class _QueuedBatchSync:
         finally:
             _queued_sync.reset(token)
 
-    async def _deliver_claimed_users(self, claimed_users: list[ClaimedUser]) -> list[WireSubscription]:
+    async def _deliver_claimed_subscriptions(self, claimed_users: list[ClaimedSubscription]) -> list[WireSubscription]:
         # The bridge bounds the entire claim-and-delivery operation by the
         # lease. Keep the adapter's smaller transport budget within it.
         self._delivery_deadline = time.time() + self._sync_lease_seconds
-        return await super()._deliver_claimed_users(claimed_users)
+        return await super()._deliver_claimed_subscriptions(claimed_users)
 
     async def _cleanup_sync_worker(self):
         # Stop only this process's worker. Queued work is shared with sibling
@@ -235,10 +237,10 @@ class _QueuedBatchSync:
                     await asyncio.wait_for(task, timeout=2.0)
             self._sync_worker_task = None
 
-    async def flush_pending_users(self):
+    async def flush_pending_subscriptions(self):
         # Never clear the wake signal here: an update enqueued during the
         # flush must still start a worker.
-        await self._user_sync_store.clear(self.node_id)
+        await self._subscription_sync_store.clear(self.node_id)
 
     async def connect(self, node_version: str, core_version: str, tasks: list | None = None):
         await super().connect(node_version, core_version, tasks)
@@ -254,7 +256,7 @@ class _QueuedBatchSync:
     async def _fence_state(self) -> tuple[bool, int]:
         active = self._local_full_syncs > 0
         generation = self._local_fence_generation
-        state = getattr(self._user_sync_store, "fence_state", None)
+        state = getattr(self._subscription_sync_store, "fence_state", None)
         if callable(state):
             shared_active, shared_generation = await state(self.node_id)
             active = active or shared_active
@@ -266,7 +268,7 @@ class _QueuedBatchSync:
         return active
 
     async def _renew_full_sync(self, token: str, lease_seconds: float, held: FenceHold) -> None:
-        renew = getattr(self._user_sync_store, "renew_full_sync", None)
+        renew = getattr(self._subscription_sync_store, "renew_full_sync", None)
         interval = max(lease_seconds / 3, 0.05)
         while True:
             await asyncio.sleep(interval)
@@ -297,7 +299,7 @@ class _QueuedBatchSync:
         """
         if lease_seconds is None:
             lease_seconds = FULL_SYNC_LEASE_SECONDS
-        store = self._user_sync_store
+        store = self._subscription_sync_store
         begin = getattr(store, "begin_full_sync", None)
         token = None
         renewal: asyncio.Task | None = None
@@ -340,14 +342,14 @@ class _QueuedBatchSync:
             with contextlib.suppress(Exception):
                 await self.wake_sync_worker()
 
-    async def capture_queued_work(self, *, quiesce: bool = True) -> dict[str, int] | list[ClaimedUser]:
+    async def capture_queued_work(self, *, quiesce: bool = True) -> dict[str, int] | list[ClaimedSubscription]:
         """Record the queued work an imminent full snapshot covers, without deleting it.
 
         With ``quiesce`` the call also waits, bounded by the claim lease, until
         no delivery is in flight for this node on any worker, so nothing sent
         before the snapshot can land after it without a durable record.
         """
-        store = self._user_sync_store
+        store = self._subscription_sync_store
         capture = getattr(store, "capture_queued", None)
         if callable(capture):
             loop = asyncio.get_running_loop()
@@ -368,36 +370,38 @@ class _QueuedBatchSync:
                 delay = min(delay * 2, 2.0)
         # The bridge's in-memory store cannot record revisions; hold its
         # entries as claims instead and settle them after the snapshot.
-        claimed: list[ClaimedUser] = []
-        while batch := await store.claim_users(self.node_id, self.worker_id, limit=1_000_000, lease_seconds=600):
+        claimed: list[ClaimedSubscription] = []
+        while batch := await store.claim_subscriptions(
+            self.node_id, self.worker_id, limit=1_000_000, lease_seconds=600
+        ):
             claimed.extend(batch)
         return claimed
 
-    async def retire_queued_work(self, captured: dict[str, int] | list[ClaimedUser]) -> None:
+    async def retire_queued_work(self, captured: dict[str, int] | list[ClaimedSubscription]) -> None:
         """Retire captured work once the snapshot that covers it has been applied."""
         if not captured:
             return
         if isinstance(captured, dict):
-            await self._user_sync_store.retire_captured(self.node_id, captured)
+            await self._subscription_sync_store.retire_captured(self.node_id, captured)
         else:
-            await self._user_sync_store.ack_users(self.node_id, [item.token for item in captured])
+            await self._subscription_sync_store.ack_subscriptions(self.node_id, [item.token for item in captured])
 
-    async def release_queued_work(self, captured: dict[str, int] | list[ClaimedUser]) -> None:
+    async def release_queued_work(self, captured: dict[str, int] | list[ClaimedSubscription]) -> None:
         """Give captured work back after a failed snapshot (nothing to undo for revision captures)."""
         if isinstance(captured, list) and captured:
-            await self._user_sync_store.requeue_users(self.node_id, captured)
+            await self._subscription_sync_store.requeue_subscriptions(self.node_id, captured)
             await self.wake_sync_worker()
 
     async def request_refresh(self, users: list[WireSubscription]) -> None:
         """Ask the queue to re-derive these users from the source of truth before delivery."""
         if not users:
             return
-        request = getattr(self._user_sync_store, "request_refresh", None)
+        request = getattr(self._subscription_sync_store, "request_refresh", None)
         if callable(request):
             await request(self.node_id, [user.subscription_uuid for user in users])
             await self.wake_sync_worker()
         else:
-            await self.update_users(users)
+            await self.update_subscriptions(users)
 
 
 async def _resolve_refresh(node_id: str, emails: list[str]) -> list[WireSubscription]:

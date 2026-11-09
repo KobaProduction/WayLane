@@ -22,15 +22,15 @@ from waylane_node_bridge.aiohttp_compat import (
 from waylane_node_bridge.common.service_pb2 import Subscription
 from waylane_node_bridge.proxy import parse_proxy_url
 from waylane_node_bridge.storage import (
-    ClaimedUser,
+    ClaimedSubscription,
     LifecycleLease,
     LifecycleOperation,
     LifecycleStatus,
     NodeLifecycleCoordinatorProtocol,
     NodeLifecycleState,
-    UserSyncStoreProtocol,
+    SubscriptionSyncStoreProtocol,
     get_default_lifecycle_coordinator,
-    get_default_user_sync_store,
+    get_default_subscription_sync_store,
 )
 
 # Default timeout configuration (module-level constants)
@@ -94,7 +94,7 @@ class _Delivery(list):
 
 
 @dataclass(slots=True)
-class _RejectedUser:
+class _RejectedSubscription:
     """Backoff of a user the node rejected; the retry itself goes through the queue.
 
     ``queued_at`` is set while the user is back in the queue waiting for a claim. ``attempts`` stays 0
@@ -102,7 +102,7 @@ class _RejectedUser:
     on its own if its batch is rejected again (users rejected before always are).
     """
 
-    user: Subscription
+    subscription: Subscription
     error: str
     since: float
     delay: float
@@ -139,7 +139,7 @@ class Controller:
         internal_timeout: int = DEFAULT_INTERNAL_TIMEOUT,
         proxy: str | None = None,
         node_id: str | None = None,
-        user_sync_store: UserSyncStoreProtocol | None = None,
+        subscription_sync_store: SubscriptionSyncStoreProtocol | None = None,
         worker_id: str | None = None,
         sync_poll_interval: float = 1.0,
         sync_lease_seconds: float = 30.0,
@@ -147,7 +147,7 @@ class Controller:
         lifecycle_lease_seconds: float = 60.0,
         sync_batch_size: int = 100,
         sync_chunk_size: int = 100,
-        user_sync_resolver: Callable[[str, list[str]], Awaitable[list[Subscription]]] | None = None,
+        subscription_sync_resolver: Callable[[str, list[str]], Awaitable[list[Subscription]]] | None = None,
     ):
         for option, value in (("sync_poll_interval", sync_poll_interval), ("sync_lease_seconds", sync_lease_seconds)):
             if not math.isfinite(value) or value <= 0:
@@ -157,7 +157,7 @@ class Controller:
                 raise ValueError(f"{option} must be a positive integer")
         self._sync_batch_size = sync_batch_size
         self._sync_chunk_size = sync_chunk_size
-        self._user_sync_resolver = user_sync_resolver
+        self._subscription_sync_resolver = subscription_sync_resolver
         self._claim_generation = 0
         self._recovery_until = 0.0
         self.name = name
@@ -210,8 +210,12 @@ class Controller:
         self._extra = extra
 
         # Lazy worker sync mechanism
-        self._user_sync_store = user_sync_store if user_sync_store is not None else get_default_user_sync_store()
+        self._subscription_sync_store = (
+            subscription_sync_store if subscription_sync_store is not None else get_default_subscription_sync_store()
+        )
         self._sync_worker_task: asyncio.Task | None = None
+        self._kv_wake_task: asyncio.Task | None = None
+        self._unsubscribe_sync_updates: Callable[[], None] | None = None
         self._work_available = asyncio.Event()
         self._worker_idle_timeout = 5.0  # seconds before worker exits
         self._sync_poll_interval = sync_poll_interval
@@ -224,12 +228,12 @@ class Controller:
 
         # Hard reset mechanism for critical failures
         self._hard_reset_event = asyncio.Event()
-        self._user_sync_failure_count = 0
+        self._subscription_sync_failure_count = 0
         self._hard_reset_threshold = 5
         self._failure_count_lock = asyncio.Lock()  # Only for incrementing counters
 
         # Subscriptions the node rejected, keyed by email, queued again after a backoff (one entry per user)
-        self._sync_retries: dict[str, _RejectedUser] = {}
+        self._sync_retries: dict[str, _RejectedSubscription] = {}
         # First retry delay, doubled up to the cap; after the window an add is retried at the last delay.
         self._sync_retry_delays = (2.0, 60.0, 300.0)
         self._sync_retry_window = 600.0
@@ -274,21 +278,24 @@ class Controller:
         """
         return self._hard_reset_event.is_set()
 
-    async def _increment_user_sync_failure(self):
+    async def _increment_subscription_sync_failure(self):
         """Increment user sync failure counter and check if hard reset is needed."""
         async with self._failure_count_lock:
-            self._user_sync_failure_count += 1
-            if self._user_sync_failure_count >= self._hard_reset_threshold and not self._hard_reset_event.is_set():
+            self._subscription_sync_failure_count += 1
+            if (
+                self._subscription_sync_failure_count >= self._hard_reset_threshold
+                and not self._hard_reset_event.is_set()
+            ):
                 self._hard_reset_event.set()
                 self.logger.critical(
-                    f"[{self.name}] HARD RESET REQUIRED: Subscription sync failed {self._user_sync_failure_count} times in a row"
+                    f"[{self.name}] HARD RESET REQUIRED: Subscription sync failed {self._subscription_sync_failure_count} times in a row"
                 )
 
-    async def _reset_user_sync_failure_count(self):
+    async def _reset_subscription_sync_failure_count(self):
         """Reset user sync failure counter on successful sync and clear hard reset event."""
         async with self._failure_count_lock:
-            old_count = self._user_sync_failure_count
-            self._user_sync_failure_count = 0
+            old_count = self._subscription_sync_failure_count
+            self._subscription_sync_failure_count = 0
             # Clear hard reset event if it was set
             if self._hard_reset_event.is_set():
                 self._hard_reset_event.clear()
@@ -297,17 +304,17 @@ class Controller:
                         f"[{self.name}] Subscription sync recovered after {old_count} failures, cleared hard reset event"
                     )
 
-    async def update_user(self, user: Subscription):
+    async def update_subscription(self, user: Subscription):
         """Queue a user for sync. Automatically deduplicates by email."""
         # A newer change replaces any rejected payload held for retry.
         self._sync_retries.pop(user.subscription_uuid, None)
-        await self._user_sync_store.enqueue_users(self.node_id, [user])
+        await self._subscription_sync_store.enqueue_subscriptions(self.node_id, [user])
         self._work_available.set()
 
         # Ensure worker is running to process the update
         await self._ensure_sync_worker_running()
 
-    async def update_users(self, users: list[Subscription]):
+    async def update_subscriptions(self, users: list[Subscription]):
         """Queue multiple users for sync. Automatically deduplicates by email."""
         if not users:
             return
@@ -315,7 +322,7 @@ class Controller:
         if self._sync_retries:
             for user in users:
                 self._sync_retries.pop(user.subscription_uuid, None)
-        await self._user_sync_store.enqueue_users(self.node_id, users)
+        await self._subscription_sync_store.enqueue_subscriptions(self.node_id, users)
         self._work_available.set()
 
         # Ensure worker is running to process the updates
@@ -359,10 +366,10 @@ class Controller:
             )
             return None, None  # Keep current delays
 
-    async def flush_pending_users(self):
+    async def flush_pending_subscriptions(self):
         """Clear all pending users without syncing them."""
         self._sync_retries.clear()
-        await self._user_sync_store.clear(self.node_id)
+        await self._subscription_sync_store.clear(self.node_id)
 
     async def node_version(self) -> str:
         async with self._version_lock:
@@ -492,7 +499,7 @@ class Controller:
         # Reset hard reset event and failure counters
         self._hard_reset_event.clear()
         async with self._failure_count_lock:
-            self._user_sync_failure_count = 0
+            self._subscription_sync_failure_count = 0
 
         # Cleanup tasks with task lock
         async with self._task_lock:
@@ -513,11 +520,19 @@ class Controller:
                 self._tasks.append(task)
 
         self._recovery_until = asyncio.get_running_loop().time() + self._sync_lease_seconds
+        if self._unsubscribe_sync_updates is None:
+            subscribe = getattr(self._subscription_sync_store, "subscribe_updates", None)
+            if callable(subscribe):
+                self._unsubscribe_sync_updates = subscribe(self.node_id, self._wake_from_kv_update)
         await self.wake_sync_worker()
 
     async def disconnect(self):
-        # Set shutdown event (no lock needed)
+        # Detach before stopping the worker: late watcher updates must not
+        # restart a controller that no longer owns this node connection.
         self._shutdown_event.set()
+        if self._unsubscribe_sync_updates is not None:
+            self._unsubscribe_sync_updates()
+            self._unsubscribe_sync_updates = None
 
         # Cleanup tasks
         async with self._task_lock:
@@ -569,6 +584,16 @@ class Controller:
     def is_shutting_down(self) -> bool:
         return self._shutdown_event.is_set()
 
+    def _wake_from_kv_update(self) -> None:
+        """Schedule a lazy worker when an external KV PUT arrives."""
+        if self.is_shutting_down():
+            return
+        self._work_available.set()
+        if (self._sync_worker_task is None or self._sync_worker_task.done()) and (
+            self._kv_wake_task is None or self._kv_wake_task.done()
+        ):
+            self._kv_wake_task = asyncio.create_task(self._ensure_sync_worker_running())
+
     async def wake_sync_worker(self) -> None:
         """Notify this controller of work, including work enqueued by another process."""
         self._work_available.set()
@@ -580,10 +605,10 @@ class Controller:
                 self._sync_worker_task = asyncio.create_task(self._sync_worker())
 
     async def _fence_state(self) -> tuple[bool, int]:
-        state = getattr(self._user_sync_store, "fence_state", None)
+        state = getattr(self._subscription_sync_store, "fence_state", None)
         return await state(self.node_id) if callable(state) else (False, 0)
 
-    async def _claim_pending_users(self, limit: int | None = None) -> list[ClaimedUser]:
+    async def _claim_pending_subscriptions(self, limit: int | None = None) -> list[ClaimedSubscription]:
         active, generation = await self._fence_state()
         if active:
             self._work_available.set()
@@ -593,7 +618,7 @@ class Controller:
         # retain its wake. Keep draining after any bounded non-empty claim.
         self._work_available.clear()
         try:
-            claimed = await self._user_sync_store.claim_users(
+            claimed = await self._subscription_sync_store.claim_subscriptions(
                 self.node_id,
                 self.worker_id,
                 limit=min(limit or self._sync_batch_size, self._sync_batch_size),
@@ -602,7 +627,7 @@ class Controller:
             if claimed:
                 self._work_available.set()
             else:
-                has_pending = getattr(self._user_sync_store, "has_pending", None)
+                has_pending = getattr(self._subscription_sync_store, "has_pending", None)
                 if callable(has_pending):
                     if await has_pending(self.node_id):
                         self._work_available.set()
@@ -615,37 +640,41 @@ class Controller:
             self._work_available.set()
             raise
 
-    async def _ack_claimed_users(self, claimed_users: list[ClaimedUser]):
+    async def _ack_claimed_subscriptions(self, claimed_users: list[ClaimedSubscription]):
         if not claimed_users:
             return
         active, generation = await self._fence_state()
         if active or generation != self._claim_generation:
-            refresh = getattr(self._user_sync_store, "refresh_claimed", None)
+            refresh = getattr(self._subscription_sync_store, "refresh_claimed", None)
             if callable(refresh):
                 await refresh(self.node_id, claimed_users)
             else:
-                await self._requeue_claimed_users(claimed_users)
+                await self._requeue_claimed_subscriptions(claimed_users)
             self._work_available.set()
             return
-        unconfirmed = await self._user_sync_store.ack_users(self.node_id, [item.token for item in claimed_users])
+        unconfirmed = await self._subscription_sync_store.ack_subscriptions(
+            self.node_id, [item.token for item in claimed_users]
+        )
         if unconfirmed:
-            refresh = getattr(self._user_sync_store, "request_refresh", None)
+            refresh = getattr(self._subscription_sync_store, "request_refresh", None)
             if not callable(refresh):
                 raise RuntimeError("A store returning unconfirmed emails must implement request_refresh")
             await refresh(self.node_id, list(unconfirmed))
             self._work_available.set()
 
-    async def _requeue_claimed_users(self, claimed_users: list[ClaimedUser]):
+    async def _requeue_claimed_subscriptions(self, claimed_users: list[ClaimedSubscription]):
         if claimed_users:
             self._work_available.set()
-            await self._user_sync_store.requeue_users(self.node_id, claimed_users)
+            await self._subscription_sync_store.requeue_subscriptions(self.node_id, claimed_users)
 
-    async def _deliver_claimed_users(self, claimed_users: list[ClaimedUser]) -> list[Subscription]:
-        users = [item.user for item in claimed_users]
-        if self._user_sync_resolver is not None:
+    async def _deliver_claimed_subscriptions(self, claimed_users: list[ClaimedSubscription]) -> list[Subscription]:
+        users = [item.subscription for item in claimed_users]
+        if self._subscription_sync_resolver is not None:
             current = {
                 user.subscription_uuid: user
-                for user in await self._user_sync_resolver(self.node_id, [user.subscription_uuid for user in users])
+                for user in await self._subscription_sync_resolver(
+                    self.node_id, [user.subscription_uuid for user in users]
+                )
             }
             # Missing records cannot safely fall back to a stale queued payload.
             # Applications must return an explicit removal payload for deleted users.
@@ -653,7 +682,7 @@ class Controller:
         supports_chunked, _ = await self._supports_chunked_sync()
         if supports_chunked:
             return await self._sync_isolating_rejections(users)
-        return await self._sync_batch_users(users)
+        return await self._sync_batch_subscriptions(users)
 
     async def _sync_isolating_rejections(self, users: list[Subscription]) -> _Delivery:
         """Deliver deltas so that a user the node rejects cannot hold back the others.
@@ -686,7 +715,7 @@ class Controller:
                 break
             batch, alone = batches.pop()
             sends += 1
-            failed = await self.sync_users_chunked(
+            failed = await self.sync_subscriptions_chunked(
                 batch, chunk_size=self._sync_chunk_size, flush_pending=False, timeout=self._internal_timeout
             )
             if not failed:
@@ -714,7 +743,7 @@ class Controller:
         entry = self._sync_retries.get(user.subscription_uuid)
         return entry is not None and (entry.attempts > 0 or entry.alone)
 
-    def _hold_rejected_user(self, user: Subscription, detail: str) -> None:
+    def _hold_rejected_subscription(self, user: Subscription, detail: str) -> None:
         """Keep a user the node rejected out of the queue until its next retry is due.
 
         A rejection can be transient (the node's core API restarting), so it is never final: retries
@@ -724,7 +753,7 @@ class Controller:
         now = asyncio.get_running_loop().time()
         entry = self._sync_retries.get(user.subscription_uuid)
         if entry is None:
-            entry = _RejectedUser(user, detail, since=now, delay=self._sync_retry_delays[0])
+            entry = _RejectedSubscription(user, detail, since=now, delay=self._sync_retry_delays[0])
             self._sync_retries[user.subscription_uuid] = entry
         if not entry.attempts:
             entry.since = now
@@ -739,7 +768,7 @@ class Controller:
                 f"{now - entry.since:.0f} s; retrying until it is accepted, the user changes or the node "
                 f"gets a full sync | Last error: {detail}"
             )
-        entry.user = user
+        entry.subscription = user
         entry.error = detail
         entry.attempts += 1
         entry.queued_at = None
@@ -755,9 +784,9 @@ class Controller:
         now = asyncio.get_running_loop().time()
         entry = self._sync_retries.get(user.subscription_uuid)
         if entry is None:
-            entry = _RejectedUser(user, detail, since=now, delay=self._sync_retry_delays[0])
+            entry = _RejectedSubscription(user, detail, since=now, delay=self._sync_retry_delays[0])
             self._sync_retries[user.subscription_uuid] = entry
-        entry.user = user
+        entry.subscription = user
         entry.alone = alone
         entry.queued_at = None
         entry.next_attempt = now
@@ -775,7 +804,7 @@ class Controller:
         due = self._next_retry_at() - asyncio.get_running_loop().time()
         return min(self._worker_idle_timeout, max(due, 0.0))
 
-    async def _queue_due_rejected_users(self) -> None:
+    async def _queue_due_rejected_subscriptions(self) -> None:
         """Put rejected users whose backoff is over back in the queue, so a claim delivers them.
 
         Going through the store keeps the claim lease, the full-sync fence and the revision checks:
@@ -797,16 +826,16 @@ class Controller:
         # Subscriptions deferred untested go first: unlike a retry, they may be users the node accepts.
         due.sort(key=lambda entry: entry.attempts > 0)
         due = due[: self._sync_batch_size]
-        store = self._user_sync_store
+        store = self._subscription_sync_store
         async with asyncio.timeout(self._internal_timeout):
             refresh = getattr(store, "request_refresh", None)
-            enqueue = getattr(store, "enqueue_users_if_absent", None)
+            enqueue = getattr(store, "enqueue_subscriptions_if_absent", None)
             if callable(refresh):
-                await refresh(self.node_id, [entry.user.subscription_uuid for entry in due])
+                await refresh(self.node_id, [entry.subscription.subscription_uuid for entry in due])
             elif callable(enqueue):
-                await enqueue(self.node_id, [entry.user for entry in due])
+                await enqueue(self.node_id, [entry.subscription for entry in due])
             else:
-                await store.enqueue_users(self.node_id, [entry.user for entry in due])
+                await store.enqueue_subscriptions(self.node_id, [entry.subscription for entry in due])
         for entry in due:
             entry.queued_at = now
         self._work_available.set()
@@ -814,7 +843,7 @@ class Controller:
     async def _sync_worker(self):
         """Drain bounded batches, retaining wakes and retrying failures with backoff."""
         retry_delay = 1.0
-        claimed: list[ClaimedUser] = []
+        claimed: list[ClaimedSubscription] = []
         loop = asyncio.get_running_loop()
         try:
             while not self.is_shutting_down():
@@ -834,21 +863,21 @@ class Controller:
                         retry_delay = min(retry_delay * 2, 30.0)
                         continue
                     if self._sync_retries:
-                        await self._queue_due_rejected_users()
+                        await self._queue_due_rejected_subscriptions()
                     # Store latency, resolver, transport lock and all stream chunks
                     # share one deadline ending before another worker can own the lease.
                     budget = self._sync_lease_seconds - min(1.0, self._sync_lease_seconds / 4)
                     self._sync_round_end = loop.time() + budget
                     async with asyncio.timeout_at(self._sync_round_end):
-                        claimed = await self._claim_pending_users()
+                        claimed = await self._claim_pending_subscriptions()
                         if claimed:
                             active, generation = await self._fence_state()
                             if active or generation != self._claim_generation:
                                 # A snapshot began during the claim. Nothing has
                                 # been sent, so defer without counting a failure.
-                                await self._requeue_claimed_users(claimed)
+                                await self._requeue_claimed_subscriptions(claimed)
                                 claimed = []
-                        failed = await self._deliver_claimed_users(claimed) if claimed else []
+                        failed = await self._deliver_claimed_subscriptions(claimed) if claimed else []
                     if not claimed:
                         await asyncio.sleep(self._sync_poll_interval)
                         continue
@@ -858,39 +887,44 @@ class Controller:
                     isolated = getattr(failed, "isolated", ())
                     deferred = getattr(failed, "deferred", ())
                     for user, detail in isolated:
-                        self._hold_rejected_user(user, detail)
+                        self._hold_rejected_subscription(user, detail)
                     for user, detail in deferred:
                         self._defer_untested_user(user, detail, failed.deferred_alone)
                     failed_emails = {user.subscription_uuid for user in failed}
                     if self._sync_retries:
                         kept = {user.subscription_uuid for user, _ in (*isolated, *deferred)}
                         for item in claimed:
-                            if item.user.subscription_uuid not in failed_emails and item.user.subscription_uuid not in kept:
-                                self._sync_retries.pop(item.user.subscription_uuid, None)
+                            if (
+                                item.subscription.subscription_uuid not in failed_emails
+                                and item.subscription.subscription_uuid not in kept
+                            ):
+                                self._sync_retries.pop(item.subscription.subscription_uuid, None)
                     async with asyncio.timeout(self._internal_timeout):
-                        await self._ack_claimed_users(
-                            [item for item in claimed if item.user.subscription_uuid not in failed_emails]
+                        await self._ack_claimed_subscriptions(
+                            [item for item in claimed if item.subscription.subscription_uuid not in failed_emails]
                         )
-                        await self._requeue_claimed_users(
-                            [item for item in claimed if item.user.subscription_uuid in failed_emails]
+                        await self._requeue_claimed_subscriptions(
+                            [item for item in claimed if item.subscription.subscription_uuid in failed_emails]
                         )
                     claimed = []
                     if failed:
-                        await self._increment_user_sync_failure()
+                        await self._increment_subscription_sync_failure()
                         await asyncio.sleep(retry_delay)
                         retry_delay = min(retry_delay * 2, 30.0)
                     else:
-                        await self._reset_user_sync_failure_count()
+                        await self._reset_subscription_sync_failure_count()
                         retry_delay = 1.0
                 except Exception as exc:
-                    self.logger.warning(f"[{self.name}] Subscription sync failed; retrying: {type(exc).__name__}: {exc!s}")
+                    self.logger.warning(
+                        f"[{self.name}] Subscription sync failed; retrying: {type(exc).__name__}: {exc!s}"
+                    )
                     self._work_available.set()
                     self._recovery_until = loop.time() + self._sync_lease_seconds
                     with suppress(Exception):
                         async with asyncio.timeout(self._internal_timeout):
-                            await self._requeue_claimed_users(claimed)
+                            await self._requeue_claimed_subscriptions(claimed)
                     claimed = []
-                    await self._increment_user_sync_failure()
+                    await self._increment_subscription_sync_failure()
                     await asyncio.sleep(retry_delay)
                     retry_delay = min(retry_delay * 2, 30.0)
         finally:
@@ -899,7 +933,7 @@ class Controller:
                 # their leases retain the work for the next worker to recover.
                 with suppress(Exception):
                     async with asyncio.timeout(self._internal_timeout):
-                        await self._requeue_claimed_users(claimed)
+                        await self._requeue_claimed_subscriptions(claimed)
             if self._sync_worker_task is asyncio.current_task():
                 self._sync_worker_task = None
 
@@ -913,7 +947,7 @@ class Controller:
             started = loop.time()
             try:
                 async with asyncio.timeout_at(held.until):
-                    renewed = await self._user_sync_store.renew_full_sync(self.node_id, token, lease_seconds)
+                    renewed = await self._subscription_sync_store.renew_full_sync(self.node_id, token, lease_seconds)
                 if renewed:
                     held.until = started + lease_seconds
                     continue
@@ -929,12 +963,12 @@ class Controller:
     async def full_sync_fence(self, lease_seconds: float = 120.0) -> AsyncIterator[FullSyncHold]:
         """Pause shared delta delivery while a fresh snapshot is read and applied.
 
-        Requires SnapshotUserSyncStoreProtocol; no unsafe process-local fallback
+        Requires SnapshotSubscriptionSyncStoreProtocol; no unsafe process-local fallback
         is used for an external store missing shared coordination.
         """
         if not math.isfinite(lease_seconds) or lease_seconds <= 0:
             raise ValueError("lease_seconds must be finite and positive")
-        store = self._user_sync_store
+        store = self._subscription_sync_store
         methods = (
             "begin_full_sync",
             "renew_full_sync",
@@ -944,7 +978,7 @@ class Controller:
             "retire_captured",
         )
         if not all(callable(getattr(store, method, None)) for method in methods):
-            raise NodeAPIError(-2, "Full snapshot coordination requires SnapshotUserSyncStoreProtocol")
+            raise NodeAPIError(-2, "Full snapshot coordination requires SnapshotSubscriptionSyncStoreProtocol")
         loop = asyncio.get_running_loop()
         started = loop.time()
         async with asyncio.timeout(lease_seconds):
@@ -977,16 +1011,16 @@ class Controller:
             raise NodeAPIError(409, "Capture queued work inside full_sync_fence()")
         async with asyncio.timeout(self._sync_lease_seconds + 5):
             while True:
-                captured, active = await self._user_sync_store.capture_queued(self.node_id)
+                captured, active = await self._subscription_sync_store.capture_queued(self.node_id)
                 if not active:
                     return captured
                 await asyncio.sleep(min(self._sync_poll_interval, 0.2))
 
     async def retire_queued_work(self, captured: dict[str, int]) -> None:
         """Retire only captured revisions after a successful authoritative snapshot."""
-        await self._user_sync_store.retire_captured(self.node_id, captured)
+        await self._subscription_sync_store.retire_captured(self.node_id, captured)
 
-    async def sync_users_from_source(
+    async def sync_subscriptions_from_source(
         self, load_users: Callable[[], Awaitable[list[Subscription]]], timeout: int | None = None
     ) -> None:
         """Read a fresh full snapshot after quiescing deltas, then retire covered work."""
@@ -994,7 +1028,7 @@ class Controller:
             captured = await self.capture_queued_work()
             users = await load_users()
             held.check()
-            await self.sync_users(users, flush_pending=False, timeout=timeout)
+            await self.sync_subscriptions(users, flush_pending=False, timeout=timeout)
             held.check()
             await self.retire_queued_work(captured)
 
@@ -1025,7 +1059,7 @@ class Controller:
                     detail = data.get("detail", "")
                 else:
                     detail = str(data)
-            except (JSONDecodeError, ValueError):
+            except JSONDecodeError, ValueError:
                 detail = e.response.text
 
             raise NodeAPIError(code=e.response.status_code, detail=detail) from e

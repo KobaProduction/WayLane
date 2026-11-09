@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import certifi
 import pytest
-from waylane_node_bridge import Health, NodeAPIError, NodeType
 
 from app.db.models import CoreType, NodeStatus
 from app.jobs import node_checker
@@ -17,6 +16,7 @@ from app.node import heartbeat as heartbeat_module
 from app.node.bridge import create_node
 from app.operation import node as node_operation
 from app.operation.node import NodeOperation
+from waylane_node_bridge import Health, NodeAPIError, NodeType
 
 TIMEOUT = (Health.BROKEN, -1, "Health check timeout")
 HEALTHY = (Health.HEALTHY, None, None)
@@ -344,7 +344,7 @@ async def test_never_connected_unreachable_node_costs_one_short_probe(checker):
     async def core_users_map(db, core_ids, *, lazy=False):
         return {1: core}, {1: users if lazy else await users()}
 
-    checker.monkeypatch.setattr(NodeOperation, "_get_core_users_map", staticmethod(core_users_map))
+    checker.monkeypatch.setattr(NodeOperation, "_get_core_subscriptions_map", staticmethod(core_users_map))
     checker.monkeypatch.setattr(node_operation, "get_node_by_id", AsyncMock(return_value=db_node))
     checker.monkeypatch.setattr(node_operation, "update_node_status", AsyncMock())
     checker.monkeypatch.setattr(node_operation.node_manager, "update_node", AsyncMock(return_value=node))

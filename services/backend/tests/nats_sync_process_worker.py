@@ -24,9 +24,9 @@ async def main():
             while True:
                 progress = False
                 for node in range(int(node_count)):
-                    claimed = await store.claim_users(str(node), worker_id, 50, 120)
-                    subscription_uuids.extend(item.user.subscription_uuid for item in claimed)
-                    await store.ack_users(str(node), [item.token for item in claimed])
+                    claimed = await store.claim_subscriptions(str(node), worker_id, 50, 120)
+                    subscription_uuids.extend(item.subscription.subscription_uuid for item in claimed)
+                    await store.ack_subscriptions(str(node), [item.token for item in claimed])
                     progress |= bool(claimed)
                 if not progress:
                     break
