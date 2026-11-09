@@ -13,6 +13,7 @@ from app.db import GetDB
 from app.db.crud.node import get_node_by_id, get_nodes
 from app.db.models import NodeStatus, Subscription as DatabaseSubscription
 from app.models.node import NodeCoreUpdate, NodeGeoFilesUpdate, NodeListQuery
+from app.nats.node_commands import SYNC_NODE_SUBSCRIPTIONS, UPDATE_SUBSCRIPTION, UPDATE_SUBSCRIPTIONS
 from app.nats.proto_utils import deserialize_proto_message, deserialize_proto_messages
 from app.nats.rpc_service import BaseRpcService
 from app.node import node_manager
@@ -45,14 +46,14 @@ class NodeWorkerService(BaseRpcService):
         self._command_handlers[action] = handler
 
     def _register_handlers(self):
-        self.register_command_handler("update_user", self._update_user)
-        self.register_command_handler("update_users", self._update_users)
+        self.register_command_handler(UPDATE_SUBSCRIPTION, self._update_subscription)
+        self.register_command_handler(UPDATE_SUBSCRIPTIONS, self._update_subscriptions)
         self.register_command_handler("update_node", self._update_node)
         self.register_command_handler("remove_node", self._remove_node)
         self.register_command_handler("connect_node", self._connect_node)
         self.register_command_handler("connect_nodes_bulk", self._connect_nodes_bulk)
         self.register_command_handler("disconnect_node", self._disconnect_node)
-        self.register_command_handler("sync_node_users", self._sync_node_users)
+        self.register_command_handler(SYNC_NODE_SUBSCRIPTIONS, self._sync_node_subscriptions)
 
         self.register_rpc_handler("get_node_system_stats", self._get_node_system_stats)
         self.register_rpc_handler("get_nodes_system_stats", self._get_nodes_system_stats)
@@ -137,19 +138,19 @@ class NodeWorkerService(BaseRpcService):
         if handler:
             await handler(data)
 
-    async def _update_user(self, data: dict):
-        user_dict = data.get("user")
-        if not user_dict:
+    async def _update_subscription(self, data: dict):
+        subscription_dict = data.get("subscription")
+        if not subscription_dict:
             return
-        proto_user = deserialize_proto_message(user_dict, ProtoSubscription)
-        await node_manager.update_user(proto_user)
+        proto_subscription = deserialize_proto_message(subscription_dict, ProtoSubscription)
+        await node_manager.update_user(proto_subscription)
 
-    async def _update_users(self, data: dict):
-        users_dicts = data.get("subscriptions") or []
-        if not users_dicts:
+    async def _update_subscriptions(self, data: dict):
+        subscription_dicts = data.get("subscriptions") or []
+        if not subscription_dicts:
             return
-        proto_users = deserialize_proto_messages(users_dicts, ProtoSubscription)
-        await node_manager.update_users(proto_users)
+        proto_subscriptions = deserialize_proto_messages(subscription_dicts, ProtoSubscription)
+        await node_manager.update_users(proto_subscriptions)
 
     async def _update_node(self, data: dict):
         node_id = data.get("node_id")
@@ -206,15 +207,17 @@ class NodeWorkerService(BaseRpcService):
             return
         await self._node_operator.disconnect_single_node(node_id)
 
-    async def _sync_node_users(self, data: dict):
+    async def _sync_node_subscriptions(self, data: dict):
         node_id = data.get("node_id")
-        flush_users = data.get("flush_users", False)
+        flush_subscriptions = data.get("flush_subscriptions", False)
         if not node_id:
             return
         # Refresh from KV before syncing to avoid stale core/inbound cache races.
         await core_manager._reload_from_cache()
         async with GetDB() as db:
-            await self._node_operator.sync_node_users(db, node_id=node_id, flush_users=flush_users)
+            await self._node_operator.sync_node_subscriptions(
+                db, node_id=node_id, flush_subscriptions=flush_subscriptions
+            )
 
     async def _get_node_system_stats(self, data: dict) -> dict:
         node_id = data.get("node_id")

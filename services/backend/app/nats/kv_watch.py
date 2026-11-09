@@ -150,7 +150,19 @@ class KvWatcher:
             )
             yield None
             while True:
-                yield await self._updates.get()
+                # The NATS connection can reconnect without the ordered push
+                # consumer delivering another message. A live watcher waiting
+                # only on Queue.get() would then miss later writes forever.
+                # Rebuild from the current KV snapshot on any connection change.
+                if not nc.is_connected or nc.stats["reconnects"] != reconnects:
+                    raise RuntimeError("NATS connection changed during live KV watch")
+                try:
+                    entry = await asyncio.wait_for(self._updates.get(), timeout=1.0)
+                except TimeoutError:
+                    continue
+                if not nc.is_connected or nc.stats["reconnects"] != reconnects:
+                    raise RuntimeError("NATS connection changed during live KV watch")
+                yield entry
         finally:
             await self._close_subscription(self._snapshot)
             await self._close_subscription(self._live)

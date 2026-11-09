@@ -39,24 +39,24 @@ logger = get_logger("node-nats-memory")
 
 WORKER_ID = f"{os.getpid()}:{uuid4().hex[:8]}"
 # Stay under default NATS max_payload (1MiB) with headroom for JSON framing.
-_MAX_USER_SYNC_VALUE_BYTES = min(900_000, nats_settings.node_command_max_payload_bytes)
+_MAX_SUBSCRIPTION_SYNC_VALUE_BYTES = min(900_000, nats_settings.node_command_max_payload_bytes)
 
 _nc: nats.NATS | None = None
-_user_sync_kv: KeyValue | None = None
+_subscription_sync_kv: KeyValue | None = None
 _lifecycle_kv: KeyValue | None = None
-_user_sync_store: NatsSubscriptionSyncStore | None = None
+_subscription_sync_store: NatsSubscriptionSyncStore | None = None
 _lifecycle_coordinator: NatsNodeLifecycleCoordinator | None = None
 _init_lock = asyncio.Lock()
 
 
-def _b64_user(user: WireSubscription) -> str:
-    return base64.b64encode(user.SerializeToString()).decode("ascii")
+def _encode_subscription(subscription: WireSubscription) -> str:
+    return base64.b64encode(subscription.SerializeToString()).decode("ascii")
 
 
-def _user_from_b64(data: str) -> WireSubscription:
-    user = WireSubscription()
-    user.ParseFromString(base64.b64decode(data.encode("ascii")))
-    return user
+def _decode_subscription(data: str) -> WireSubscription:
+    subscription = WireSubscription()
+    subscription.ParseFromString(base64.b64decode(data.encode("ascii")))
+    return subscription
 
 
 def _digest(value: str) -> str:
@@ -100,9 +100,9 @@ RefreshResolver = Callable[[str, list[str]], Awaitable[list[WireSubscription]]]
 
 
 class NatsSubscriptionSyncStore:
-    """One CAS-guarded KV document per (node, user) for the shared delta queue.
+    """One CAS-guarded KV document per (node, subscription UUID) for the shared delta queue.
 
-    Key ``p.<node>.<digest(email)>`` holds ``{"email", "user"}`` plus an optional
+    Key ``p.<node>.<digest(subscription_uuid)>`` holds ``{"subscription_uuid", "subscription"}`` plus an optional
     ``"claim": {"worker", "until"}`` while a worker is delivering it. Every state
     transition is a revision-guarded write:
 
@@ -115,8 +115,8 @@ class NatsSubscriptionSyncStore:
       lease has expired. An old payload therefore cannot resurrect a newer one
       even after the newer one was delivered and removed.
 
-    A refresh marker ``{"email", "refresh": true}`` asks whichever worker scans
-    next to re-derive the user from the source of truth; the resolved payload
+    A refresh marker ``{"subscription_uuid", "refresh": true}`` asks whichever worker scans
+    next to re-derive the subscription from the source of truth; the resolved payload
     replaces exactly that marker revision, never a newer enqueue.
 
     A full snapshot never drains the queue destructively: ``capture_queued``
@@ -129,7 +129,7 @@ class NatsSubscriptionSyncStore:
         self._key_index = KvKeyIndex(kv)
         self._write_slots = asyncio.Semaphore(32)
         # key -> (revision, lease expiry) as last read for that revision, so
-        # scans skip other workers' in-flight users (and quiescence polls skip
+        # scans skip other workers' in-flight subscriptions (and quiescence polls skip
         # unchanged unclaimed entries) without a KV read.
         self._claims_seen: dict[str, tuple[int, float]] = {}
         # Returns current payloads for refresh markers. Installed by the
@@ -141,10 +141,7 @@ class NatsSubscriptionSyncStore:
 
     async def has_pending(self, node_id: str) -> bool:
         """Keep polling for leased work without scanning every KV value."""
-        return bool(
-            await self._key_index.entries(self._pending_prefix(node_id))
-            or await self._key_index.entries(self._legacy_claimed_prefix(node_id))
-        )
+        return bool(await self._key_index.entries(self._pending_prefix(node_id)))
 
     async def _run_bounded(self, operation, items) -> None:
         async def run(item):
@@ -162,14 +159,11 @@ class NatsSubscriptionSyncStore:
     def _pending_prefix(self, node_id: str) -> str:
         return f"p.{node_id}."
 
-    def _legacy_claimed_prefix(self, node_id: str) -> str:
-        return f"c.{node_id}."
-
     def _fence_key(self, node_id: str) -> str:
         return f"f.{node_id}.sync"
 
-    def _pending_key(self, node_id: str, email: str) -> str:
-        return f"{self._pending_prefix(node_id)}{_digest(email)}"
+    def _pending_key(self, node_id: str, subscription_uuid: str) -> str:
+        return f"{self._pending_prefix(node_id)}{_digest(subscription_uuid)}"
 
     @staticmethod
     def _b64(text: str) -> str:
@@ -183,23 +177,23 @@ class NatsSubscriptionSyncStore:
             return ""
 
     @classmethod
-    def _token(cls, key: str, revision: int, email: str, claim_id: str) -> str:
+    def _token(cls, key: str, revision: int, subscription_uuid: str, claim_id: str) -> str:
         # digest.revision.subscription_uuid(base64url).claim_id: opaque to the bridge, and
         # self-describing for acknowledgements, requeues, and claim releases.
-        return f"{key.rpartition('.')[2]}.{revision}.{cls._b64(email)}.{claim_id}"
+        return f"{key.rpartition('.')[2]}.{revision}.{cls._b64(subscription_uuid)}.{claim_id}"
 
     def _token_parts(self, node_id: str, token: str) -> tuple[str, int, str, str] | None:
         parts = token.split(".")
         if len(parts) != 4 or not parts[0] or not parts[1].isdigit():
             return None
-        digest, revision, email, claim_id = parts
-        return f"{self._pending_prefix(node_id)}{digest}", int(revision), self._unb64(email), claim_id
+        digest, revision, subscription_uuid, claim_id = parts
+        return f"{self._pending_prefix(node_id)}{digest}", int(revision), self._unb64(subscription_uuid), claim_id
 
     def _ensure_value_size(self, key: str, value: dict[str, Any]) -> None:
         size = len(json.dumps(value, separators=(",", ":")).encode())
-        if size > _MAX_USER_SYNC_VALUE_BYTES:
+        if size > _MAX_SUBSCRIPTION_SYNC_VALUE_BYTES:
             raise RuntimeError(
-                f"user sync KV value for key={key} is {size} bytes; exceeds limit {_MAX_USER_SYNC_VALUE_BYTES}"
+                f"subscription sync KV value for key={key} is {size} bytes; exceeds limit {_MAX_SUBSCRIPTION_SYNC_VALUE_BYTES}"
             )
 
     @staticmethod
@@ -208,9 +202,9 @@ class NatsSubscriptionSyncStore:
 
     # --- enqueue / restore ---------------------------------------------------
 
-    async def _enqueue_one(self, node_id: str, email: str, user: WireSubscription) -> None:
-        key = self._pending_key(node_id, email)
-        value = {"email": email, "user": _b64_user(user)}
+    async def _enqueue_one(self, node_id: str, subscription_uuid: str, subscription: WireSubscription) -> None:
+        key = self._pending_key(node_id, subscription_uuid)
+        value = {"subscription_uuid": subscription_uuid, "subscription": _encode_subscription(subscription)}
         self._ensure_value_size(key, value)
         for attempt in range(32):
             doc, rev = await kv_get_json(self._kv, key)
@@ -261,12 +255,15 @@ class NatsSubscriptionSyncStore:
             self._claims_seen[key] = (revision, 0.0)
             return
 
-    async def enqueue_users(self, node_id: str, users: list[WireSubscription]) -> None:
-        if not users:
+    async def enqueue_users(self, node_id: str, subscriptions: list[WireSubscription]) -> None:
+        if not subscriptions:
             return
-        # Latest payload per email wins (dedupe across the batch first).
-        by_email = {user.subscription_uuid: user for user in users}
-        await self._run_bounded(lambda user: self._enqueue_one(node_id, user.subscription_uuid, user), by_email.values())
+        # Latest payload per subscription_uuid wins (dedupe across the batch first).
+        by_subscription_uuid = {subscription.subscription_uuid: subscription for subscription in subscriptions}
+        await self._run_bounded(
+            lambda subscription: self._enqueue_one(node_id, subscription.subscription_uuid, subscription),
+            by_subscription_uuid.values(),
+        )
 
     async def _create_if_absent(self, key: str, value: dict[str, Any]) -> bool:
         """Create-only write. Only a demonstrated CAS conflict counts as "newer present".
@@ -282,69 +279,50 @@ class NatsSubscriptionSyncStore:
         self._key_index.observe_put(key, revision)
         return True
 
-    async def _restore_one(self, node_id: str, user: WireSubscription) -> None:
+    async def _restore_one(self, node_id: str, subscription: WireSubscription) -> None:
         await self._create_if_absent(
-            self._pending_key(node_id, user.subscription_uuid), {"email": user.subscription_uuid, "user": _b64_user(user)}
+            self._pending_key(node_id, subscription.subscription_uuid),
+            {"subscription_uuid": subscription.subscription_uuid, "subscription": _encode_subscription(subscription)},
         )
 
-    async def _request_refresh_one(self, node_id: str, email: str) -> bool:
-        """Mark a user for re-derivation unless a payload (or claim) is already queued for it.
+    async def _request_refresh_one(self, node_id: str, subscription_uuid: str) -> bool:
+        """Mark a subscription for re-derivation unless a payload (or claim) is already queued for it.
 
         Create-only: an existing entry is either a newer payload that will be
         delivered anyway or an in-flight claim that must stay visible.
         """
-        return await self._create_if_absent(self._pending_key(node_id, email), {"email": email, "refresh": True})
+        return await self._create_if_absent(
+            self._pending_key(node_id, subscription_uuid), {"subscription_uuid": subscription_uuid, "refresh": True}
+        )
 
-    async def request_refresh(self, node_id: str, emails: list[str]) -> None:
-        """Durably ask any worker to re-derive these users before the next delivery.
+    async def request_refresh(self, node_id: str, subscription_uuids: list[str]) -> None:
+        """Durably ask any worker to re-derive these subscriptions before the next delivery.
 
-        The marker holds no payload. A claim scan hands its email to the refresh
+        The marker holds no payload. A claim scan hands its subscription_uuid to the refresh
         resolver and replaces exactly the marker's revision with the result, so
         a newer API enqueue in the meantime is never overwritten. The marker
         survives until that succeeds.
         """
-        if not emails:
+        if not subscription_uuids:
             return
-        await self._run_bounded(lambda email: self._request_refresh_one(node_id, email), dict.fromkeys(emails))
-
-    async def _migrate_legacy_claims(self, node_id: str) -> None:
-        """Settle in-flight claims left by pre-upgrade workers under ``c.<node>.*``.
-
-        An unexpired legacy claim may still be delivering, so it is left alone
-        (and counts as active for full-sync quiescence). An expired one is
-        replaced by a refresh marker rather than its raw payload: a newer state
-        may have been delivered since, and the marker re-derives the current
-        one from the source of truth.
-        """
-        legacy = await self._key_index.entries(self._legacy_claimed_prefix(node_id))
-        now = time.time()
-        for key, indexed_revision in legacy.items():
-            doc, rev = await kv_get_json(self._kv, key)
-            if doc is None:
-                self._key_index.discard(key, indexed_revision)
-                continue
-            if float(doc.get("expires_at", 0)) > now:
-                continue
-            email = doc.get("email")
-            if isinstance(email, str):
-                # Propagates transport failures: the legacy claim is removed
-                # only once its user is known to be queued for re-derivation.
-                await self._request_refresh_one(node_id, email)
-            try:
-                await self._kv.delete(key, last=rev)
-                self._key_index.discard(key, indexed_revision)
-            except Exception as exc:
-                logger.debug("Failed to remove legacy claim key=%s: %s", key, exc)
+        await self._run_bounded(
+            lambda subscription_uuid: self._request_refresh_one(node_id, subscription_uuid),
+            dict.fromkeys(subscription_uuids),
+        )
 
     # --- claim / ack / requeue -----------------------------------------------
 
     async def _claim_doc(
         self, key: str, doc: dict[str, Any], revision: int, worker_id: str, lease_seconds: float
     ) -> ClaimedUser | None:
-        email, user_b64 = doc["email"], doc["user"]
+        subscription_uuid, subscription_b64 = doc["subscription_uuid"], doc["subscription"]
         until = time.time() + lease_seconds
         claim_id = uuid4().hex
-        value = {"email": email, "user": user_b64, "claim": {"id": claim_id, "worker": worker_id, "until": until}}
+        value = {
+            "subscription_uuid": subscription_uuid,
+            "subscription": subscription_b64,
+            "claim": {"id": claim_id, "worker": worker_id, "until": until},
+        }
         self._ensure_value_size(key, value)
         try:
             # Revision-guarded so two workers cannot claim the same payload.
@@ -357,7 +335,10 @@ class NatsSubscriptionSyncStore:
             return None
         self._key_index.observe_put(key, claimed_revision)
         self._claims_seen[key] = (claimed_revision, until)
-        return ClaimedUser(token=self._token(key, claimed_revision, email, claim_id), user=_user_from_b64(user_b64))
+        return ClaimedUser(
+            token=self._token(key, claimed_revision, subscription_uuid, claim_id),
+            user=_decode_subscription(subscription_b64),
+        )
 
     async def _resolve_refresh_markers(
         self, node_id: str, markers: dict[str, tuple[str, int]], worker_id: str, lease_seconds: float
@@ -366,18 +347,25 @@ class NatsSubscriptionSyncStore:
         if not markers:
             return []
         if self.refresh_resolver is None:
-            logger.warning("No refresh resolver installed; %s user(s) on node %s stay queued", len(markers), node_id)
+            logger.warning(
+                "No refresh resolver installed; %s subscription(s) on node %s stay queued", len(markers), node_id
+            )
             return []
         try:
-            payloads = {user.subscription_uuid: user for user in await self.refresh_resolver(node_id, list(markers))}
+            payloads = {
+                subscription.subscription_uuid: subscription
+                for subscription in await self.refresh_resolver(node_id, list(markers))
+            }
         except Exception as exc:
-            logger.warning("Refresh of %s user(s) for node %s failed; retrying later: %s", len(markers), node_id, exc)
+            logger.warning(
+                "Refresh of %s subscription(s) for node %s failed; retrying later: %s", len(markers), node_id, exc
+            )
             return []
         claimed: list[ClaimedUser] = []
-        for email, (key, revision) in markers.items():
-            user = payloads.get(email)
-            if user is None:
-                # Nothing to send for this user; retire the marker unless it changed.
+        for subscription_uuid, (key, revision) in markers.items():
+            subscription = payloads.get(subscription_uuid)
+            if subscription is None:
+                # Nothing to send for this subscription; retire the marker unless it changed.
                 try:
                     await self._kv.delete(key, last=revision)
                     self._key_index.discard(key, revision)
@@ -387,61 +375,22 @@ class NatsSubscriptionSyncStore:
             # CAS against the marker revision: a payload enqueued after the
             # marker was read (possibly newer than our database read) wins.
             item = await self._claim_doc(
-                key, {"email": email, "user": _b64_user(user)}, revision, worker_id, lease_seconds
+                key,
+                {"subscription_uuid": subscription_uuid, "subscription": _encode_subscription(subscription)},
+                revision,
+                worker_id,
+                lease_seconds,
             )
             if item is not None:
                 claimed.append(item)
         return claimed
 
-    async def resolve_refresh_markers(self, node_id: str) -> tuple[int, int]:
-        """Replace every refresh marker for a node with its current payload, without claiming it.
-
-        Returns ``(resolved, remaining)``. Used before rolling back to a panel
-        version that does not understand markers, so no queued work is stranded.
-        """
-        if self.refresh_resolver is None:
-            raise RuntimeError("no refresh resolver installed")
-        markers: dict[str, tuple[str, int]] = {}
-        for key in await self._discover_entries(node_id):
-            doc, rev = await kv_get_json(self._kv, key)
-            if doc is None or not doc.get("refresh") or isinstance(doc.get("user"), str):
-                continue
-            if isinstance(doc.get("email"), str):
-                markers[doc["email"]] = (key, rev)
-        if not markers:
-            return 0, 0
-        payloads = {user.subscription_uuid: user for user in await self.refresh_resolver(node_id, list(markers))}
-        resolved = 0
-        for email, (key, revision) in markers.items():
-            user = payloads.get(email)
-            try:
-                if user is None:
-                    await self._kv.delete(key, last=revision)
-                    self._key_index.discard(key, revision)
-                else:
-                    value = {"email": email, "user": _b64_user(user)}
-                    self._ensure_value_size(key, value)
-                    new_revision = await self._kv.update(key, self._encode(value), last=revision)
-                    self._key_index.observe_put(key, new_revision)
-                    self._claims_seen[key] = (new_revision, 0.0)
-            except nats.errors.Error as exc:
-                logger.debug("Refresh marker key=%s changed during resolution: %s", key, exc)
-                continue
-            resolved += 1
-        remaining = 0
-        for key in await self._discover_entries(node_id):
-            doc, _ = await kv_get_json(self._kv, key)
-            if doc is not None and doc.get("refresh") and not isinstance(doc.get("user"), str):
-                remaining += 1
-        return resolved, remaining
-
     async def claim_users(self, node_id: str, worker_id: str, limit: int, lease_seconds: float) -> list[ClaimedUser]:
         if limit <= 0:
             return []
-        # Apply the same batch budget as direct user updates. Large shared
+        # Apply the same batch budget as direct subscription updates. Large shared
         # claims can exceed the node RPC deadline and repeatedly requeue work.
-        limit = min(limit, max(1, nats_settings.node_update_users_batch_size))
-        await self._migrate_legacy_claims(node_id)
+        limit = min(limit, max(1, nats_settings.node_update_subscriptions_batch_size))
 
         result: list[ClaimedUser] = []
         markers: dict[str, tuple[str, int]] = {}
@@ -465,13 +414,13 @@ class NatsSubscriptionSyncStore:
                 self._claims_seen[pending_key] = (rev, float(claim["until"]))
                 continue
             self._claims_seen[pending_key] = (rev, 0.0)
-            email = doc.get("email")
-            if not isinstance(email, str):
+            subscription_uuid = doc.get("subscription_uuid")
+            if not isinstance(subscription_uuid, str):
                 continue
-            if doc.get("refresh") and not isinstance(doc.get("user"), str):
-                markers[email] = (pending_key, rev)
+            if doc.get("refresh") and not isinstance(doc.get("subscription"), str):
+                markers[subscription_uuid] = (pending_key, rev)
                 continue
-            if not isinstance(doc.get("user"), str):
+            if not isinstance(doc.get("subscription"), str):
                 continue
             item = await self._claim_doc(pending_key, doc, rev, worker_id, lease_seconds)
             if item is not None:
@@ -483,7 +432,7 @@ class NatsSubscriptionSyncStore:
         parts = self._token_parts(node_id, token)
         if parts is None:
             return
-        key, revision, email, claim_id = parts
+        key, revision, subscription_uuid, claim_id = parts
         try:
             deleted = await self._kv.delete(key, last=revision)
         except Exception as exc:
@@ -495,18 +444,18 @@ class NatsSubscriptionSyncStore:
             return
         doc, _ = await kv_get_json(self._kv, key)
         if doc is None:
-            if email:
+            if subscription_uuid:
                 # The payload we delivered was removed by someone else (a newer
                 # delivery or a full sync). Our copy may have landed last, so
                 # the caller should re-derive the current state.
-                unconfirmed.append(email)
+                unconfirmed.append(subscription_uuid)
             return
         # A newer payload is pending and will be delivered after ours; make it
         # claimable immediately if it still carries our (preserved) claim.
         await self._release_claim(key, claim_id)
 
     async def ack_users(self, node_id: str, tokens: list[str]) -> list[str]:
-        """Acknowledge delivered claims; returns emails whose latest state could not be confirmed."""
+        """Acknowledge delivered claims; returns subscription_uuids whose latest state could not be confirmed."""
         if not tokens:
             return []
         unconfirmed: list[str] = []
@@ -518,7 +467,7 @@ class NatsSubscriptionSyncStore:
         if parts is None:
             return
         key, revision, _, claim_id = parts
-        value = {"email": item.user.subscription_uuid, "user": _b64_user(item.user)}
+        value = {"subscription_uuid": item.user.subscription_uuid, "subscription": _encode_subscription(item.user)}
         self._ensure_value_size(key, value)
         try:
             new_revision = await self._kv.update(key, self._encode(value), last=revision)
@@ -534,7 +483,7 @@ class NatsSubscriptionSyncStore:
         self._claims_seen[key] = (new_revision, 0.0)
 
     async def requeue_users(self, node_id: str, claimed_users: list[ClaimedUser]) -> list[str]:
-        """Return claimed payloads to the queue; returns emails that could not be requeued."""
+        """Return claimed payloads to the queue; returns subscription_uuids that could not be requeued."""
         if not claimed_users:
             return []
         failed: list[str] = []
@@ -545,8 +494,8 @@ class NatsSubscriptionSyncStore:
         parts = self._token_parts(node_id, item.token)
         if parts is None:
             return
-        key, revision, email, claim_id = parts
-        marker = {"email": email or item.user.subscription_uuid, "refresh": True}
+        key, revision, subscription_uuid, claim_id = parts
+        marker = {"subscription_uuid": subscription_uuid or item.user.subscription_uuid, "refresh": True}
         try:
             new_revision = await self._kv.update(key, self._encode(marker), last=revision)
         except nats_js_errors.KeyWrongLastSequenceError:
@@ -578,7 +527,7 @@ class NatsSubscriptionSyncStore:
         its checkpoint is replayed in order (deletes included) before the
         result is trusted. Nothing here relies on cached claim state alone.
         """
-        prefixes = (self._pending_prefix(node_id), self._legacy_claimed_prefix(node_id))
+        prefixes = (self._pending_prefix(node_id),)
         if not isinstance(self._kv, KeyValue):
             entries: dict[str, int] = {}
             for prefix in prefixes:
@@ -626,8 +575,6 @@ class NatsSubscriptionSyncStore:
                     return
                 claim = doc.get("claim")
                 until = float(claim.get("until", 0)) if isinstance(claim, dict) else 0.0
-                # Pre-upgrade claims keep their own lease field.
-                until = max(until, float(doc.get("expires_at", 0) or 0))
                 self._claims_seen[key] = (rev, until)
             if until > now:
                 active += 1
@@ -918,53 +865,53 @@ async def ensure_bridge_memory() -> tuple[NatsSubscriptionSyncStore | None, Nats
 
     Split-role / single-worker deployments keep the bridge's in-process defaults.
     """
-    global _nc, _user_sync_kv, _lifecycle_kv, _user_sync_store, _lifecycle_coordinator
+    global _nc, _subscription_sync_kv, _lifecycle_kv, _subscription_sync_store, _lifecycle_coordinator
 
     if not needs_shared_bridge_memory():
         return None, None
 
-    if _user_sync_store is not None and _lifecycle_coordinator is not None:
-        return _user_sync_store, _lifecycle_coordinator
+    if _subscription_sync_store is not None and _lifecycle_coordinator is not None:
+        return _subscription_sync_store, _lifecycle_coordinator
 
     async with _init_lock:
-        if _user_sync_store is not None and _lifecycle_coordinator is not None:
-            return _user_sync_store, _lifecycle_coordinator
+        if _subscription_sync_store is not None and _lifecycle_coordinator is not None:
+            return _subscription_sync_store, _lifecycle_coordinator
 
         _nc = await create_nats_client()
         if _nc is None:
             return None, None
 
         js: JetStreamContext = await get_jetstream_context(_nc)
-        _user_sync_kv = await get_or_create_kv_bucket(js, nats_settings.node_user_sync_kv_bucket)
+        _subscription_sync_kv = await get_or_create_kv_bucket(js, nats_settings.node_subscription_sync_kv_bucket)
         _lifecycle_kv = await get_or_create_kv_bucket(js, nats_settings.node_lifecycle_kv_bucket)
-        if _user_sync_kv is None or _lifecycle_kv is None:
+        if _subscription_sync_kv is None or _lifecycle_kv is None:
             logger.warning("Failed to create node bridge memory KV buckets")
             if _nc is not None:
                 with contextlib.suppress(Exception):
                     await _nc.close()
             _nc = None
-            _user_sync_kv = None
+            _subscription_sync_kv = None
             _lifecycle_kv = None
             return None, None
 
-        _user_sync_store = NatsSubscriptionSyncStore(_user_sync_kv)
+        _subscription_sync_store = NatsSubscriptionSyncStore(_subscription_sync_kv)
         _lifecycle_coordinator = NatsNodeLifecycleCoordinator(_lifecycle_kv)
         logger.info("Node bridge NATS memory ready (worker_id=%s)", WORKER_ID)
-        return _user_sync_store, _lifecycle_coordinator
+        return _subscription_sync_store, _lifecycle_coordinator
 
 
 def get_bridge_memory() -> tuple[NatsSubscriptionSyncStore | None, NatsNodeLifecycleCoordinator | None, str]:
-    return _user_sync_store, _lifecycle_coordinator, WORKER_ID
+    return _subscription_sync_store, _lifecycle_coordinator, WORKER_ID
 
 
 async def shutdown_bridge_memory() -> None:
-    global _nc, _user_sync_kv, _lifecycle_kv, _user_sync_store, _lifecycle_coordinator
-    if _user_sync_store is not None:
-        await _user_sync_store.close()
+    global _nc, _subscription_sync_kv, _lifecycle_kv, _subscription_sync_store, _lifecycle_coordinator
+    if _subscription_sync_store is not None:
+        await _subscription_sync_store.close()
     if _nc is not None:
         await _nc.close()
     _nc = None
-    _user_sync_kv = None
+    _subscription_sync_kv = None
     _lifecycle_kv = None
-    _user_sync_store = None
+    _subscription_sync_store = None
     _lifecycle_coordinator = None

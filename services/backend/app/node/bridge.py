@@ -26,7 +26,7 @@ from waylane_node_bridge.grpclib import Node as GrpcNode
 from waylane_node_bridge.rest import Node as RestNode
 from waylane_node_bridge.storage import ClaimedUser
 
-_queued_sync: ContextVar[bool] = ContextVar("queued_node_user_sync", default=False)
+_queued_sync: ContextVar[bool] = ContextVar("queued_node_subscription_sync", default=False)
 
 # Lease for one full snapshot (queue drain + database read + node RPC). It is
 # renewed while the snapshot is in progress; a crashed holder's fence expires
@@ -162,8 +162,14 @@ class _QueuedBatchSync:
         handler = _refresh_handler
         if handler is None:
             return users
-        fresh = {user.subscription_uuid: user for user in await handler(self.node_id, [user.subscription_uuid for user in users])}
-        return [_keep_removal_credentials(fresh[user.subscription_uuid], user) if user.subscription_uuid in fresh else user for user in users]
+        fresh = {
+            user.subscription_uuid: user
+            for user in await handler(self.node_id, [user.subscription_uuid for user in users])
+        }
+        return [
+            _keep_removal_credentials(fresh[user.subscription_uuid], user) if user.subscription_uuid in fresh else user
+            for user in users
+        ]
 
     async def sync_users_chunked(self, users, chunk_size=100, flush_pending=False, timeout=None):
         if not _queued_sync.get() or not users:

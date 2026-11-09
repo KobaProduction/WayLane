@@ -2,8 +2,10 @@
 
 Repository owner: **Koba Production**; original integration: Intens. Python FastAPI control-plane backend derived from PasarGuard Panel.
 
-This project is **not** production-ready as WayLane; its current behavior remains PasarGuard-compatible.
-The existing API, node orchestration and integrated HTML subscription page are preserved.
+This project is **not** production-ready as WayLane. Its current control-plane
+model is UUID-first `Subscription`; old product `User` and numeric subscription
+API routes are intentionally absent. The independent legacy VPN node remains
+available pending explicit, coordinated runtime migration.
 
 The dashboard frontend source is now part of this same repository at
 `services/frontend/`, with its own service and CI scope. Where an existing
@@ -33,6 +35,35 @@ before attempting a push. CI runs the same repository-specific gate.
 deployment compatibility, or complete the eventual Vue/HA migration.
 
 Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft license applicable to derived code. See `LICENSING.md` and `LICENSE.UPSTREAM`.
+
+## Node subscription synchronization — NATS queue v2
+
+The WayLane-owned API and worker exchange the `update_subscription`,
+`update_subscriptions` and `sync_node_subscriptions` commands over the configured
+`NATS_NODE_COMMAND_SUBJECT`. Their payloads use `subscription`,
+`subscriptions`, and `flush_subscriptions`. The authenticated node-sync route
+`PUT /api/node/{node_id}/sync` uses the `flush_subscriptions` query parameter
+and rejects unrecognized query parameters rather than silently flushing.
+
+For shared JetStream KV delivery the settings are
+`NATS_NODE_UPDATE_SUBSCRIPTIONS_BATCH_SIZE` (default `100`) and
+`NATS_NODE_SUBSCRIPTION_SYNC_KV_BUCKET` (default
+`waylane_node_subscription_sync`). The new bucket stores per-node CAS-guarded
+`p.<node_id>.<digest(subscription_uuid)>` entries with a
+`subscription_uuid` plus an encoded `subscription` Protobuf payload or a
+`refresh: true` marker. Full-snapshot fences and revision/claim tokens still
+protect against stale deliveries. These keys are WayLane-specific, **not**
+Xray's native `Account.email` identity.
+
+**Breaking deployment boundary:** This source revision does **not** migrate
+messages from the former `waylane_node_user_sync` bucket, consume old `c.*`
+claims, accept old NATS command actions, or run a live cutover. Deploy API and
+node worker together only after confirming that pending work in the old bucket
+is drained or explicitly resolved. Establish a full current-subscription
+snapshot on each node and verify fencing/revocation before retiring the old
+bucket; do not discard outstanding credentials or delete KV data as a side
+effect of a code push. Real NATS state, DEV routing and VPN traffic require
+separate operational acceptance.
 
 
 ## Database migrations — existing PasarGuard databases are supported

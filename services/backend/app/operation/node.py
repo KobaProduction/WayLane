@@ -65,6 +65,7 @@ from app.models.stats import (
 )
 from app.nats import needs_shared_bridge_memory
 from app.nats.leader import needs_job_leader
+from app.nats.node_commands import SYNC_NODE_SUBSCRIPTIONS
 from app.nats.node_rpc import node_nats_client
 from app.node import SubscriptionSyncPreemptedError, core_subscriptions, node_manager
 from app.node.bridge import FullSyncConflictError
@@ -132,7 +133,7 @@ class NodeOperation(BaseOperation):
                 self._disconnect_single_node_sync if sync else self._disconnect_single_node_local
             )
 
-            self._sync_node_users_impl = self._sync_node_users_local
+            self._sync_node_subscriptions_impl = self._sync_node_subscriptions_local
             self._get_node_stats_impl = self._get_node_system_stats_local
             self._get_nodes_stats_impl = self._get_nodes_system_stats_local
             self._get_outbounds_latency_impl = self._get_outbounds_latency_local
@@ -150,7 +151,7 @@ class NodeOperation(BaseOperation):
             self._connect_single_impl = self._connect_single_node_remote
             self._connect_bulk_impl = self._connect_nodes_bulk_remote
             self._disconnect_single_impl = self._disconnect_single_node_remote
-            self._sync_node_users_impl = self._sync_node_users_remote
+            self._sync_node_subscriptions_impl = self._sync_node_subscriptions_remote
             self._get_node_stats_impl = self._get_node_system_stats_remote
             self._get_nodes_stats_impl = self._get_nodes_system_stats_remote
             self._get_outbounds_latency_impl = self._get_outbounds_latency_remote
@@ -884,8 +885,10 @@ class NodeOperation(BaseOperation):
                 logger.error(f"Error getting IP list for user {email} on node {node_id}: {e}")
             return None
 
-    async def sync_node_users(self, db: AsyncSession, node_id: int, flush_users: bool = False) -> NodeResponse:
-        return await self._sync_node_users_impl(db, node_id, flush_users)
+    async def sync_node_subscriptions(
+        self, db: AsyncSession, node_id: int, flush_subscriptions: bool = False
+    ) -> NodeResponse:
+        return await self._sync_node_subscriptions_impl(db, node_id, flush_subscriptions)
 
     async def clear_usage_data(self, db: AsyncSession, table: UsageTable, query: NodeClearUsageQuery):
         if query.start and query.end and query.start >= query.end:
@@ -1352,7 +1355,9 @@ class NodeOperation(BaseOperation):
         except RuntimeError as exc:
             await self.handle_rpc_error(exc)
 
-    async def _sync_node_users_local(self, db: AsyncSession, node_id: int, flush_users: bool) -> NodeResponse:
+    async def _sync_node_subscriptions_local(
+        self, db: AsyncSession, node_id: int, flush_subscriptions: bool
+    ) -> NodeResponse:
         db_node = await self.get_validated_node(db, node_id=node_id)
 
         if db_node.status != NodeStatus.connected:
@@ -1369,7 +1374,7 @@ class NodeOperation(BaseOperation):
             # between the read and the flush can be lost.
             _, users_by_core = await self._get_core_users_map(db, {core_id}, lazy=True)
             users = users_by_core.get(core_id, [])
-            if await node_manager.sync_full(node_id, users, flush_pending=flush_users) is None:
+            if await node_manager.sync_full(node_id, users, flush_pending=flush_subscriptions) is None:
                 await self.raise_error(message="Node is not connected", code=409)
         except SubscriptionSyncPreemptedError:
             # An edit of the node's connection or its removal won; this is not a node fault,
@@ -1388,10 +1393,12 @@ class NodeOperation(BaseOperation):
 
         return NodeResponse.model_validate(db_node)
 
-    async def _sync_node_users_remote(self, db: AsyncSession, node_id: int, flush_users: bool) -> NodeResponse:
+    async def _sync_node_subscriptions_remote(
+        self, db: AsyncSession, node_id: int, flush_subscriptions: bool
+    ) -> NodeResponse:
         await node_nats_client.publish(
-            "sync_node_users",
-            {"node_id": node_id, "flush_users": flush_users},
+            SYNC_NODE_SUBSCRIPTIONS,
+            {"node_id": node_id, "flush_subscriptions": flush_subscriptions},
         )
         return NodeResponse.model_validate(await self.get_validated_node(db, node_id))
 

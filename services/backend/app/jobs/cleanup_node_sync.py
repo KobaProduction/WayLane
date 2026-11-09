@@ -21,7 +21,9 @@ async def cleanup_node_sync():
         return
     try:
         async with asyncio.timeout(240):
-            count = await compact_deleted_keys(await get_jetstream_context(nc), nats_settings.node_user_sync_kv_bucket)
+            count = await compact_deleted_keys(
+                await get_jetstream_context(nc), nats_settings.node_subscription_sync_kv_bucket
+            )
         if count:
             logger.info("Compacted %s completed node-sync keys", count)
     except TimeoutError:

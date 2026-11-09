@@ -90,7 +90,7 @@ async def test_node_manager_bulk_user_sync_uses_bounded_chunked_batches(monkeypa
             return []
 
     fake_node = FakeNode()
-    monkeypatch.setattr("app.node.nats_settings.node_update_users_batch_size", 2)
+    monkeypatch.setattr("app.node.nats_settings.node_update_subscriptions_batch_size", 2)
 
     await manager._sync_users_to_node(1, fake_node, users)
 
@@ -116,7 +116,7 @@ async def test_node_manager_bulk_user_sync_falls_back_when_chunked_is_not_suppor
             return []
 
     fake_node = FakeNode()
-    monkeypatch.setattr("app.node.nats_settings.node_update_users_batch_size", 2)
+    monkeypatch.setattr("app.node.nats_settings.node_update_subscriptions_batch_size", 2)
 
     await manager._sync_users_to_node(1, fake_node, users)
 

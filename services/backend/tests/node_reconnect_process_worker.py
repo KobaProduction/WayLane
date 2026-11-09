@@ -9,13 +9,14 @@ from unittest.mock import AsyncMock
 
 import nats
 
-from waylane_node_bridge import Health
-
+# Subprocesses start with tests/ on sys.path; resolve the backend package root
+# before importing its locally owned bridge code.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db.models import NodeStatus
 from app.node import manager_sync
 from app.operation import node as node_operation
+from waylane_node_bridge import Health
 
 
 class MetadataSession:

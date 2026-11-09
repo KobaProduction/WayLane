@@ -42,7 +42,7 @@ def deserialize_proto_message(message_dict: dict, message_type: type[Message]) -
 
     Args:
         message_dict: A dictionary representation of a proto message
-        message_type: The Protocol Buffer message class to deserialize into (e.g., ProtoUser)
+        message_type: The Protocol Buffer message class to deserialize into (e.g., ProtoSubscription)
 
     Returns:
         A Protocol Buffer message instance of the specified type
@@ -58,7 +58,7 @@ def deserialize_proto_messages(messages_dicts: list[dict], message_type: type[Me
 
     Args:
         messages_dicts: A list of dictionary representations of proto messages
-        message_type: The Protocol Buffer message class to deserialize into (e.g., ProtoUser)
+        message_type: The Protocol Buffer message class to deserialize into (e.g., ProtoSubscription)
 
     Returns:
         A list of Protocol Buffer message instances of the specified type

@@ -328,7 +328,9 @@ async def test_delta_delivered_across_a_full_snapshot_is_reapplied_from_current_
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     state.gate = asyncio.Event()
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails])
+        AsyncMock(
+            side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails]
+        )
     )
     try:
         await node.connect("0.5.4", "26.3.27")
@@ -378,7 +380,9 @@ async def test_unconfirmed_ack_leaves_a_marker_resolved_from_the_source_of_truth
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     state.gate = asyncio.Event()
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails])
+        AsyncMock(
+            side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails]
+        )
     )
     try:
         await node.connect("0.5.4", "26.3.27")
@@ -724,7 +728,9 @@ async def test_bulk_updates_use_the_fenced_durable_queue(monkeypatch):
     try:
         await node.connect("0.5.4", "26.3.27")
         token = await store.begin_full_sync(node.node_id, "other", 120)
-        await manager._sync_users_to_node(1, node, [Subscription(subscription_uuid=f"bulk-{n}", inbounds=["in"]) for n in range(150)])
+        await manager._sync_users_to_node(
+            1, node, [Subscription(subscription_uuid=f"bulk-{n}", inbounds=["in"]) for n in range(150)]
+        )
         await asyncio.sleep(0.2)
         assert state.deltas == []  # recorded durably, held behind the fence
         captured, _ = await store.capture_queued(node.node_id)
@@ -777,23 +783,31 @@ async def test_refresh_request_never_displaces_a_queued_payload_or_an_active_cla
     node = make_node("grpc", store)
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails])
+        AsyncMock(
+            side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=["db"]) for e in emails]
+        )
     )
     try:
         await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="claimed", inbounds=["payload"])])
         claimed = await other.claim_users(node.node_id, "other", 10, 30)
         assert [item.user.subscription_uuid for item in claimed] == ["claimed"]
         await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="queued", inbounds=["payload"])])
-        await node.request_refresh([Subscription(subscription_uuid="queued"), Subscription(subscription_uuid="claimed"), Subscription(subscription_uuid="fresh")])
+        await node.request_refresh(
+            [
+                Subscription(subscription_uuid="queued"),
+                Subscription(subscription_uuid="claimed"),
+                Subscription(subscription_uuid="fresh"),
+            ]
+        )
         # Raw queue invariants: the queued payload and the sibling's claim are untouched, only "fresh" got a marker.
         docs = {
-            json.loads(v)["email"]: json.loads(v)
+            json.loads(v)["subscription_uuid"]: json.loads(v)
             for k, (v, _) in kv._data.items()
             if k.startswith(f"p.{node.node_id}.")
         }
-        assert "user" in docs["queued"] and "refresh" not in docs["queued"]
-        assert docs["claimed"]["claim"]["worker"] == "other" and "user" in docs["claimed"]
-        assert docs["fresh"] == {"email": "fresh", "refresh": True}
+        assert "subscription" in docs["queued"] and "refresh" not in docs["queued"]
+        assert docs["claimed"]["claim"]["worker"] == "other" and "subscription" in docs["claimed"]
+        assert docs["fresh"] == {"subscription_uuid": "fresh", "refresh": True}
         _, active = await store.capture_queued(node.node_id)
         assert active == 1  # the sibling's in-flight claim is still visible
         await node.connect("0.5.4", "26.3.27")
@@ -818,12 +832,20 @@ async def test_edits_queued_in_reverse_commit_order_converge_to_the_database_sta
     state = attach_fake_transport(monkeypatch, node, FakeNodeState())
     database = {"u": ["v2"]}  # final committed state is B's
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=database.get(e, [])) for e in emails])
+        AsyncMock(
+            side_effect=lambda node_id, emails: [
+                Subscription(subscription_uuid=e, inbounds=database.get(e, [])) for e in emails
+            ]
+        )
     )
     try:
         await node.connect("0.5.4", "26.3.27")
-        await node.update_user(Subscription(subscription_uuid="u", inbounds=["v2"]))  # B's serialization, enqueued first
-        await node.update_user(Subscription(subscription_uuid="u", inbounds=[]))  # A's older serialization, enqueued last
+        await node.update_user(
+            Subscription(subscription_uuid="u", inbounds=["v2"])
+        )  # B's serialization, enqueued first
+        await node.update_user(
+            Subscription(subscription_uuid="u", inbounds=[])
+        )  # A's older serialization, enqueued last
         await wait_until(lambda: state.users.get("u") == ["v2"], timeout=10)
         await asyncio.wait_for(node._sync_worker_task, 10)
         assert state.users["u"] == ["v2"]  # never regressed to A's state
@@ -843,11 +865,19 @@ async def test_stale_single_update_after_a_bulk_update_converges(monkeypatch):
     manager = await make_manager(node)
     database = {f"u{n}": ["bulk-v2"] for n in range(5)}
     register_refresh_handler(
-        AsyncMock(side_effect=lambda node_id, emails: [Subscription(subscription_uuid=e, inbounds=database.get(e, [])) for e in emails])
+        AsyncMock(
+            side_effect=lambda node_id, emails: [
+                Subscription(subscription_uuid=e, inbounds=database.get(e, [])) for e in emails
+            ]
+        )
     )
     try:
-        await manager._sync_users_to_node(1, node, [Subscription(subscription_uuid=f"u{n}", inbounds=["bulk-v2"]) for n in range(5)])
-        await store.enqueue_users(node.node_id, [Subscription(subscription_uuid="u2", inbounds=["single-v1"])])  # older edit, later enqueue
+        await manager._sync_users_to_node(
+            1, node, [Subscription(subscription_uuid=f"u{n}", inbounds=["bulk-v2"]) for n in range(5)]
+        )
+        await store.enqueue_users(
+            node.node_id, [Subscription(subscription_uuid="u2", inbounds=["single-v1"])]
+        )  # older edit, later enqueue
         await node.connect("0.5.4", "26.3.27")
         await wait_until(lambda: len(state.users) == 5, timeout=10)
         await asyncio.wait_for(node._sync_worker_task, 10)

@@ -61,9 +61,11 @@ async def test_real_grpc_and_nats_deliver_bounded_queue_after_rpc_failure(jetstr
     node.channel = Channel("127.0.0.1", port, ssl=False)
     node._client = service_grpc.NodeServiceStub(node.channel)
     monkeypatch.setattr(node_operation, "needs_shared_bridge_memory", lambda: True)
-    monkeypatch.setattr(nats_settings, "node_update_users_batch_size", 100)
+    monkeypatch.setattr(nats_settings, "node_update_subscriptions_batch_size", 100)
     try:
-        await store.enqueue_users("transport", [service.Subscription(subscription_uuid=f"queued-{i}") for i in range(1200)])
+        await store.enqueue_users(
+            "transport", [service.Subscription(subscription_uuid=f"queued-{i}") for i in range(1200)]
+        )
         await node.connect("0.5.4", "26.3.27")
         await node_operation.NodeOperation._resume_shared_sync(node)
         async with asyncio.timeout(20):

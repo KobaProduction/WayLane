@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_object_session
 from app.db import GetDB
 from app.db.models import Admin, AdminRole, AdminStatus, Subscription
 from app.models.subscription_models import SubscriptionNotificationResponse
+from app.nats.node_commands import UPDATE_SUBSCRIPTION, UPDATE_SUBSCRIPTIONS
 from app.nats.node_rpc import encode_node_command, node_nats_client
 from app.nats.proto_utils import serialize_proto_message, serialize_proto_messages
 from app.node import node_manager
@@ -30,15 +31,15 @@ def _chunk_serialized_subscriptions_for_nats(users: list[dict]) -> list[list[dic
         return []
 
     max_payload_bytes = max(1024, nats_settings.node_command_max_payload_bytes)
-    max_batch_size = max(1, nats_settings.node_update_users_batch_size)
+    max_batch_size = max(1, nats_settings.node_update_subscriptions_batch_size)
     chunks: list[list[dict]] = []
     current: list[dict] = []
-    envelope_bytes = len(encode_node_command("update_users", {"subscriptions": []}))
+    envelope_bytes = len(encode_node_command(UPDATE_SUBSCRIPTIONS, {"subscriptions": []}))
     current_bytes = envelope_bytes
 
     for user in users:
         # Reuse the wire encoder so JSON escaping and the command envelope are counted exactly.
-        single_user_bytes = len(encode_node_command("update_users", {"subscriptions": [user]}))
+        single_user_bytes = len(encode_node_command(UPDATE_SUBSCRIPTIONS, {"subscriptions": [user]}))
         user_bytes = single_user_bytes - envelope_bytes
         candidate_bytes = current_bytes + user_bytes + (1 if current else 0)  # JSON array comma
         if current and (len(current) >= max_batch_size or candidate_bytes > max_payload_bytes):
@@ -154,13 +155,13 @@ else:
 
     async def _dispatch_subscription_update(proto_subscription):
         user_dict = serialize_proto_message(proto_subscription)
-        await node_nats_client.publish("update_user", {"user": user_dict})
+        await node_nats_client.publish(UPDATE_SUBSCRIPTION, {"subscription": user_dict})
 
     async def _dispatch_subscriptions_update(proto_subscriptions, *, await_dispatch: bool = False):
         """Publish bounded batches to the node worker before returning."""
         users_dicts = serialize_proto_messages(proto_subscriptions)
         for users_chunk in _chunk_serialized_subscriptions_for_nats(users_dicts):
-            await node_nats_client.publish("update_users", {"subscriptions": users_chunk})
+            await node_nats_client.publish(UPDATE_SUBSCRIPTIONS, {"subscriptions": users_chunk})
 
 
 class CurrentStateReader:

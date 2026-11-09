@@ -264,7 +264,7 @@ class NodeManager:
     async def _sync_user_batches(
         self, node_id: int, node: WayLaneNode, users: list[ProtoSubscription], *, batch_size: int | None = None
     ) -> None:
-        batch_size = max(1, batch_size or nats_settings.node_update_users_batch_size)
+        batch_size = max(1, batch_size or nats_settings.node_update_subscriptions_batch_size)
         failed_count = 0
 
         for batch in self._chunk_users(users, batch_size):
@@ -274,7 +274,7 @@ class NodeManager:
             raise RuntimeError(f"failed to sync {failed_count}/{len(users)} users to node {node_id}")
 
     async def _sync_users_to_node(self, node_id: int, node: WayLaneNode | None, users: list[ProtoSubscription]):
-        batch_size = max(1, nats_settings.node_update_users_batch_size)
+        batch_size = max(1, nats_settings.node_update_subscriptions_batch_size)
         lock = self._user_sync_locks.setdefault(node_id, asyncio.Lock())
         failed_count = 0
         task = self._track_user_sync(node_id)

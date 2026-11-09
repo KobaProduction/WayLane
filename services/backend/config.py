@@ -96,12 +96,22 @@ class NatsSettings(EnvSettings):
     node_rpc_timeout: float = Field(default=30.0, validation_alias="NATS_NODE_RPC_TIMEOUT")
     scheduler_rpc_timeout: float = Field(default=5.0, validation_alias="NATS_SCHEDULER_RPC_TIMEOUT")
     node_command_max_payload_bytes: int = Field(default=900000, validation_alias="NATS_NODE_COMMAND_MAX_PAYLOAD_BYTES")
-    node_update_users_batch_size: int = Field(default=100, validation_alias="NATS_NODE_UPDATE_USERS_BATCH_SIZE")
+    node_update_subscriptions_batch_size: int = Field(
+        default=100, validation_alias="NATS_NODE_UPDATE_SUBSCRIPTIONS_BATCH_SIZE"
+    )
     core_pubsub_channel: str = Field(default="core_hosts_updates", validation_alias="CORE_PUBSUB_CHANNEL")
     host_pubsub_channel: str = Field(default="host_manager_updates", validation_alias="HOST_PUBSUB_CHANNEL")
-    node_user_sync_kv_bucket: str = Field(
-        default="waylane_node_user_sync", validation_alias="NATS_NODE_USER_SYNC_KV_BUCKET"
+    node_subscription_sync_kv_bucket: str = Field(
+        default="waylane_node_subscription_sync", validation_alias="NATS_NODE_SUBSCRIPTION_SYNC_KV_BUCKET"
     )
+
+    @field_validator("node_subscription_sync_kv_bucket")
+    @classmethod
+    def require_v2_subscription_queue_namespace(cls, value: str) -> str:
+        if not value.strip() or value.strip() == "waylane_node_user_sync":
+            raise ValueError("NATS_NODE_SUBSCRIPTION_SYNC_KV_BUCKET must name a new v2 subscription KV bucket")
+        return value.strip()
+
     node_lifecycle_kv_bucket: str = Field(
         default="waylane_node_lifecycle", validation_alias="NATS_NODE_LIFECYCLE_KV_BUCKET"
     )
@@ -201,14 +211,20 @@ class JobSettings(EnvSettings):
     node_health_probe_timeout: int = Field(default=5, ge=1, validation_alias="NODE_HEALTH_PROBE_TIMEOUT")
     node_health_max_backoff: int = Field(default=60, ge=0, validation_alias="NODE_HEALTH_MAX_BACKOFF")
     record_node_usages_interval: int = Field(default=30, validation_alias="JOB_RECORD_NODE_USAGES_INTERVAL")
-    record_subscription_usages_interval: int = Field(default=10, validation_alias="JOB_RECORD_SUBSCRIPTION_USAGES_INTERVAL")
+    record_subscription_usages_interval: int = Field(
+        default=10, validation_alias="JOB_RECORD_SUBSCRIPTION_USAGES_INTERVAL"
+    )
     review_subscriptions_interval: int = Field(default=30, validation_alias="JOB_REVIEW_SUBSCRIPTIONS_INTERVAL")
     review_admin_limits_interval: int = Field(default=10, validation_alias="JOB_REVIEW_ADMIN_LIMITS_INTERVAL")
     send_notifications_interval: int = Field(default=30, validation_alias="JOB_SEND_NOTIFICATIONS_INTERVAL")
     gather_nodes_stats_interval: int = Field(default=25, validation_alias="JOB_GATHER_NODES_STATS_INTERVAL")
     remove_old_inbounds_interval: int = Field(default=600, validation_alias="JOB_REMOVE_OLD_INBOUNDS_INTERVAL")
-    remove_expired_subscriptions_interval: int = Field(default=3600, validation_alias="JOB_REMOVE_EXPIRED_SUBSCRIPTIONS_INTERVAL")
-    reset_subscription_data_usage_interval: int = Field(default=600, validation_alias="JOB_RESET_SUBSCRIPTION_DATA_USAGE_INTERVAL")
+    remove_expired_subscriptions_interval: int = Field(
+        default=3600, validation_alias="JOB_REMOVE_EXPIRED_SUBSCRIPTIONS_INTERVAL"
+    )
+    reset_subscription_data_usage_interval: int = Field(
+        default=600, validation_alias="JOB_RESET_SUBSCRIPTION_DATA_USAGE_INTERVAL"
+    )
     reset_node_usage_interval: int = Field(default=60, validation_alias="JOB_RESET_NODE_USAGE_INTERVAL")
     check_node_limits_interval: int = Field(default=60, validation_alias="JOB_CHECK_NODE_LIMITS_INTERVAL")
     cleanup_subscription_updates_interval: int = Field(

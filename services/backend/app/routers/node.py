@@ -310,11 +310,14 @@ async def reconnect_node(
 @router.put("/{node_id}/sync")
 async def sync_node(
     node_id: int,
-    flush_users: bool = True,
+    request: Request,
+    flush_subscriptions: bool = True,
     db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("nodes", "update")),
 ):
-    return await node_operator.sync_node_users(db, node_id=node_id, flush_users=flush_users)
+    if set(request.query_params) - {"flush_subscriptions"}:
+        raise HTTPException(status_code=422, detail="Unknown node sync query parameter")
+    return await node_operator.sync_node_subscriptions(db, node_id=node_id, flush_subscriptions=flush_subscriptions)
 
 
 @router.delete("/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -403,7 +406,9 @@ async def subscription_online_stats(
     _: AdminDetails = Depends(require_permission("subscriptions", "read")),
 ):
     subscription_uuid = await _subscription_node_id(db, subscription_uuid, admin)
-    return await node_operator.get_subscription_online_stats_by_node(db=db, node_id=node_id, subscription_uuid=subscription_uuid)
+    return await node_operator.get_subscription_online_stats_by_node(
+        db=db, node_id=node_id, subscription_uuid=subscription_uuid
+    )
 
 
 @router.get("/{node_id}/subscriptions/{subscription_uuid}/online-ips", response_model=SubscriptionIPList)

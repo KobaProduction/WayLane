@@ -737,7 +737,7 @@ def node_operator_mock(monkeypatch: pytest.MonkeyPatch):
         "bulk_update_nodes",
         "reset_node_usage",
         "restart_node",
-        "sync_node_users",
+        "sync_node_subscriptions",
         "remove_node",
         "get_node_stats_periodic",
         "get_node_system_stats",
@@ -947,28 +947,38 @@ def test_reconnect_node(access_token, node_operator_mock):
     assert await_args[1] == 9
 
 
-def test_sync_node_users(access_token, node_operator_mock):
-    node_operator_mock.sync_node_users.return_value = {"synced": True}
+def test_sync_node_subscriptions(access_token, node_operator_mock):
+    node_operator_mock.sync_node_subscriptions.return_value = {"synced": True}
     response = client.put(
         "/api/node/11/sync",
         headers=auth_headers(access_token),
-        params={"flush_users": True},
+        params={"flush_subscriptions": True},
     )
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {"synced": True}
-    awaited_kwargs = node_operator_mock.sync_node_users.await_args.kwargs
+    awaited_kwargs = node_operator_mock.sync_node_subscriptions.await_args.kwargs
     assert awaited_kwargs["node_id"] == 11
-    assert awaited_kwargs["flush_users"] is True
+    assert awaited_kwargs["flush_subscriptions"] is True
 
 
-def test_sync_node_users_flushes_by_default(access_token, node_operator_mock):
-    node_operator_mock.sync_node_users.return_value = {"synced": True}
+def test_sync_node_subscriptions_flushes_by_default(access_token, node_operator_mock):
+    node_operator_mock.sync_node_subscriptions.return_value = {"synced": True}
     response = client.put("/api/node/11/sync", headers=auth_headers(access_token))
 
     assert response.status_code == status.HTTP_200_OK
-    awaited_kwargs = node_operator_mock.sync_node_users.await_args.kwargs
+    awaited_kwargs = node_operator_mock.sync_node_subscriptions.await_args.kwargs
     assert awaited_kwargs["node_id"] == 11
-    assert awaited_kwargs["flush_users"] is True
+    assert awaited_kwargs["flush_subscriptions"] is True
+
+
+def test_sync_node_rejects_unknown_query_parameters_instead_of_silently_flushing(access_token, node_operator_mock):
+    response = client.put(
+        "/api/node/11/sync",
+        headers=auth_headers(access_token),
+        params={"flush_users": "false"},
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    node_operator_mock.sync_node_subscriptions.assert_not_awaited()
 
 
 def test_remove_node(access_token, node_operator_mock):

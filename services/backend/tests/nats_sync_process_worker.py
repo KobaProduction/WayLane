@@ -16,7 +16,7 @@ async def main():
     url, bucket, worker_id, node_count = sys.argv[1:]
     nc = await nats.connect(url)
     store = NatsSubscriptionSyncStore(await nc.jetstream().key_value(bucket))
-    emails = []
+    subscription_uuids = []
     try:
         async with asyncio.timeout(60):
             # All inputs are seeded before process startup. An empty complete
@@ -25,12 +25,12 @@ async def main():
                 progress = False
                 for node in range(int(node_count)):
                     claimed = await store.claim_users(str(node), worker_id, 50, 120)
-                    emails.extend(item.user.email for item in claimed)
+                    subscription_uuids.extend(item.user.subscription_uuid for item in claimed)
                     await store.ack_users(str(node), [item.token for item in claimed])
                     progress |= bool(claimed)
                 if not progress:
                     break
-        print(json.dumps(emails), flush=True)
+        print(json.dumps(subscription_uuids), flush=True)
     finally:
         await store.close()
         await nc.close()

@@ -195,10 +195,12 @@ async def test_restored_queue_retries_and_drains_after_attach(jetstream, monkeyp
     from config import nats_settings
     from waylane_node_bridge import NodeType
 
-    monkeypatch.setattr(nats_settings, "node_update_users_batch_size", 100)
+    monkeypatch.setattr(nats_settings, "node_update_subscriptions_batch_size", 100)
     original = NatsSubscriptionSyncStore(jetstream.kv)
     try:
-        await original.enqueue_users("91", [Subscription(subscription_uuid=f"restored-{index}") for index in range(1200)])
+        await original.enqueue_users(
+            "91", [Subscription(subscription_uuid=f"restored-{index}") for index in range(1200)]
+        )
     finally:
         await original.close()
     store = NatsSubscriptionSyncStore(jetstream.kv)
@@ -285,18 +287,25 @@ async def test_health_poll_recovers_claim_that_expires_after_startup(jetstream, 
     )
     sync = AsyncMock(return_value=[])
     monkeypatch.setattr(node, "_sync_batch_users", sync, raising=False)
+    # Controller is transport-abstract; the test uses a fake unchunked node
+    # rather than a REST/gRPC subclass with sync_users_chunked implemented.
+    monkeypatch.setattr(node, "_supports_chunked_sync", AsyncMock(return_value=(False, "test")))
     try:
         await node.connect("0.5.4", "26.3.27")
         await node_operation.NodeOperation._resume_shared_sync(node)
-        await asyncio.wait_for(node._sync_worker_task, timeout=5)
+        # A leased pending claim keeps the shared worker alive for future
+        # recovery. It must not be cancelled by a test-side idle timeout.
+        await asyncio.sleep(0.05)
         sync.assert_not_awaited()
+        assert node._sync_worker_task is not None and not node._sync_worker_task.done()
         now[0] += 61
         await node_checker.process_node_health_check(
             SimpleNamespace(id=93, name="restored", status=NodeStatus.connected, default_timeout=10), node
         )
-        await asyncio.wait_for(node._sync_worker_task, timeout=5)
-        assert [user.subscription_uuid for user in sync.await_args.args[0]] == ["orphan"]
-        await wait_for_keys(store, "c.93.", 0)
+        async with asyncio.timeout(5):
+            while sync.await_count == 0:
+                await asyncio.sleep(0.02)
+        assert [subscription.subscription_uuid for subscription in sync.await_args.args[0]] == ["orphan"]
         await wait_for_keys(store, "p.93.", 0)
     finally:
         await node.disconnect()
@@ -474,10 +483,13 @@ async def test_clear_catches_unobserved_writes_and_preserves_other_nodes(jetstre
         await kv.put("p.1.cached", b"{}")
         await store.enqueue_users("1", [Subscription(subscription_uuid="local")])
         await store.clear("1")
-        for key in ("p.1.cached", "c.1.cached", "p.1.new", "c.1.new", store._pending_key("1", "local")):
+        for key in ("p.1.cached", "p.1.new", store._pending_key("1", "local")):
             with pytest.raises(KeyNotFoundError):
                 await kv.get(key)
-        assert (await kv.get("p.2.keep")).value == b"{}"
+        # c.* belongs to the retired queue namespace and must not be modified
+        # by a v2 node clear; the separate bucket isolates it in production.
+        for key in ("c.1.cached", "c.1.new", "p.2.keep"):
+            assert (await kv.get(key)).value == b"{}"
         assert (await jetstream.js.stream_info(f"KV_{jetstream.bucket}")).state.consumer_count == 1
     finally:
         await store.close()
@@ -724,7 +736,7 @@ async def test_watcher_resumes_after_network_disconnect(jetstream):
         assert await store.claim_users("1", "reader", 10, 30) == []
         # Drop only this client's TCP transport; the writer remains connected.
         nc._transport.close()
-        await jetstream.kv.put("p.1.new", b'{"email":"new","user":"CgNuZXc="}')
+        await jetstream.kv.put("p.1.new", b'{"subscription_uuid":"new","subscription":"CgNuZXc="}')
         async with asyncio.timeout(10):
             while nc.stats["reconnects"] == 0:
                 await asyncio.sleep(0.02)
@@ -740,7 +752,9 @@ async def test_four_python_processes_deliver_every_update_once(jetstream):
     writer = NatsSubscriptionSyncStore(jetstream.kv)
     expected = {f"node{node}-user{user}" for node in range(4) for user in range(250)}
     for node in range(4):
-        await writer.enqueue_users(str(node), [Subscription(subscription_uuid=f"node{node}-user{user}") for user in range(250)])
+        await writer.enqueue_users(
+            str(node), [Subscription(subscription_uuid=f"node{node}-user{user}") for user in range(250)]
+        )
     processes = []
     try:
         for worker in range(4):
@@ -825,7 +839,9 @@ async def test_repeated_sync_compaction_and_idle_keep_resources_bounded(jetstrea
         assert jetstream.nc.stats["out_msgs"] == sent
         assert (await jetstream.js.stream_info(stream)).state.consumer_count == 1
         await store.enqueue_users("1", [Subscription(subscription_uuid="after-idle")])
-        assert [item.user.subscription_uuid for item in await store.claim_users("1", "worker", 100, 30)] == ["after-idle"]
+        assert [item.user.subscription_uuid for item in await store.claim_users("1", "worker", 100, 30)] == [
+            "after-idle"
+        ]
     finally:
         await store.close()
 
@@ -845,6 +861,8 @@ async def test_live_index_survives_consumer_recreation(jetstream):
         async with asyncio.timeout(30):
             while not await store._key_index.keys("p.1."):
                 await asyncio.sleep(0.05)
-        assert [item.user.subscription_uuid for item in await store.claim_users("1", "reader", 10, 30)] == ["after-consumer-loss"]
+        assert [item.user.subscription_uuid for item in await store.claim_users("1", "reader", 10, 30)] == [
+            "after-consumer-loss"
+        ]
     finally:
         await store.close()

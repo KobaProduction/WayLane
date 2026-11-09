@@ -88,7 +88,7 @@ def manager(monkeypatch: pytest.MonkeyPatch) -> NodeManager:
     monkeypatch.setattr("app.node.ensure_bridge_memory", AsyncMock(return_value=None))
     monkeypatch.setattr("app.node.get_bridge_memory", lambda: (None, None, None))
     monkeypatch.setattr("app.node.create_node", lambda **kwargs: _FakePGNode(**kwargs))
-    monkeypatch.setattr("app.node.nats_settings.node_update_users_batch_size", 2)
+    monkeypatch.setattr("app.node.nats_settings.node_update_subscriptions_batch_size", 2)
     manager = NodeManager()
     manager.logger = MagicMock()
     return manager
@@ -237,7 +237,7 @@ async def test_cancelling_full_sync_caller_cancels_the_sync(manager: NodeManager
 
 
 @pytest.mark.asyncio
-async def test_sync_node_users_maps_preemption_to_conflict(monkeypatch: pytest.MonkeyPatch):
+async def test_sync_node_subscriptions_maps_preemption_to_conflict(monkeypatch: pytest.MonkeyPatch):
     operator = NodeOperation(operator_type=OperatorType.API)
     db_node = SimpleNamespace(id=5, status=NodeStatus.connected, core_config_id=None)
     monkeypatch.setattr(operator, "get_validated_node", AsyncMock(return_value=db_node))
@@ -252,7 +252,7 @@ async def test_sync_node_users_maps_preemption_to_conflict(monkeypatch: pytest.M
     monkeypatch.setattr(node_operation_module, "update_node_status", update_status)
 
     with pytest.raises(HTTPException) as exc_info:
-        await operator._sync_node_users_local(object(), 5, True)
+        await operator._sync_node_subscriptions_local(object(), 5, True)
 
     assert exc_info.value.status_code == 409
     # Preemption is not a node fault: the node keeps its status.
@@ -260,7 +260,7 @@ async def test_sync_node_users_maps_preemption_to_conflict(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_sync_node_users_during_a_start_answers_conflict_without_marking_the_node(
+async def test_sync_node_subscriptions_during_a_start_answers_conflict_without_marking_the_node(
     monkeypatch: pytest.MonkeyPatch,
 ):
     from tests.test_node_bridge import close_node, make_node
@@ -277,7 +277,7 @@ async def test_sync_node_users_during_a_start_answers_conflict_without_marking_t
     try:
         async with node.full_sync_fence():  # what a Start (or a batched WireGuard start) holds meanwhile
             with pytest.raises(HTTPException) as exc_info:
-                await operator._sync_node_users_local(object(), 99, True)
+                await operator._sync_node_subscriptions_local(object(), 99, True)
     finally:
         await close_node(node)
 
@@ -287,7 +287,7 @@ async def test_sync_node_users_during_a_start_answers_conflict_without_marking_t
 
 
 @pytest.mark.asyncio
-async def test_sync_node_users_still_marks_the_node_on_a_node_error(monkeypatch: pytest.MonkeyPatch):
+async def test_sync_node_subscriptions_still_marks_the_node_on_a_node_error(monkeypatch: pytest.MonkeyPatch):
     from waylane_node_bridge import NodeAPIError
 
     operator = NodeOperation(operator_type=OperatorType.API)
@@ -303,7 +303,7 @@ async def test_sync_node_users_still_marks_the_node_on_a_node_error(monkeypatch:
     monkeypatch.setattr(node_operation_module, "update_node_status", update_status)
 
     with pytest.raises(HTTPException) as exc_info:
-        await operator._sync_node_users_local(object(), 5, True)
+        await operator._sync_node_subscriptions_local(object(), 5, True)
 
     assert exc_info.value.status_code == 409
     update_status.assert_awaited_once()
@@ -311,7 +311,9 @@ async def test_sync_node_users_still_marks_the_node_on_a_node_error(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_sync_node_users_keeps_503_when_delivery_claims_outlive_the_lease(monkeypatch: pytest.MonkeyPatch):
+async def test_sync_node_subscriptions_keeps_503_when_delivery_claims_outlive_the_lease(
+    monkeypatch: pytest.MonkeyPatch,
+):
     from app.node.bridge import FullSyncConflictError
 
     operator = NodeOperation(operator_type=OperatorType.API)
@@ -328,7 +330,7 @@ async def test_sync_node_users_keeps_503_when_delivery_claims_outlive_the_lease(
     monkeypatch.setattr(node_operation_module, "update_node_status", update_status)
 
     with pytest.raises(HTTPException) as exc_info:
-        await operator._sync_node_users_local(object(), 6, True)
+        await operator._sync_node_subscriptions_local(object(), 6, True)
 
     assert exc_info.value.status_code == 503
     # Nothing reached the node, so its status is left alone.

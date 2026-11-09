@@ -3035,7 +3035,7 @@ core_id?: number | null;
 };
 
 export type SyncNodeParams = {
-flush_users?: boolean;
+flush_subscriptions?: boolean;
 };
 
 export type GetNodeStatsPeriodicParams = {
