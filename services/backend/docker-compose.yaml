@@ -1,33 +1,42 @@
-# Standalone backend using an EXTERNALLY managed PostgreSQL database.
-# Use only one connection contract: SQLALCHEMY_DATABASE_URL includes
-# externally administered username, password, hostname and DB name.
-# No PostgreSQL container or database volume is created by this deployment.
-name: waylane-backend
+# Independently deployed WayLane API using separately managed PostgreSQL.
+# Provide the same PostgreSQL credential reference to the dependency and API.
+# The API NEVER owns a database container or its persistent volume.
 services:
-  backend:
+  waylane-api:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    entrypoint: ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
     environment:
-      SQLALCHEMY_DATABASE_URL: ${SQLALCHEMY_DATABASE_URL:?}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: waylane-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_MIGRATION_HOST: waylane-postgres
+      POSTGRES_AUTO_CREATE_DB: "false"
+      WAYLANE_TLS_SECRET_KEY: ${WAYLANE_TLS_SECRET_KEY:?}
+      WAYLANE_DEVICE_WEBHOOK_SECRET: ${WAYLANE_DEVICE_WEBHOOK_SECRET:?}
       ROLE: all-in-one
-      UVICORN_HOST: backend
+      NATS_ENABLED: "0"
+      UVICORN_HOST: "0.0.0.0"
       UVICORN_PORT: "8000"
       UVICORN_WORKERS: "1"
-      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
-      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
-      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
-      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
-    ports:
-      - "127.0.0.1:8000:8000"
+      OTLP_ENDPOINT: ${OTEL_ENDPOINT:?}
+      OTLP_BEARER_TOKEN: ${OTEL_BEARER_TOKEN:?}
+      OTEL_SERVICE_NAMESPACE: waylane
+      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: development
+    expose:
+      - "8000"
     volumes:
-      - backend_data:/var/lib/pasarguard
+      - backend-data:/var/lib/pasarguard
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://backend:8000/health >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null"]
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 45s
+      start_period: 60s
+
 volumes:
-  backend_data: {}
+  backend-data: {}

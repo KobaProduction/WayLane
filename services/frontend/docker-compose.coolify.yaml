@@ -1,15 +1,16 @@
-# Coolify: Base Directory /services/frontend
-# Docker compose location /docker-compose.coolify.yaml
+# Base Directory /services/frontend; Compose Location /docker-compose.coolify.yaml.
+# Watch Paths: services/frontend/** only; Connect To Predefined Network is
+# required to resolve the private waylane-api DNS name.
 x-watch-path-coolify:
   - "services/frontend/**"
-
 services:
   frontend:
     extends:
       file: docker-compose.yaml
       service: frontend
     environment:
-      SERVICE_FQDN_FRONTEND_8080: /
+      SERVICE_URL_FRONTEND_8080: /
     build:
       args:
         VITE_BASE_API: ${VITE_BASE_API:-/}
+        NGINX_CONFIG: deploy/nginx.bundled.conf

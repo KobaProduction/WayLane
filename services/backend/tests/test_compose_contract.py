@@ -66,7 +66,7 @@ def test_extends_adapters_redeclare_top_level_networks_and_volumes():
         assert env["POSTGRES_DB"] == "${POSTGRES_DATABASE:-waylane}"
 
     backend = read("services/backend/docker-compose.coolify.yaml")
-    assert "backend_data" in backend["volumes"]
+    assert "backend-data" in backend["volumes"]
 
 
 def test_bundled_postgres_dsn_handles_uri_reserved_password(monkeypatch):
@@ -105,15 +105,28 @@ def test_bundled_postgres_dsn_handles_uri_reserved_password(monkeypatch):
 def test_split_apps_do_not_bundle_postgres_or_other_service():
     backend = read("services/backend/docker-compose.yaml")
     frontend = read("services/frontend/docker-compose.yaml")
-    assert set(backend["services"]) == {"backend"}
+    assert set(backend["services"]) == {"waylane-api"}
     assert set(frontend["services"]) == {"frontend"}
-    assert backend["services"]["backend"]["environment"]["SQLALCHEMY_DATABASE_URL"] == "${SQLALCHEMY_DATABASE_URL:?}"
-    assert backend["services"]["backend"]["environment"]["UVICORN_HOST"] == "backend"
-    assert "backend:8000/health" in backend["services"]["backend"]["healthcheck"]["test"][1]
-    assert "POSTGRES_PASSWORD" not in backend["services"]["backend"]["environment"]
+    api = backend["services"]["waylane-api"]
+    environment = api["environment"]
+    assert environment["POSTGRES_PASSWORD"] == "${POSTGRES_PASSWORD:?}"
+    assert environment["POSTGRES_HOST"] == "waylane-postgres"
+    assert environment["POSTGRES_MIGRATION_HOST"] == "waylane-postgres"
+    assert environment["POSTGRES_AUTO_CREATE_DB"] == "false"
+    assert environment["UVICORN_HOST"] == "0.0.0.0"
+    assert environment["NATS_ENABLED"] == "0"
+    assert environment["WAYLANE_TLS_SECRET_KEY"] == "${WAYLANE_TLS_SECRET_KEY:?}"
+    assert environment["WAYLANE_DEVICE_WEBHOOK_SECRET"] == "${WAYLANE_DEVICE_WEBHOOK_SECRET:?}"
+    assert environment["OTLP_ENDPOINT"] == "${OTEL_ENDPOINT:?}"
+    assert environment["OTLP_BEARER_TOKEN"] == "${OTEL_BEARER_TOKEN:?}"
+    assert "SQLALCHEMY_DATABASE_URL" not in environment
+    assert api["entrypoint"] == ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
+    assert "127.0.0.1:8000/health" in api["healthcheck"]["test"][1]
+    assert "ports" not in api and api["expose"] == ["8000"]
+    assert "ports" not in frontend["services"]["frontend"]
     assert frontend["services"]["frontend"]["build"]["args"]["VITE_BASE_API"] == "${VITE_BASE_API:-/}"
+    assert frontend["services"]["frontend"]["build"]["args"]["NGINX_CONFIG"] == "deploy/nginx.bundled.conf"
     assert "environment" not in frontend["services"]["frontend"]
-    assert frontend["services"]["frontend"]["ports"] == ["127.0.0.1:8081:8080"]
 
 
 @pytest.mark.parametrize(
@@ -245,8 +258,9 @@ def test_managed_backend_pooler_is_private_and_shares_only_approved_credentials(
 def test_split_frontend_has_one_coolify_domain_and_never_backend_credentials():
     adapter = read("services/frontend/docker-compose.coolify.yaml")
     env = adapter["services"]["frontend"]["environment"]
-    assert env == {"SERVICE_FQDN_FRONTEND_8080": "/"}
+    assert env == {"SERVICE_URL_FRONTEND_8080": "/"}
     assert adapter["services"]["frontend"]["build"]["args"]["VITE_BASE_API"] == "${VITE_BASE_API:-/}"
+    assert adapter["services"]["frontend"]["build"]["args"]["NGINX_CONFIG"] == "deploy/nginx.bundled.conf"
 
 
 def test_node_is_an_independent_required_authenticated_resource():

@@ -1,0 +1,23 @@
+# Independently owned, persistent WayLane PostgreSQL dependency.
+# This resource MUST NOT watch backend/frontend/Node source changes.
+services:
+  waylane-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-waylane}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  postgres-data: {}

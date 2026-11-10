@@ -1,20 +1,24 @@
-# Coolify: Base Directory /services/backend
-# Docker compose location /docker-compose.coolify.yaml
-# Persist EXACT resource Watch Paths; do not watch unrelated owners.
+# Base Directory /services/backend; Compose Location /docker-compose.coolify.yaml.
+# Watch Paths: services/backend/** only. Use Connect To Predefined Network
+# so this resource can resolve waylane-postgres and frontend can resolve waylane-api.
 x-watch-path-coolify:
   - "services/backend/**"
-
 services:
-  backend:
+  waylane-api:
     extends:
       file: docker-compose.yaml
-      service: backend
+      service: waylane-api
     environment:
-      SQLALCHEMY_DATABASE_URL: ${SQLALCHEMY_DATABASE_URL:?}
-      OTLP_ENDPOINT: ${OTLP_ENDPOINT:-}
-      OTLP_BEARER_TOKEN: ${OTLP_BEARER_TOKEN:-}
-      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-waylane}
-      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: ${OTEL_DEPLOYMENT_ENVIRONMENT_NAME:-development}
-
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME:-waylane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-waylane}
+      POSTGRES_HOST: waylane-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_MIGRATION_HOST: waylane-postgres
+      POSTGRES_AUTO_CREATE_DB: "false"
+      WAYLANE_TLS_SECRET_KEY: ${WAYLANE_TLS_SECRET_KEY:?}
+      WAYLANE_DEVICE_WEBHOOK_SECRET: ${WAYLANE_DEVICE_WEBHOOK_SECRET:?}
+      OTEL_ENDPOINT: ${OTEL_ENDPOINT:?}
+      OTEL_BEARER_TOKEN: ${OTEL_BEARER_TOKEN:?}
 volumes:
-  backend_data: {}
+  backend-data: {}

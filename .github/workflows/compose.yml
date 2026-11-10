@@ -7,6 +7,7 @@ on:
       - docker-compose.coolify.yaml
       - "deploy/compose/**"
       - "deploy/backend-postgres/**"
+      - "deploy/dependencies/**"
       - "deploy/external/**"
       - "services/frontend/deploy/nginx.bundled.conf"
       - "services/backend/docker-compose*.yaml"
@@ -20,6 +21,7 @@ on:
       - docker-compose.coolify.yaml
       - "deploy/compose/**"
       - "deploy/backend-postgres/**"
+      - "deploy/dependencies/**"
       - "deploy/external/**"
       - "services/frontend/deploy/nginx.bundled.conf"
       - "services/backend/docker-compose*.yaml"
@@ -42,6 +44,10 @@ jobs:
       DEPLOYMENT_ENVIRONMENT: development
       SQLALCHEMY_DATABASE_URL: postgresql+asyncpg://ci_waylane:synthetic-compose-ci-only@db.invalid:5432/waylane_test
       API_KEY: 9c509f4c-d643-4f16-83e7-b1615a9ee2da
+      WAYLANE_TLS_SECRET_KEY: synthetic-fernet-CI-only
+      WAYLANE_DEVICE_WEBHOOK_SECRET: synthetic-ci-webhook-key-not-production-32chars
+      OTEL_ENDPOINT: https://otel.example.invalid
+      OTEL_BEARER_TOKEN: synthetic-ci-otel-token
     steps:
       - uses: actions/checkout@v4
       - name: Verify Docker Compose files and extensions
@@ -50,6 +56,8 @@ jobs:
           docker compose version
           docker compose -f docker-compose.yaml config --quiet
           docker compose -f docker-compose.coolify.yaml config --quiet
+          docker compose -f deploy/dependencies/docker-compose.yaml config --quiet
+          docker compose -f deploy/dependencies/docker-compose.coolify.yaml config --quiet
           docker compose -f deploy/backend-postgres/docker-compose.yaml config --quiet
           docker compose -f deploy/backend-postgres/docker-compose.coolify.yaml config --quiet
           docker compose -f deploy/external/docker-compose.yaml config --quiet
@@ -83,8 +91,12 @@ jobs:
             echo "Missing node API_KEY was accepted" >&2
             exit 1
           fi
-          if env -u SQLALCHEMY_DATABASE_URL docker compose -f services/backend/docker-compose.yaml config --quiet >/dev/null 2>&1; then
-            echo "Missing external database DSN was accepted" >&2
+          if env -u POSTGRES_PASSWORD docker compose -f services/backend/docker-compose.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing independently shared PostgreSQL password was accepted" >&2
+            exit 1
+          fi
+          if env -u WAYLANE_TLS_SECRET_KEY docker compose -f services/backend/docker-compose.yaml config --quiet >/dev/null 2>&1; then
+            echo "Missing WayLane TLS encryption secret was accepted" >&2
             exit 1
           fi
       - name: Verify bundled WayLane Nginx proxy syntax
