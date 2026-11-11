@@ -1,5 +1,6 @@
 # Base Directory /deploy/dependencies; Compose Location /docker-compose.coolify.yaml.
-# Set Watch Paths to deploy/dependencies/** ONLY in the Coolify resource UI.
+# Intended Watch Paths: deploy/dependencies/**. This x-* key is documentation
+# only; Public Git sources may require manual-only deployment.
 x-watch-path-coolify:
   - "deploy/dependencies/**"
 services:

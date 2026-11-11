@@ -1,6 +1,6 @@
 # Base Directory /services/frontend; Compose Location /docker-compose.coolify.yaml.
-# Watch Paths: services/frontend/** only; Connect To Predefined Network is
-# required to resolve the private waylane-api DNS name.
+# Intended Watch Paths: services/frontend/**; Public Git may be manual-only.
+# Connect To Predefined Network to resolve the private waylane-api DNS name.
 x-watch-path-coolify:
   - "services/frontend/**"
 services:

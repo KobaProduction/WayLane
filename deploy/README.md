@@ -6,10 +6,23 @@ resources. **Do not** use the all-in-one root Compose or legacy
 
 | Resource | Base directory | Compose location | Watch Paths |
 | --- | --- | --- | --- |
-| PostgreSQL dependencies | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | `deploy/dependencies/**` |
+| **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | `deploy/dependencies/**` |
 | Backend | `/services/backend` | `/docker-compose.coolify.yaml` | `services/backend/**` |
 | Frontend | `/services/frontend` | `/docker-compose.coolify.yaml` | `services/frontend/**` |
 | VPN Node | `/services/node` | `/docker-compose.node.discovery.coolify.yaml` (or Classic) | `services/node/**` |
+
+The **Coolify resource** is named `WayLane / Dependencies` even while
+PostgreSQL is its only Compose service. This follows the shared-dependency
+deployment ownership pattern; do not name the resource after a database
+image. The inner Docker service remains `waylane-postgres` for private DNS.
+
+**Watch Paths shown above are intended scopes, not automatically activated
+by the `x-watch-path-coolify` documentation key.** A Coolify Public Git
+source may not provide provider webhook Watch Paths. In that situation set
+**Manual deployments only** on every affected resource and update each one
+explicitly. Enable Git provider automatic deploys only after verifying
+the GitHub App can access this repository, saving the actual Watch Paths
+in each resource and testing independent deployments.
 
 Use the same approved Git ref for the backend/frontend/dependency resources.
 A new Node requires a **panel-issued** invitation or Classic token, not a
