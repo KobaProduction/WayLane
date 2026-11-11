@@ -18,8 +18,12 @@ these three running resources.
   to SigNoz as `WayLane/frontend`; no Nginx log exporter or collector is used.
   `SERVICE_FQDN_FRONTEND_8080` is **not** an operator input or required
   second public-domain directive.
-- **WayLane Node** — separate future enrollment and VPN-core pilot; no
-  production traffic accepted by the application healthchecks alone.
+- **WayLane / Node** — separate, manual-only future deployment at
+  `/deploy/node/discovery` (or `/deploy/node/classic`). Exactly two outer
+  Compose services: one-shot bootstrap and stable Agent with its own private
+  rootless Docker. The Agent starts a replaceable inner Node, which owns
+  Panel WSS and VPN Cores. No additional public management domain, system
+  Docker socket or production traffic acceptance from source checks.
 
 Frontend and Backend deployments are currently manual. Automated Git
 deployments, if deliberately activated, can use commits as the trigger; path
@@ -28,5 +32,5 @@ Dependencies.
 
 Production releases, migration, node runtime and data recovery retain their
 own acceptance boundaries. See
-[Node runtime](../../services/node/agent/README.md) and
+[Node deployment](../../deploy/node/README.md) and
 [Compose alternatives](../../deploy/compose/README.md).

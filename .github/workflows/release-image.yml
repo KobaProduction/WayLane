@@ -19,6 +19,7 @@ jobs:
             backend-v*) echo "component=backend" >> "$GITHUB_OUTPUT";;
             frontend-v*) echo "component=frontend" >> "$GITHUB_OUTPUT";;
             node-v*) echo "component=node" >> "$GITHUB_OUTPUT";;
+            agent-v*) echo "component=agent" >> "$GITHUB_OUTPUT";;
             *) echo "Unsupported component release tag" >&2; exit 1;;
           esac
   verify:
@@ -37,13 +38,18 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         if: needs.detect.outputs.component == 'backend'
       - uses: actions/setup-go@v5
-        if: needs.detect.outputs.component == 'node'
+        if: needs.detect.outputs.component == 'node' || needs.detect.outputs.component == 'agent'
         with:
-          go-version-file: services/node/go.mod
+          go-version: "1.27.1"
       - name: Component verification
         env:
           COMPONENT: ${{ needs.detect.outputs.component }}
-        run: cd "services/$COMPONENT" && ./scripts/verify.sh
+        run: |
+          if [ "$COMPONENT" = "agent" ]; then
+            cd "services/agent" && ./verify.sh
+          else
+            cd "services/$COMPONENT" && ./scripts/verify.sh
+          fi
   publish:
     needs: [detect, verify]
     runs-on: ubuntu-latest
@@ -63,9 +69,19 @@ jobs:
             type=ref,event=tag
             type=sha,format=long,prefix=sha-
       - uses: docker/build-push-action@v6
+        if: needs.detect.outputs.component == 'backend' || needs.detect.outputs.component == 'frontend'
         with:
           context: ./services/${{ needs.detect.outputs.component }}
           file: ./services/${{ needs.detect.outputs.component }}/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - uses: docker/build-push-action@v6
+        if: needs.detect.outputs.component == 'node' || needs.detect.outputs.component == 'agent'
+        with:
+          context: .
+          file: ./services/${{ needs.detect.outputs.component }}/${{ needs.detect.outputs.component }}.Dockerfile
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}

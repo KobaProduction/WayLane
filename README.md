@@ -9,13 +9,17 @@ GitHub source for all three services is KobaProduction/WayLane.
 | --- | --- | --- |
 | services/backend/ | Python 3.14, FastAPI, scheduler, node RPC | independent Coolify backend |
 | services/frontend/ | React/Bun, static Nginx | independent Coolify frontend |
-| services/node/ | Legacy Go node (Xray, WireGuard, opt-in AWG 3.1) + separate WayLane Agent prototype | independently deployed; experimental agent owns rootless Docker and one Xray DEV child |
+| services/agent/ | Go supervisor, private rootless Docker, immutable Node upgrades | stable outer Agent; separate Node image lifecycle |
+| services/node/ | Go WSS/Protobuf Node, child Xray, gated AWG 3.1 | replaceable internal Node (owned by Agent) |
+| deploy/node/ | Classic/Discovery Git-backed Compose | independent, manual-only Node installation |
 | services/external/ | managed PostgreSQL, ingress, API balancer, OTLP | separately owned infrastructure |
 | shared/contracts/ | narrowly shared wire DTOs | docs / protocol checks |
 
 Each service keeps a native Dockerfile, dependency lock and tests.
-Root CI and planned Coolify resources watch only affected directories.
-DEV builds from source in Coolify; PROD pulls pinned GHCR release images.
+Root CI validates the affected service owners independently. The active
+Coolify Backend/Frontend resources deploy manually; Dependencies and the
+unaccepted Node installer must not redeploy on ordinary source pushes.
+DEV builds from source in Coolify; PROD releases use pinned image digests.
 
 ## Git validation
 
@@ -70,14 +74,20 @@ For Intens VPN, deployment definitions live in
 The backend and frontend build inputs belong to this monorepo; the customer
 Web App and VPN Core are separate services.
 
-## WayLane Node Agent (opt-in, experimental)
+## WayLane Agent → Node → VPN Cores
 
-The new node uses one Compose resource with exactly two services:
-one-shot privileged `bootstrap` and autonomous non-privileged `agent`.
-The agent owns its private embedded rootless Docker daemon and controls
-a single Xray DEV child. Its sole panel control transport is outbound WSS
-with binary Protobuf frames; source implementation exists, but real TLS/WSS
-host acceptance and public VPN traffic remain unverified. Other engines and
-networking/privilege hardening remain future work.
-The legacy Go node is preserved independently until migration acceptance.
-See [services/node/agent/README.md](services/node/agent/README.md).
+The Git-backed Node installer contains exactly two **outer** Compose services:
+a one-shot privileged `bootstrap` and a stable non-root `agent`. The Agent
+owns the single embedded rootless Docker engine and an independently updatable
+Node container. Only the Node communicates with the Panel via one outbound
+binary-Protobuf WSS session, and only the Node owns child VPN Cores.
+
+Xray source-level lifecycle support exists; AmneziaWG 3.1 is an explicitly
+disabled experimental profile until real TUN/UDP handshakes and routing are
+validated. Neither source tests nor running containers establish production
+VPN readiness. The deprecated combined PasarGuard Node RPC runtime is removed
+from this integration; preserved upstream history remains in Git.
+
+Installation source: [deploy/node/README.md](deploy/node/README.md).
+Architecture: [Agent](services/agent/README.md) and
+[replaceable Node](services/node/README.md).

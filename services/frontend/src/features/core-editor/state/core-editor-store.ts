@@ -6,6 +6,7 @@ import type { CoreResponse } from '@/service/api'
 import { apiCoreTypeToKind } from '../kit/core-kind'
 import { createNewXrayProfile, importRawToProfile, profileToPersistedConfig } from '../kit/xray-adapter'
 import { createNewWireGuardDraft, draftToPersistedConfig, wireGuardConfigToDraft } from '../kit/wireguard-adapter'
+import { applyAmneziaPreset } from '../kit/amneziawg-settings'
 
 export type XrayCoreSection = 'bindings' | 'inbounds' | 'outbounds' | 'routing' | 'balancers' | 'dns' | 'api' | 'advanced'
 
@@ -250,7 +251,7 @@ export const useCoreEditorStore = create<CoreEditorStoreState>((set, get) => ({
 
   initNew: (kind, name = '') => {
     if (kind === 'wg') {
-      const draft = createNewWireGuardDraft()
+      const draft = applyAmneziaPreset(createNewWireGuardDraft())
       set({
         hydrated: true,
         isNew: true,
@@ -380,7 +381,7 @@ export const useCoreEditorStore = create<CoreEditorStoreState>((set, get) => ({
     const cur = get().kind
     if (nextKind === cur) return
     if (nextKind === 'wg') {
-      const draft = createNewWireGuardDraft()
+      const draft = applyAmneziaPreset(createNewWireGuardDraft())
       set({
         kind: 'wg',
         fallbacksInboundTags: [],

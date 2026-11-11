@@ -101,10 +101,14 @@ def test_frontend_same_origin_api_and_node_wss_proxy():
     assert "reportChunkLoadFailure()" in recovery
 
 
-def test_existing_node_remains_independently_deployed():
-    node = compose("services/node/docker-compose.node.discovery.coolify.yaml")
-    assert set(node["services"]) == {"bootstrap", "agent"}
-    assert "DISCOVERY_TOKEN" in node["services"]["agent"]["environment"]
-    assert "services/node/**" in node["x-watch-path-coolify"]
-    for unrelated in ("services/frontend/**", "services/backend/**", "deploy/dependencies/**"):
-        assert unrelated not in node["x-watch-path-coolify"]
+def test_node_resources_remain_separate_from_applications():
+    for mode, credential in (("classic", "NODE_TOKEN"), ("discovery", "DISCOVERY_TOKEN")):
+        node = compose(f"deploy/node/{mode}/docker-compose.coolify.yaml")
+        assert set(node["services"]) == {"bootstrap", "agent"}
+        assert "x-watch-path-coolify" not in node
+        assert node["services"]["agent"]["environment"][credential] == f"${{{credential}:?}}"
+        assert node["services"]["agent"]["environment"]["DEV_ALLOW_HTTP"] == "false"
+        assert node["services"]["agent"]["environment"]["AWG_EXPERIMENTAL_DEV"] == "false"
+        assert all("ports" not in service for service in node["services"].values())
+        for unrelated in ("frontend", "waylane-api", "waylane-postgres"):
+            assert unrelated not in node["services"]

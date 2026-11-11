@@ -9,7 +9,7 @@ resources. **Do not** use the all-in-one root Compose or legacy
 | **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | **Manual only**; PostgreSQL is not redeployed for app changes |
 | **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
 | **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
-| VPN Node (future pilot) | `/services/node` | `/docker-compose.node.discovery.coolify.yaml` (or Classic) | Manual until runtime acceptance |
+| **WayLane / Node** (future isolated pilot) | `/deploy/node/discovery` (or `/deploy/node/classic`) | `/docker-compose.coolify.yaml` | **Manual only** until identity, rootless Docker and VPN traffic acceptance |
 
 The resource named **WayLane / Dependencies** contains the single PostgreSQL
 service `waylane-postgres`; it is not a second application runtime.
@@ -24,7 +24,14 @@ Coolify's actual deployment configuration.
 Use the same approved Git ref for the backend/frontend/dependency resources.
 A new Node requires a **panel-issued** invitation or Classic token, not a
 randomly fabricated registration secret. Node runs a separate Compose
-resource and does not share the API database volume.
+resource and does not share the API database volume. The **stable Agent**
+owns rootless Docker and a replaceable internal Node container, which in
+turn manages its sibling VPN Cores. The outer Compose has only bootstrap
+and Agent; use the standalone [Node deployment guide](node/README.md).
+Do not deploy the Node until the panel has an authorized administrator,
+approved enrollment, independent named volumes and host-level runtime
+acceptance. Never expose or assume working VPN UDP traffic from health
+checks or source builds.
 
 ## Dependency isolation
 

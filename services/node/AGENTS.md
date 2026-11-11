@@ -1,36 +1,28 @@
-# WayLane Node — agent routing
+# WayLane autonomous Node
 
-Canonical source: https://github.com/KobaProduction/WayLane/tree/main/services/node
-The deleted standalone node repository is not an active source or release authority.
-Read root `AGENTS.md` and the relevant AI Agent Workflow skills.
+The only Node implementation is this Go module, built from the module root.
+Read root `AGENTS.md`, `services/node/README.md`,
+`deploy/node/README.md` and relevant AI Agent Workflow skills.
 
-## Two independent node lifecycles
+Node installs via `deploy/node/{classic,discovery}/` with exactly two
+outer services: one-shot privileged bootstrap, non-root steady-state
+agent controller that owns its private rootless Docker and VPN cores.
+The control plane is **one outbound authenticated WSS connection** with
+binary Protobuf. No secondary management transport, host Docker socket,
+independent systemd service or extra Compose rootless sidecar.
 
-- Legacy `cmd/node/`, `controller/`, `backend/xray/`, `backend/wireguard/`:
-  one existing PasarGuard-compatible node process, host networking and
-  NET_ADMIN requirements; `DEPLOYMENT.md` owns this runtime's acceptance.
-  Kernel WireGuard remains the default; AmneziaWG 3.1 is opt-in and requires
-  separate real-traffic verification (Issue #7).
-- New `bootstrap/`, `agent/`, `docker-compose.node.yaml`, and
-  `docker-compose.node.{classic,discovery}*.yaml`: autonomous WayLane Node. **Read the complete `agent/README.md` as its authoritative
-  lifecycle and topology contract before changing any of these files.**
-  Exactly two Compose services, one-shot privileged bootstrap and autonomous
-  non-privileged Go agent supervising its private embedded rootless Docker.
-  No host systemd, independent rootless-engine Compose service, or host Docker
-  socket. The panel communicates only with the internal node controller. Single Xray DEV child is implemented, but full legacy user/stats/routing
-  parity and additional engines are deferred and not accepted.
+`scripts/verify.sh` owns the Go source gate. The Go dependencies are
+isolated to the Node's WSS/Protobuf runtime. Validate both generic and
+Coolify Compose and the host runtime before declaring deployment ready.
+Experimental AWG 3.1 is gated by AWG_EXPERIMENTAL_DEV=true,
+DEV_ALLOW_HTTP=true, a Docker Desktop/loopback Panel origin, linux/amd64 and
+/dev/net/tun. Coolify explicitly disables the DEV flags. Backend independently
+stores desired AWG generations; the WSS endpoint handles both core IDs.
+Do not claim production traffic support from source tests alone.
 
-`common/service.proto` is now a WayLane-native RPC contract, paired with the bundled Python bridge;
-`scripts/verify.sh` runs source gates. Preserve provenance/licenses in
-`UPSTREAM.md` and `LICENSING.md`. No production node migration without
-explicit acceptance.
+## Subscription identity
 
-## Subscription account identity
-
-`common/service.proto` is WayLane-owned and defines `Subscription` with canonical
-`subscription_uuid` (UUIDv4), including the sync, removal and statistics contracts.
-Its Python bridge and Go bindings are regenerated together. Only the Xray adapter
-maps the UUID to the external `Account.email` field as required by Xray; it is not
-a contact email or a subscription username. No WayLane product `User`, numeric
-subscription ID or subscriber `username` may be reintroduced. Node IDs remain
-separate machine identifiers.
+The Node and Panel use a canonical UUIDv4 `subscription_uuid` for subscription
+identity. The Xray adapter may populate its third-party Account.email field,
+but that field is never a WayLane user email or alternate numeric identifier.
+Do not restore the removed legacy Node RPC or numeric user identifiers.

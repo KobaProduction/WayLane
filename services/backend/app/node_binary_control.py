@@ -18,7 +18,7 @@ from sqlalchemy import case, select, update
 
 from app.controlpb import control_pb2 as pb
 from app.db.base import SessionLocal, begin_immediate_if_sqlite
-from app.db.models import node_agent_registrations, node_agent_xray_desired
+from app.db.models import node_agent_registrations, node_agent_xray_desired, node_agent_awg_desired
 
 PROTOCOL_VERSION = 1
 MAX_BINARY_FRAME = 2_000_000
@@ -94,6 +94,8 @@ class AgentBinarySession:
         self._secret = secret
         self._started = False
         self._last_sent_generation = 0
+        self._last_sent_awg_generation = 0
+        self._session_capabilities: set[str] = set()
         self._last_seen_ids: set[str] = set()
         self.outgoing: asyncio.Queue[pb.Envelope | None] = asyncio.Queue(maxsize=8)
         self.stopped = asyncio.Event()
@@ -125,6 +127,9 @@ class AgentBinarySession:
             from app.routers.node_registry import Heartbeat
 
             body = Heartbeat(node_uuid=uuid.UUID(self.node_uuid), **payload)
+            # Desired AWG updates are gated by CURRENT-session telemetry, not
+            # a possibly stale capability from a previous Node deployment.
+            self._session_capabilities = set(body.capabilities)
             changes = {
                 "agent_version": body.node_version,
                 "capabilities": body.capabilities,
@@ -152,16 +157,17 @@ class AgentBinarySession:
                 )
                 await db.commit()
         elif message.kind == "result":
-            if message.core_id != CORE_ID or message.generation <= 0:
+            if message.core_id not in (CORE_ID, "awg/default") or message.generation <= 0:
                 raise ValueError("unknown core result")
             if message.status not in {"running", "stopped", "error", "requires_restart"}:
                 raise ValueError("invalid core status")
+            desired_table = node_agent_awg_desired if message.core_id == "awg/default" else node_agent_xray_desired
             async with SessionLocal() as db:
                 await begin_immediate_if_sqlite(db)
                 row = (
                     (
                         await db.execute(
-                            select(node_agent_xray_desired).where(node_agent_xray_desired.c.node_uuid == self.node_uuid)
+                            select(desired_table).where(desired_table.c.node_uuid == self.node_uuid)
                         )
                     )
                     .mappings()
@@ -169,14 +175,15 @@ class AgentBinarySession:
                 )
                 if not row or row["generation"] != message.generation:
                     await self.outgoing.put(
-                        new_message("ack", self.node_uuid, generation=message.generation, status="stale")
+                        new_message("ack", self.node_uuid, generation=message.generation,
+                                    core_id=message.core_id, status="stale")
                     )
                     return
                 await db.execute(
-                    update(node_agent_xray_desired)
+                    update(desired_table)
                     .where(
-                        node_agent_xray_desired.c.node_uuid == self.node_uuid,
-                        node_agent_xray_desired.c.generation == message.generation,
+                        desired_table.c.node_uuid == self.node_uuid,
+                        desired_table.c.generation == message.generation,
                     )
                     .values(
                         applied_generation=message.generation
@@ -189,7 +196,8 @@ class AgentBinarySession:
                 )
                 await db.commit()
             await self.outgoing.put(
-                new_message("ack", self.node_uuid, generation=message.generation, status="accepted")
+                new_message("ack", self.node_uuid, generation=message.generation,
+                            core_id=message.core_id, status="accepted")
             )
         elif message.kind == "ping":
             await self.outgoing.put(new_message("pong", self.node_uuid))
@@ -203,40 +211,56 @@ class AgentBinarySession:
             return
         await check_agent(self.node_uuid, self._secret)
         async with SessionLocal() as db:
-            entry = (
-                (
-                    await db.execute(
-                        select(node_agent_xray_desired).where(node_agent_xray_desired.c.node_uuid == self.node_uuid)
-                    )
-                )
-                .mappings()
-                .one_or_none()
+            node_capabilities = (await db.execute(select(
+                node_agent_registrations.c.capabilities,
+            ).where(node_agent_registrations.c.node_uuid == self.node_uuid))).scalar_one_or_none() or []
+            xray = (
+                (await db.execute(select(node_agent_xray_desired).where(
+                    node_agent_xray_desired.c.node_uuid == self.node_uuid
+                ))).mappings().one_or_none()
             )
-            if not entry or entry["generation"] <= self._last_sent_generation:
-                return
-            from app.routers.node_xray_resources import agent_tls_material
+            if xray and xray["generation"] > self._last_sent_generation:
+                from app.routers.node_xray_resources import agent_tls_material
 
-            desired = {
-                "configured": True,
-                "generation": entry["generation"],
-                "applied_generation": entry["applied_generation"],
-                "action": entry["action"],
-                "image_version": entry["image_version"],
-                "region": entry["region"] or "",
-                "config": entry["config"],
-                "tls_certificates": await agent_tls_material(db, self.node_uuid),
-            }
-            self._last_sent_generation = int(entry["generation"])
-            await self.outgoing.put(
-                new_message(
-                    "desired",
-                    self.node_uuid,
-                    core_id=CORE_ID,
-                    generation=int(entry["generation"]),
-                    operation=entry["action"],
-                    payload=desired,
-                )
+                payload = {
+                    "configured": True,
+                    "generation": xray["generation"],
+                    "applied_generation": xray["applied_generation"],
+                    "action": xray["action"],
+                    "image_version": xray["image_version"],
+                    "region": xray["region"] or "",
+                    "config": xray["config"],
+                    "tls_certificates": await agent_tls_material(db, self.node_uuid),
+                }
+                await self.outgoing.put(new_message(
+                    "desired", self.node_uuid, core_id=CORE_ID,
+                    generation=int(xray["generation"]), operation=xray["action"], payload=payload,
+                ))
+                self._last_sent_generation = int(xray["generation"])
+
+            # AWG is independent from Xray and sent only to an approved Node
+            # that has explicitly advertised an accepted AWG capability.
+            if ("awg.protobuf.binary" not in node_capabilities or
+                    "awg.protobuf.binary" not in self._session_capabilities):
+                return
+            awg = (
+                (await db.execute(select(node_agent_awg_desired).where(
+                    node_agent_awg_desired.c.node_uuid == self.node_uuid
+                ))).mappings().one_or_none()
             )
+            if not awg or awg["generation"] <= self._last_sent_awg_generation:
+                return
+            await self.outgoing.put(new_message(
+                "desired", self.node_uuid, core_id="awg/default",
+                generation=int(awg["generation"]), operation=awg["action"],
+                payload={
+                    "configured": True,
+                    "generation": awg["generation"],
+                    "action": awg["action"],
+                    "config": awg["config"],
+                },
+            ))
+            self._last_sent_awg_generation = int(awg["generation"])
 
     async def publisher(self) -> None:
         """Send desired changes and bounded protobuf heartbeats (no text ping)."""

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { $fetch } from '@/service/http'
 import { useAdmin } from '@/hooks/use-admin'
 import { hasPermission } from '@/utils/rbac'
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 
 type AgentTLSBinding = {
   inbound_tag: string
@@ -82,7 +83,7 @@ type Registration = {
   machine_metrics: NodeRuntimeMetrics | null
 }
 
-/** Modern WayLane Node registry; legacy PasarGuard node cards remain separate. */
+/** Autonomous WayLane Node registration and supported core controls. */
 export default function NodeDiscoveryPanel() {
   const { admin } = useAdmin()
   const canRead = hasPermission(admin, 'nodes', 'read')
@@ -92,8 +93,9 @@ export default function NodeDiscoveryPanel() {
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [label, setLabel] = useState('')
   const [directCredentials, setDirectCredentials] = useState<{ node_uuid: string; node_token: string } | null>(null)
-  const [registrationMode, setRegistrationMode] = useState<'classic' | 'discovery'>('classic')
-  const [autoApprove, setAutoApprove] = useState(true)
+  const [registrationMode, setRegistrationMode] = useState<'classic' | 'discovery'>('discovery')
+  const registrationRef = useRef<HTMLDivElement>(null)
+  const [autoApprove, setAutoApprove] = useState(false)
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -116,6 +118,20 @@ export default function NodeDiscoveryPanel() {
 
 
 
+
+  // The Nodes page header and command palette use this event. The old node
+  // list/dialog no longer mounts here, so bring the actual registration form
+  // into view and keyboard focus instead of silently doing nothing.
+  useEffect(() => {
+    if (!canCreate || !canRead) return
+    const openRegistration = () => {
+      setRegistrationMode('discovery')
+      registrationRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      registrationRef.current?.focus()
+    }
+    window.addEventListener('openNodeDialog', openRegistration)
+    return () => window.removeEventListener('openNodeDialog', openRegistration)
+  }, [canCreate, canRead])
 
   const refresh = async () => {
     try {
@@ -342,11 +358,11 @@ export default function NodeDiscoveryPanel() {
         <CardDescription>
           Нода устанавливается на сервер и включает bootstrap, управляющий процесс и отдельные VPN-ядра.
           Выберите способ регистрации: управляемая панелью нода или самостоятельное подключение через Discovery.
-          Уже работающие legacy-ноды и клиентский трафик не переключаются автоматически.
+          Клиентский трафик и другие ноды не переключаются автоматически.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-col gap-3 rounded-md border p-3">
+        <div ref={registrationRef} tabIndex={-1} aria-label="Регистрация новой ноды" className="flex flex-col gap-3 rounded-md border p-3 focus-visible:outline-2 focus-visible:outline-primary">
           <p className="text-sm font-medium">Способ подключения новой ноды</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="Способ регистрации ноды">
             <Button type="button" variant={registrationMode === 'classic' ? 'default' : 'outline'}
@@ -362,7 +378,7 @@ export default function NodeDiscoveryPanel() {
             <div className="space-y-2">
               <p className="text-muted-foreground text-xs">
                 Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN. После подключения нода автоматически передаст hostname сервера — отдельное поле имени не требуется.
-                Используйте docker-compose.node.classic.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
+                В Coolify используйте /deploy/node/classic и /docker-compose.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
               </p>
               {canCreate && (
                 <Button type="button" disabled={loading} onClick={() => void createDirect()}>
@@ -388,8 +404,8 @@ export default function NodeDiscoveryPanel() {
           ) : (
             <div className="space-y-2">
               <p className="text-muted-foreground text-xs">
-                Нода сама регистрируется по Discovery-токену. Используйте docker-compose.node.discovery.coolify.yaml.
-                Новые ноды можно подтверждать автоматически или вручную.
+                Нода сама регистрируется по Discovery-токену. В Coolify используйте /deploy/node/discovery и /docker-compose.coolify.yaml.
+                По умолчанию новые ноды требуют ручного подтверждения. Автоматическое одобрение повышает риск при утечке приглашения.
               </p>
               {canCreate && (
                 <div className="flex flex-col gap-2 sm:flex-row">
@@ -404,7 +420,7 @@ export default function NodeDiscoveryPanel() {
               {canCreate && (
                 <label className="flex items-start gap-2 text-sm">
                   <Checkbox checked={autoApprove} onCheckedChange={checked => setAutoApprove(checked === true)} />
-                  <span>Подтверждать новые ноды автоматически (это не разрешает управление VPN-ядрами)</span>
+                  <span>Автоматически одобрять ноды по этому приглашению (одобренные ноды могут получать команды управления ядрами)</span>
                 </label>
               )}
               {token && (
@@ -464,7 +480,11 @@ export default function NodeDiscoveryPanel() {
                 </div>
                 <p className="text-muted-foreground break-all font-mono text-xs">{node.node_uuid}</p>
                 <p className="text-muted-foreground break-words text-xs">
-                  Управляющий процесс {node.node_version} · {node.last_seen_at ? 'Был на связи' : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
+                  Управляющий процесс {node.node_version} · {node.last_seen_at ? `Последнее взаимодействие: ${new Date(node.last_seen_at).toLocaleString()}` : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  Заявленные возможности: {node.capabilities?.length ? node.capabilities.join(', ') : 'не объявлены'}.
+                  {' '}AmneziaWG 3.1 и обычный WireGuard: запуск на автономной Node пока не реализован.
                 </p>
                 {node.machine_metrics && (
                   <p className="text-muted-foreground break-words text-xs">
@@ -486,8 +506,9 @@ export default function NodeDiscoveryPanel() {
                       void refreshTLSBindings(node.node_uuid)
                       void $fetch<TLSPresetSummary[]>('/api/tls-presets')
                         .then(setTlsPresetChoices).catch(() => setTlsPresetChoices([]))
-                    }}>Xray: управление</Button>
+                    }} disabled={!node.capabilities?.includes('xray.protobuf.binary')}>Xray: управление (DEV)</Button>
                     <span className="text-muted-foreground text-xs">
+                      {!node.capabilities?.includes('xray.protobuf.binary') ? 'Нода ещё не объявила поддержку Xray · ' : ''}
                       {xrayStates[node.node_uuid]?.configured
                         ? `Версия: ${xrayStates[node.node_uuid].image_version} · ${xrayStates[node.node_uuid].runtime_status} · поколение ${xrayStates[node.node_uuid].applied_generation}/${xrayStates[node.node_uuid].generation}`
                         : 'Xray не настроен'}
@@ -516,8 +537,23 @@ export default function NodeDiscoveryPanel() {
                           onClick={() => void changeXray(node.node_uuid, 'reconfigure')}>Применить конфигурацию без рестарта Xray</Button>
                         <Button variant="outline" size="sm" disabled={xrayBusy}
                           onClick={() => void changeXray(node.node_uuid, 'restart')}>Перезапустить</Button>
-                        <Button variant="destructive" size="sm" disabled={xrayBusy}
-                          onClick={() => void changeXray(node.node_uuid, 'stop')}>Остановить</Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="destructive" size="sm" disabled={xrayBusy || !xrayStates[node.node_uuid]?.configured}>Остановить</Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Остановить Xray на этой ноде?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                VPN-подключения через это ядро будут прерваны. Действие не затрагивает другие ноды и ядра.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Отмена</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => void changeXray(node.node_uuid, 'stop')}>Остановить Xray</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                         <Button variant="outline" size="sm" disabled={xrayBusy}
                           onClick={() => void readXray(node.node_uuid)}>Статус</Button>
                       </div>

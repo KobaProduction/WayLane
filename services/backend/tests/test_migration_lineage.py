@@ -71,7 +71,12 @@ def test_revision_map_cli_keeps_product_user_unavailable():
     assert not hasattr(models, "User")
 
     backend_dir = Path(__file__).resolve().parents[1]
-    for args in (("heads",), ("history", "-r", "-3:head")):
+    history = ScriptDirectory.from_config(Config("alembic.ini"))
+    merged_head = history.get_current_head()
+    assert set(history.get_revision(merged_head).down_revision) == {
+        "d9f2e8714c33", "a7e36d1b4f90"
+    }, "The AWG and UUID-only histories must join without rewriting either revision"
+    for args in (("heads",), ("history",)):
         result = subprocess.run(
             [sys.executable, "-m", "alembic", *args],
             cwd=backend_dir,
@@ -81,7 +86,10 @@ def test_revision_map_cli_keeps_product_user_unavailable():
             check=False,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "d9f2e8714c33" in result.stdout
+        assert merged_head in result.stdout
+        if args[0] == "history":
+            assert "d9f2e8714c33" in result.stdout
+            assert "a7e36d1b4f90" in result.stdout
 
     # Neither command may install a permanent compatibility alias.
     assert "User" not in vars(models)
