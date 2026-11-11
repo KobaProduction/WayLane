@@ -3,6 +3,7 @@
 These checks verify SOURCE only; actual Coolify parsing, Shared variable
 resolution, network membership and live resource isolation require acceptance.
 """
+
 from pathlib import Path
 
 import yaml
@@ -31,28 +32,24 @@ def test_postgres_is_only_stable_dependency_and_never_host_published():
     assert set(base["volumes"]) == set(adapter["volumes"]) == {"postgres-data"}
     assert "healthcheck" in service
     assert adapter["services"]["waylane-postgres"]["extends"] == {
-        "file": "docker-compose.yaml", "service": "waylane-postgres"
+        "file": "docker-compose.yaml",
+        "service": "waylane-postgres",
     }
     assert adapter["services"]["waylane-postgres"]["environment"] == service["environment"]
-    assert adapter["x-watch-path-coolify"] == ["deploy/dependencies/**"]
+    assert "x-watch-path-coolify" not in adapter
     assert not any("valkey" in name.lower() for name in base["services"])
 
 
-def test_backend_frontend_and_dependencies_are_independent_watch_scopes():
+def test_applications_are_independent_without_parser_watch_hints():
     backend = compose("services/backend/docker-compose.coolify.yaml")
     frontend = compose("services/frontend/docker-compose.coolify.yaml")
     dependencies = compose("deploy/dependencies/docker-compose.coolify.yaml")
-    paths = [set(d["x-watch-path-coolify"]) for d in (dependencies, backend, frontend)]
-    assert paths == [
-        {"deploy/dependencies/**"},
-        {"services/backend/**"},
-        {"services/frontend/**"},
-    ]
-    assert not any(a & b for i, a in enumerate(paths) for b in paths[i+1:])
+    # Auto-deploy strategy is owned by Coolify: dependencies remain manual,
+    # while application changes may trigger without restricted file paths.
+    assert all("x-watch-path-coolify" not in c for c in (dependencies, backend, frontend))
     assert set(backend["services"]) == {"waylane-api"}
     assert set(frontend["services"]) == {"frontend"}
-    assert all("ports" not in s for c in (dependencies, backend, frontend)
-               for s in c["services"].values())
+    assert all("ports" not in s for c in (dependencies, backend, frontend) for s in c["services"].values())
 
 
 def test_backend_secret_boundaries_and_otlp_contract():
@@ -74,10 +71,13 @@ def test_backend_secret_boundaries_and_otlp_contract():
 
 def test_frontend_same_origin_api_and_node_wss_proxy():
     conf = (ROOT / "services/frontend/deploy/nginx.bundled.conf").read_text()
-    assert "location /api/" in conf and "proxy_pass http://waylane-api:8000;" in conf
+    assert "location /api/" in conf
+    assert "resolver 127.0.0.11 valid=10s" in conf
+    assert "set $waylane_api_upstream waylane-api:8000;" in conf
+    assert conf.count("proxy_pass http://$waylane_api_upstream;") == 3
     ws = conf.split("location = /api/node-control/control/ws {", 1)[1].split("location /api/", 1)[0]
     assert "proxy_set_header Upgrade $http_upgrade;" in ws
-    assert "proxy_set_header Connection \"upgrade\";" in ws
+    assert 'proxy_set_header Connection "upgrade";' in ws
     assert "access_log off;" in ws
     sub = conf.split("location /sub/ {", 1)[1].split("location = /index.html", 1)[0]
     assert "access_log off;" in sub

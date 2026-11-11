@@ -1,4 +1,5 @@
 """Source-level guarantees for ordinary and Coolify Compose variants."""
+
 import importlib.util
 from pathlib import Path
 
@@ -22,7 +23,10 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     assert services["postgres"]["environment"]["POSTGRES_DB"] == "${POSTGRES_DATABASE:-waylane}"
     assert services["backend"]["environment"]["POSTGRES_DB"] == "${POSTGRES_DATABASE:-waylane}"
     assert services["backend"]["environment"]["POSTGRES_USER"] == services["postgres"]["environment"]["POSTGRES_USER"]
-    assert services["backend"]["environment"]["POSTGRES_PASSWORD"] == services["postgres"]["environment"]["POSTGRES_PASSWORD"]
+    assert (
+        services["backend"]["environment"]["POSTGRES_PASSWORD"]
+        == services["postgres"]["environment"]["POSTGRES_PASSWORD"]
+    )
     assert "SQLALCHEMY_DATABASE_URL" not in services["backend"]["environment"]
     assert "ports" not in services["postgres"]
     assert "ports" not in services["backend"]
@@ -40,9 +44,7 @@ def test_bundled_stack_requires_credentials_and_uses_persistent_private_db():
     assert services["backend"]["depends_on"]["pgbouncer"]["condition"] == "service_healthy"
     assert doc["networks"]["database"]["internal"] is True
     assert "postgres_data:/var/lib/postgresql/data" in services["postgres"]["volumes"]
-    assert services["backend"]["entrypoint"] == [
-        "/code/.venv/bin/python", "/code/compose_db_entrypoint.py"
-    ]
+    assert services["backend"]["entrypoint"] == ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
     ignore = (ROOT / "services/backend/.dockerignore").read_text().splitlines()
     assert "compose_db_entrypoint.py" not in ignore
     assert "scripts" in ignore  # Regression: keep script outside ignored path.
@@ -151,9 +153,14 @@ def test_split_apps_do_not_bundle_postgres_or_other_service():
 )
 def test_coolify_watch_scopes_and_extend_source(adapter, expected, forbidden):
     manifest = read(adapter)
-    watched = set(manifest["x-watch-path-coolify"])
-    assert watched >= expected
-    assert not (watched & forbidden)
+    if adapter == "docker-compose.coolify.yaml":
+        # Historical all-in-one adapter retains optional scope hints.
+        watched = set(manifest["x-watch-path-coolify"])
+        assert watched >= expected
+        assert not (watched & forbidden)
+    else:
+        # Current independently deployed applications do not require watch hints.
+        assert "x-watch-path-coolify" not in manifest
     for service, definition in manifest["services"].items():
         if adapter == "docker-compose.coolify.yaml" and service == "frontend":
             assert "extends" not in definition  # Do not inherit local port/file mount.
@@ -188,7 +195,8 @@ def test_direct_github_coolify_stack_has_no_intens_dependency():
     assert document["services"]["frontend"]["depends_on"]["backend"]["condition"] == "service_healthy"
     assert (ROOT / "services/frontend/deploy/nginx.bundled.conf").is_file()
     nginx = (ROOT / "services/frontend/deploy/nginx.bundled.conf").read_text()
-    assert "proxy_pass http://waylane-api:8000;" in nginx
+    assert "set $waylane_api_upstream waylane-api:8000;" in nginx
+    assert "proxy_pass http://$waylane_api_upstream;" in nginx
     assert "location /sub/" in nginx
     assert "access_log off;" in nginx.split("location /sub/ {", 1)[1].split("location =", 1)[0]
 
@@ -224,9 +232,9 @@ def test_root_ingress_routes_browser_telemetry_to_backend():
 def test_runtime_includes_webhook_http_client_dependency():
     import tomllib
 
-    config = tomllib.loads((ROOT / 'services/backend/pyproject.toml').read_text())
-    runtime = config['project']['dependencies']
-    assert any(value.startswith('httpx') for value in runtime)
+    config = tomllib.loads((ROOT / "services/backend/pyproject.toml").read_text())
+    runtime = config["project"]["dependencies"]
+    assert any(value.startswith("httpx") for value in runtime)
 
 
 def test_managed_backend_pooler_is_private_and_shares_only_approved_credentials():
@@ -279,7 +287,6 @@ def test_node_is_an_independent_required_authenticated_resource():
 
 
 def test_pgbouncer_config_is_session_pooling_scram_and_never_trust_auth():
-    from pathlib import Path
     source = (ROOT / "deploy/compose/pgbouncer/start.py").read_text()
     assert "auth_type = scram-sha-256" in source
     assert "pool_mode = session" in source

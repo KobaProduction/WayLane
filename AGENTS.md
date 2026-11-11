@@ -22,7 +22,9 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
 - shared/contracts/: narrowly scoped protocol DTOs, no ORM imports.
 
 Each internal service owns its Dockerfile, dependencies, tests and deployment.
-CI and Coolify Watch Paths must scope independently to each module.
+CI must validate affected owners independently. Coolify deployment triggers are
+operator-owned: stable Dependencies stay manual, while independent Frontend
+and Backend may deploy on all relevant commits without mandatory Watch Paths.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
 

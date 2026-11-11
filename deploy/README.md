@@ -4,25 +4,22 @@ WayLane's application stack is split into independent Coolify Compose
 resources. **Do not** use the all-in-one root Compose or legacy
 `deploy/backend-postgres/` for this installation.
 
-| Resource | Base directory | Compose location | Watch Paths |
+| Resource | Base directory | Compose location | Deployment updates |
 | --- | --- | --- | --- |
-| **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | `deploy/dependencies/**` |
-| Backend | `/services/backend` | `/docker-compose.coolify.yaml` | `services/backend/**` |
-| Frontend | `/services/frontend` | `/docker-compose.coolify.yaml` | `services/frontend/**` |
-| VPN Node | `/services/node` | `/docker-compose.node.discovery.coolify.yaml` (or Classic) | `services/node/**` |
+| **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | **Manual only**; PostgreSQL is not redeployed for app changes |
+| **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
+| **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
+| VPN Node (future pilot) | `/services/node` | `/docker-compose.node.discovery.coolify.yaml` (or Classic) | Manual until runtime acceptance |
 
-The **Coolify resource** is named `WayLane / Dependencies` even while
-PostgreSQL is its only Compose service. This follows the shared-dependency
-deployment ownership pattern; do not name the resource after a database
-image. The inner Docker service remains `waylane-postgres` for private DNS.
-
-**Watch Paths shown above are intended scopes, not automatically activated
-by the `x-watch-path-coolify` documentation key.** A Coolify Public Git
-source may not provide provider webhook Watch Paths. In that situation set
-**Manual deployments only** on every affected resource and update each one
-explicitly. Enable Git provider automatic deploys only after verifying
-the GitHub App can access this repository, saving the actual Watch Paths
-in each resource and testing independent deployments.
+The resource named **WayLane / Dependencies** contains the single PostgreSQL
+service `waylane-postgres`; it is not a second application runtime.
+An isolated PostgreSQL lifecycle must never be tied to frontend/backend
+source pushes. Do not configure a file-path filter just to achieve this:
+keep the dependency resource on manual deployment. For application resources,
+`Watch Paths` are optional; if GitHub push automation is later enabled,
+the intended behavior is a deployment for source changes without requiring
+narrow file globs. A placeholder `x-watch-path-coolify` has no effect on
+Coolify's actual deployment configuration.
 
 Use the same approved Git ref for the backend/frontend/dependency resources.
 A new Node requires a **panel-issued** invitation or Classic token, not a
@@ -49,7 +46,7 @@ or API host port. Only Frontend owns a Coolify-managed HTTP(S) route:
 Frontend builds the existing `deploy/nginx.bundled.conf`, which proxies
 `/api/`, subscription requests and binary WebSocket upgrades to the
 independent `waylane-api` service. Frontend and Backend source changes
-must not trigger a PostgreSQL redeploy; verify persisted Watch Paths.
+must not trigger a PostgreSQL redeploy; keep Dependencies manual.
 
 ## Secret ownership
 
@@ -82,7 +79,7 @@ scope. The Backend creates both runtime and migration DSNs internally using
 ## Validation, restarts and rollback
 
 1. Verify generic Compose and Coolify-inherited Compose for every resource.
-2. Check the Git revision and each resource's own Watch Paths before Deploy.
+2. Check the Git revision and the dependency's manual-deployment policy before Deploy.
 3. Start PostgreSQL and validate login, durable volume and readiness.
 4. Start Backend, apply Alembic, verify authenticated API and the OTLP export
    without exposing credentials.

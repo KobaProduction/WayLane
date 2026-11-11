@@ -3,7 +3,6 @@ import os
 import socket
 import ssl
 
-import click
 import uvicorn
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -63,6 +62,17 @@ def check_and_modify_ip(ip_address: str) -> str:
         return "localhost"
 
 
+def resolve_unencrypted_bind_host(ip_address: str) -> str:
+    """Allow an explicitly configured wildcard only for operator-owned HTTP ingress.
+
+    An unspecified address keeps the existing loopback-only behavior. Docker
+    deployments must keep the API private and terminate TLS at the frontend.
+    """
+    if ip_address == "0.0.0.0" and os.environ.get("UVICORN_HOST") == "0.0.0.0":
+        return ip_address
+    return check_and_modify_ip(ip_address)
+
+
 def validate_cert_and_key(cert_file_path, key_file_path, ca_type: str = "public"):
     if not os.path.isfile(cert_file_path):
         raise ValueError(f"SSL certificate file '{cert_file_path}' does not exist.")
@@ -120,23 +130,19 @@ if __name__ == "__main__":
         if server_settings.uds:
             bind_args["uds"] = server_settings.uds
         else:
-            ip = check_and_modify_ip(server_settings.host)
-
-            logger.warning(f"""
-{click.style("IMPORTANT!", blink=True, bold=True, fg="yellow")}
-You're running WayLane without specifying {click.style("UVICORN_SSL_CERTFILE", italic=True, fg="magenta")} and {click.style("UVICORN_SSL_KEYFILE", italic=True, fg="magenta")}.
-The application will only be accessible through localhost. This means that {click.style("WayLane and subscription URLs will not be accessible externally", bold=True)}.
-
-If you need external access, please provide the SSL files to allow the server to bind to 0.0.0.0. Alternatively, you can run the server on localhost or a Unix socket and use a reverse proxy, such as Nginx or Caddy, to handle SSL termination and provide external access.
-
-If you wish to continue without SSL, you can use SSH port forwarding to access the application from your machine. note that in this case, subscription functionality will not work.
-
-Use the following command:
-
-{click.style(f"ssh -L {server_settings.port}:localhost:{server_settings.port} user@server", italic=True, fg="cyan")}
-
-Then, navigate to {click.style(f"http://{ip}:{server_settings.port}", bold=True)} on your computer.
-            """)
+            ip = resolve_unencrypted_bind_host(server_settings.host)
+            if ip == "0.0.0.0":
+                logger.warning(
+                    "Serving unencrypted HTTP on all interfaces. The backend "
+                    "must stay on a private network without published host ports; "
+                    "terminate public TLS at the trusted reverse proxy."
+                )
+            else:
+                logger.warning(
+                    "No backend TLS certificates configured; HTTP listener is "
+                    "restricted to %s. Use a reverse proxy to expose this service.",
+                    ip,
+                )
 
             bind_args["host"] = ip
             bind_args["port"] = server_settings.port

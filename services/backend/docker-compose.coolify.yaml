@@ -1,8 +1,5 @@
 # Base Directory /services/backend; Compose Location /docker-compose.coolify.yaml.
-# Intended Watch Paths: services/backend/**; Public Git may be manual-only.
 # Use Connect To Predefined Network to resolve waylane-postgres and waylane-api.
-x-watch-path-coolify:
-  - "services/backend/**"
 services:
   waylane-api:
     extends:
