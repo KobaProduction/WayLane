@@ -42,6 +42,16 @@ if (
     os.environ["DATABASE_URL"] = _worker_database_url
     os.environ["SQLALCHEMY_DATABASE_URL"] = _worker_database_url
 
+# Local API helpers and application service code must use the same migrated
+# SQLite database. FastAPI dependency overrides alone do not cover code paths
+# that open GetDB() directly (for example, subscription generation).
+if _test_from == "local" and _requested_database_url.get_backend_name() == "sqlite":
+    _active_database_url = _test_setting("DATABASE_URL", str(_requested_database_url))
+    _app_database_url = os.environ.get("SQLALCHEMY_DATABASE_URL")
+    if _app_database_url is not None and make_url(_app_database_url) != make_url(_active_database_url):
+        raise pytest.UsageError("Local SQLite app and test database URLs must match")
+    os.environ["SQLALCHEMY_DATABASE_URL"] = _active_database_url
+
 # Override settings for tests
 from config import auth_settings, runtime_settings, server_settings
 
