@@ -31,6 +31,9 @@ def main():
     for name in ("AGENTS.md", "README.md", "agent.Dockerfile", "bootstrap.Dockerfile",
                  "node-seed.Dockerfile", "bootstrap.sh", "main.go", "go.mod", "verify.sh", "LICENSE"):
         assert (agent / name).is_file(), f"Missing Agent runtime: {name}"
+    hook = (ROOT / ".githooks/pre-push").read_text()
+    assert '"^services/agent/"' in hook
+    assert "(cd services/agent && ./verify.sh)" in hook
     assert not (ROOT / "services/node/bootstrap.sh").exists()
     assert not (ROOT / "services/node/runtime.go").exists()
     rel = yaml.load(

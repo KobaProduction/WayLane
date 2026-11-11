@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-# The migration branch changes all three owners. Workflows run independently
-# after publication; pre-push verifies exactly the affected module owners.
+# The integration branch changes backend, frontend, Node and stable Agent.
+# Verify each affected source owner without running deployment side effects.
 base=""
 if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then
   base="$(git merge-base HEAD refs/remotes/origin/main)"
@@ -10,7 +10,7 @@ fi
 if [[ -n "$base" ]]; then
   changed="$(git diff --name-only "$base" HEAD)"
 else
-  changed=$'services/backend/\nservices/frontend/\nservices/node/'
+  changed=$'services/backend/\nservices/frontend/\nservices/node/\nservices/agent/'
 fi
 for service in backend frontend node; do
   if grep -q "^services/$service/" <<< "$changed"; then
@@ -18,6 +18,10 @@ for service in backend frontend node; do
     (cd "services/$service" && ./scripts/verify.sh)
   fi
 done
+if grep -q "^services/agent/" <<< "$changed"; then
+  echo "[pre-push] verifying agent"
+  (cd services/agent && ./verify.sh)
+fi
 python="services/backend/.venv/bin/python"
 if [[ ! -x "$python" ]]; then
   python=python3
