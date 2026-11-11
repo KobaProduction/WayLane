@@ -63,7 +63,7 @@ log = logging.getLogger("waylane.telemetry")
 
 class BrowserEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["uncaught_error", "unhandled_rejection", "chunk_load_error"]
+    kind: Literal["uncaught_error", "unhandled_rejection", "chunk_load_error", "render_error"]
     route_group: Literal["login", "dashboard", "settings", "other"]
 
 

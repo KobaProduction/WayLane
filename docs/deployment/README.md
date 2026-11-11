@@ -14,6 +14,8 @@ these three running resources.
 - **WayLane / Frontend** — public HTTPS `waylane-dev.koba-nexus.ru`,
   Coolify route declared by `SERVICE_URL_FRONTEND_8080: /`;
   Nginx serves UI, proxies `/api/`, `/sub/` and binary WebSocket to Backend.
+  Browser diagnostic events go to the authenticated Backend API, which exports
+  to SigNoz as `WayLane/frontend`; no Nginx log exporter or collector is used.
   `SERVICE_FQDN_FRONTEND_8080` is **not** an operator input or required
   second public-domain directive.
 - **WayLane Node** — separate future enrollment and VPN-core pilot; no

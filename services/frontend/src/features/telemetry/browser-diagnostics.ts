@@ -7,43 +7,64 @@
 import { $fetch } from '@/service/http'
 import { getAuthToken } from '@/utils/authStorage'
 
-type Kind = 'uncaught_error' | 'unhandled_rejection' | 'chunk_load_error'
-type Group = 'login' | 'dashboard' | 'settings' | 'other'
+export type BrowserDiagnosticKind = 'uncaught_error' | 'unhandled_rejection' | 'chunk_load_error' | 'render_error'
+export type BrowserRouteGroup = 'login' | 'dashboard' | 'settings' | 'other'
+type BrowserDiagnostic = { kind: BrowserDiagnosticKind; route_group: BrowserRouteGroup }
 
 const LIMIT = 10
 const WINDOW_MS = 60_000
-let windowStart = 0
-let sent = 0
 let installed = false
 
-function group(): Group {
-  // Use coarse static route groups only. Browser URL/hash may contain tokens.
-  const fragment = window.location.hash
+export function classifyRouteHash(fragment: string): BrowserRouteGroup {
+  // Never send the actual hash: it may contain subscription or session tokens.
   if (fragment.startsWith('#/login')) return 'login'
   if (fragment.startsWith('#/settings')) return 'settings'
   if (fragment.startsWith('#/')) return 'dashboard'
   return 'other'
 }
 
-function send(kind: Kind): void {
-  // The existing auth client is responsible for providing an authenticated
-  // admin token. Anonymous authentication errors do not generate telemetry.
-  if (!getAuthToken()) return
-  const now = Date.now()
-  if (now - windowStart > WINDOW_MS) {
-    windowStart = now
-    sent = 0
+/** One bounded reporter per browser session, with no dynamic error payload. */
+export function createBrowserDiagnosticReporter(
+  isAuthenticated: () => boolean,
+  routeGroup: () => BrowserRouteGroup,
+  deliver: (body: BrowserDiagnostic) => Promise<unknown>,
+  clock: () => number = Date.now,
+): (kind: BrowserDiagnosticKind) => void {
+  let windowStart = 0
+  let sent = 0
+
+  return kind => {
+    // Anonymous client errors are not reported. This also avoids turning
+    // an unauthenticated route into an attacker-controlled telemetry source.
+    try {
+      if (!isAuthenticated()) return
+      const now = clock()
+      if (now - windowStart >= WINDOW_MS) {
+        windowStart = now
+        sent = 0
+      }
+      if (sent >= LIMIT) return
+      const event: BrowserDiagnostic = { kind, route_group: routeGroup() }
+      sent += 1
+      void deliver(event).catch(() => {
+        // Best-effort telemetry; an export failure must not recurse.
+      })
+    } catch {
+      // Restricted localStorage or a failed transport must not break the UI.
+    }
   }
-  if (++sent > LIMIT) return
-  void $fetch('/api/telemetry/browser', {
+}
+
+const send = createBrowserDiagnosticReporter(
+  () => Boolean(getAuthToken()),
+  () => classifyRouteHash(window.location.hash),
+  body => $fetch('/api/telemetry/browser', {
     method: 'POST',
-    body: { kind, route_group: group() },
+    body,
     retry: 0,
     timeout: 3000,
-  }).catch(() => {
-    // Telemetry is best effort. Never recursively report export failure.
-  })
-}
+  }),
+)
 
 export function installBrowserDiagnostics(): void {
   if (installed) return
@@ -55,4 +76,9 @@ export function installBrowserDiagnostics(): void {
 
 export function reportChunkLoadFailure(): void {
   send('chunk_load_error')
+}
+
+/** Report only a fixed event category, never React error objects or stacks. */
+export function reportReactRenderFailure(): void {
+  send('render_error')
 }

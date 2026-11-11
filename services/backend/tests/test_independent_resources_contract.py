@@ -87,8 +87,18 @@ def test_frontend_same_origin_api_and_node_wss_proxy():
         "services/frontend/deploy/nginx.bundled.conf",
     ):
         config = (ROOT / nginx_config).read_text()
-        assert '"service.namespace":"WayLane","service.name":"frontend"' in config
-        assert '"service.name":"waylane-frontend"' not in config
+        assert "access_log off;" in config
+        assert "log_format waylane_json" not in config
+        assert '"service.name"' not in config
+        assert "/api/telemetry/browser" not in config
+    reporter = (ROOT / "services/frontend/src/features/telemetry/browser-diagnostics.ts").read_text()
+    assert "/api/telemetry/browser" in reporter
+    assert "timeout: 3000" in reporter
+    assert "retry: 0" in reporter
+    boundary = (ROOT / "services/frontend/src/components/layout/error-boundary.tsx").read_text()
+    assert "reportReactRenderFailure()" in boundary
+    recovery = (ROOT / "services/frontend/src/utils/chunk-recovery.ts").read_text()
+    assert "reportChunkLoadFailure()" in recovery
 
 
 def test_existing_node_remains_independently_deployed():

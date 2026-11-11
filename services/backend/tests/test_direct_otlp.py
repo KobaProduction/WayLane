@@ -23,6 +23,7 @@ def test_browser_diagnostics_are_structurally_bounded():
         route_group="dashboard",
     )
     assert payload.model_dump() == {"kind": "uncaught_error", "route_group": "dashboard"}
+    assert browser_telemetry.BrowserEvent(kind="render_error", route_group="other").kind == "render_error"
     with pytest.raises(ValidationError):
         browser_telemetry.BrowserEvent(
             kind="uncaught_error",
@@ -149,9 +150,10 @@ def test_direct_otlp_logs_traces_are_sanitized(monkeypatch):
         )
         with trace.get_tracer("waylane.test").start_as_current_span("safe.browser.error"):
             logging.getLogger("waylane.telemetry").warning("http.error")
-        traces, logs, _ = providers
+        traces, backend_logs, frontend_logs, _, _ = providers
         assert traces.force_flush(timeout_millis=3000)
-        assert logs.force_flush(timeout_millis=3000)
+        assert backend_logs.force_flush(timeout_millis=3000)
+        assert frontend_logs.force_flush(timeout_millis=3000)
         runtime.flush_and_shutdown_direct_otlp()
         assert {path for path, *_ in captured} >= {"/v1/traces", "/v1/logs"}
         assert all(auth == "Bearer synthetic-local-test-bearer" for _, auth, _, _ in captured)
@@ -167,14 +169,36 @@ def test_direct_otlp_logs_traces_are_sanitized(monkeypatch):
             for rec in scope.log_records
         )
         expected_identity = {
-            "service.name": "backend",
             "service.namespace": "WayLane",
             "deployment.environment.name": "development",
         }
+        names_by_service = {}
         for packet in log_requests:
             for item in packet.resource_logs:
                 attrs = {attribute.key: attribute.value.string_value for attribute in item.resource.attributes}
                 assert all(attrs[key] == value for key, value in expected_identity.items())
+                names_by_service.setdefault(attrs["service.name"], set()).update(
+                    rec.body.string_value for scope in item.scope_logs for rec in scope.log_records
+                )
+        assert "browser.error" in names_by_service["frontend"]
+        assert "browser.error" not in names_by_service["backend"]
+        frontend_error = [
+            rec
+            for packet in log_requests
+            for group in packet.resource_logs
+            if any(
+                attr.key == "service.name" and attr.value.string_value == "frontend"
+                for attr in group.resource.attributes
+            )
+            for scope in group.scope_logs
+            for rec in scope.log_records
+            if rec.body.string_value == "browser.error"
+        ]
+        assert len(frontend_error) == 1
+        safe_fields = {attr.key: attr.value.string_value for attr in frontend_error[0].attributes}
+        assert safe_fields["event_kind"] == "uncaught_error"
+        assert safe_fields["route_group"] == "dashboard"
+        assert "runtime.log" in names_by_service["backend"]
         assert all(b"synthetic-secret" not in body for _, _, _, body in captured)
         trace_requests = [
             ExportTraceServiceRequest.FromString(body) for path, _, _, body in captured if path == "/v1/traces"
@@ -190,6 +214,7 @@ def test_direct_otlp_logs_traces_are_sanitized(monkeypatch):
             for item in packet.resource_spans:
                 attrs = {attribute.key: attribute.value.string_value for attribute in item.resource.attributes}
                 assert all(attrs[key] == value for key, value in expected_identity.items())
+                assert attrs["service.name"] == "backend"
 
     finally:
         server.shutdown()

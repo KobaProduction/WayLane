@@ -28,11 +28,14 @@ def _resource_value(name: str, default: str) -> str:
 class _MetadataOnlyOTLPHandler(logging.Handler):
     """Sanitize arbitrary application logs before exporting their metadata."""
 
-    def __init__(self, downstream):
+    def __init__(self, downstream, *, frontend_only: bool = False):
         super().__init__(logging.DEBUG)
         self._downstream = downstream
+        self._frontend_only = frontend_only
 
     def emit(self, record: logging.LogRecord):
+        if (record.name == "waylane.telemetry") != self._frontend_only:
+            return
         if record.name.startswith(("opentelemetry", "urllib3", "httpcore", "httpx")):
             return
         # Preserve complete text only for our own fixed, reviewed telemetry
@@ -148,22 +151,43 @@ def configure_direct_otlp():
                 max_export_batch_size=64,
             )
         )
-        logs = LoggerProvider(resource=res)
-        logs.add_log_record_processor(
-            BatchLogRecordProcessor(
-                OTLPLogExporter(endpoint=base + "/v1/logs", headers=headers, timeout=4),
-                max_queue_size=512,
-                max_export_batch_size=64,
+
+        def new_log_provider(resource):
+            provider = LoggerProvider(resource=resource)
+            provider.add_log_record_processor(
+                BatchLogRecordProcessor(
+                    OTLPLogExporter(endpoint=base + "/v1/logs", headers=headers, timeout=4),
+                    max_queue_size=512,
+                    max_export_batch_size=64,
+                )
             )
+            return provider
+
+        backend_logs = new_log_provider(res)
+        frontend_resource = Resource.create(
+            {
+                "service.name": "frontend",
+                "service.namespace": res.attributes["service.namespace"],
+                "deployment.environment.name": res.attributes["deployment.environment.name"],
+            }
         )
+        frontend_logs = new_log_provider(frontend_resource)
         trace.set_tracer_provider(traces)
-        sanitized = _MetadataOnlyOTLPHandler(LoggingHandler(logger_provider=logs))
+
+        # Only the Backend owns OTLP credentials. The authenticated browser
+        # relay uses a dedicated SDK resource so SigNoz can distinguish frontend
+        # diagnostics from the Backend's own runtime log records.
+        backend_handler = _MetadataOnlyOTLPHandler(LoggingHandler(logger_provider=backend_logs))
+        frontend_handler = _MetadataOnlyOTLPHandler(
+            LoggingHandler(logger_provider=frontend_logs),
+            frontend_only=True,
+        )
         # FastAPI/Uvicorn process loggers are not necessarily root-propagating.
-        # Attach at one appropriate ancestor per tree.
-        logging.getLogger().addHandler(sanitized)
-        logging.getLogger("uvicorn").addHandler(sanitized)
-        _telemetry = (traces, logs, sanitized)
-        logging.getLogger("waylane.telemetry").info("otel.started")
+        logging.getLogger().addHandler(backend_handler)
+        logging.getLogger("uvicorn").addHandler(backend_handler)
+        logging.getLogger("waylane.telemetry").addHandler(frontend_handler)
+        _telemetry = (traces, backend_logs, frontend_logs, backend_handler, frontend_handler)
+        logger.info("otel.started")
         return _telemetry
 
 
@@ -173,9 +197,11 @@ def flush_and_shutdown_direct_otlp():
         state = _telemetry
         if not state:
             return
-        traces, logs, handler = state
-        logging.getLogger().removeHandler(handler)
-        logging.getLogger("uvicorn").removeHandler(handler)
+        traces, backend_logs, frontend_logs, backend_handler, frontend_handler = state
+        logging.getLogger().removeHandler(backend_handler)
+        logging.getLogger("uvicorn").removeHandler(backend_handler)
+        logging.getLogger("waylane.telemetry").removeHandler(frontend_handler)
         traces.shutdown()
-        logs.shutdown()
+        backend_logs.shutdown()
+        frontend_logs.shutdown()
         _telemetry = None

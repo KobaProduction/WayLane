@@ -87,13 +87,21 @@ settings use `OTEL_NAMESPACE`, `OTEL_SERVICE_NAME`, and
 The runtime still recognizes the previous internal namespace/environment
 keys for older deployment variants.
 
-Frontend Nginx access logs identify themselves as
-`service.namespace=WayLane`, `service.name=frontend` on stdout.
-**Stdout alone is not OTLP**: verify an independent Docker log collector
-before claiming that Nginx access logs are available in SigNoz. Never inject
-a collector Bearer into the browser or frontend container solely to label
-its logs. Authenticated, sanitized browser errors are sent to the Backend
-telemetry endpoint and exported by that trusted service.
+Frontend application diagnostics travel over same-origin HTTPS:
+`browser → /api/telemetry/browser → private Backend → OTLP → SigNoz`.
+The browser sends only an allowlisted event kind and a coarse route group;
+it never sends raw messages, stacks, user identifiers, URLs or bearer values.
+Backend authenticates each request, applies a per-admin rate limit and uses
+its own protected OTLP credentials to export logs under
+`service.namespace=WayLane`, `service.name=frontend`. Backend runtime logs
+and traces remain under `WayLane/backend`. No collector, SDK exporter or
+OTLP bearer is installed in the Frontend image.
+
+Nginx is only the static UI server and reverse proxy; its access log is
+disabled, and ordinary proxy errors stay on stderr for local diagnostics.
+Nginx logs are **not** an application telemetry source. Unauthenticated
+browser events are intentionally not submitted; initial login/owner
+diagnostics require server-side observation until an admin authenticates.
 
 ## Validation, restarts and rollback
 

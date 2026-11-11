@@ -1,4 +1,5 @@
 import { ErrorPage } from '@/components/layout/error-page'
+import { reportReactRenderFailure } from '@/features/telemetry/browser-diagnostics'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
 type ErrorBoundaryProps = {
@@ -22,8 +23,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error }
   }
 
-  componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
-    console.error('Unhandled dashboard error:', error, errorInfo)
+  componentDidCatch(_error: unknown, errorInfo: ErrorInfo) {
+    reportReactRenderFailure()
     this.setState({ componentStack: errorInfo.componentStack || undefined })
   }
 

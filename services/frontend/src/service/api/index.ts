@@ -1301,6 +1301,7 @@ export const BrowserEventKind = {
   uncaught_error: 'uncaught_error',
   unhandled_rejection: 'unhandled_rejection',
   chunk_load_error: 'chunk_load_error',
+  render_error: 'render_error',
 } as const;
 
 export type BrowserEventRouteGroup = typeof BrowserEventRouteGroup[keyof typeof BrowserEventRouteGroup];

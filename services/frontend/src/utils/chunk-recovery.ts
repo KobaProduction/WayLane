@@ -1,3 +1,4 @@
+import { reportChunkLoadFailure } from '@/features/telemetry/browser-diagnostics'
 import { lazy, type ComponentType } from 'react'
 
 const CHUNK_RELOAD_KEY = 'waylane:chunk-reload-at'
@@ -80,6 +81,7 @@ export function recoverFromChunkLoadError(error: unknown): boolean {
     return false
   }
 
+  reportChunkLoadFailure()
   markChunkReloadAttempt()
   void clearBrowserBuildCaches().finally(() => {
     window.location.reload()
