@@ -76,6 +76,25 @@ dependencies and Backend but the value must exist only once in the shared
 scope. The Backend creates both runtime and migration DSNs internally using
 `compose_db_entrypoint.py`.
 
+## Telemetry identity
+
+Backend exports OpenTelemetry logs and traces directly to the configured
+`OTEL_ENDPOINT`. The canonical resource identity is
+`service.namespace=WayLane`, `service.name=backend`, and
+`deployment.environment.name=development`. Source-controlled service
+settings use `OTEL_NAMESPACE`, `OTEL_SERVICE_NAME`, and
+`DEPLOYMENT_ENVIRONMENT`; no secret value is embedded in the image.
+The runtime still recognizes the previous internal namespace/environment
+keys for older deployment variants.
+
+Frontend Nginx access logs identify themselves as
+`service.namespace=WayLane`, `service.name=frontend` on stdout.
+**Stdout alone is not OTLP**: verify an independent Docker log collector
+before claiming that Nginx access logs are available in SigNoz. Never inject
+a collector Bearer into the browser or frontend container solely to label
+its logs. Authenticated, sanitized browser errors are sent to the Backend
+telemetry endpoint and exported by that trusted service.
+
 ## Validation, restarts and rollback
 
 1. Verify generic Compose and Coolify-inherited Compose for every resource.

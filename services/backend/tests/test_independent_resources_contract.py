@@ -82,6 +82,13 @@ def test_frontend_same_origin_api_and_node_wss_proxy():
     sub = conf.split("location /sub/ {", 1)[1].split("location = /index.html", 1)[0]
     assert "access_log off;" in sub
     assert "waylane-postgres" not in conf
+    for nginx_config in (
+        "services/frontend/deploy/nginx.conf",
+        "services/frontend/deploy/nginx.bundled.conf",
+    ):
+        config = (ROOT / nginx_config).read_text()
+        assert '"service.namespace":"WayLane","service.name":"frontend"' in config
+        assert '"service.name":"waylane-frontend"' not in config
 
 
 def test_existing_node_remains_independently_deployed():

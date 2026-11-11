@@ -129,9 +129,13 @@ def configure_direct_otlp():
 
         res = Resource.create(
             {
-                "service.name": "waylane-backend",
-                "service.namespace": _resource_value("OTEL_SERVICE_NAMESPACE", "waylane"),
-                "deployment.environment.name": _resource_value("OTEL_DEPLOYMENT_ENVIRONMENT_NAME", "development"),
+                "service.name": _resource_value("OTEL_SERVICE_NAME", "backend"),
+                "service.namespace": _resource_value(
+                    "OTEL_NAMESPACE", os.getenv("OTEL_SERVICE_NAMESPACE") or "WayLane"
+                ),
+                "deployment.environment.name": _resource_value(
+                    "DEPLOYMENT_ENVIRONMENT", os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT_NAME") or "development"
+                ),
             }
         )
         base = endpoint.rstrip("/")

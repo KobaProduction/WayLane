@@ -25,8 +25,9 @@ services:
       UVICORN_WORKERS: "1"
       OTLP_ENDPOINT: ${OTEL_ENDPOINT:?}
       OTLP_BEARER_TOKEN: ${OTEL_BEARER_TOKEN:?}
-      OTEL_SERVICE_NAMESPACE: waylane
-      OTEL_DEPLOYMENT_ENVIRONMENT_NAME: development
+      OTEL_NAMESPACE: WayLane
+      OTEL_SERVICE_NAME: backend
+      DEPLOYMENT_ENVIRONMENT: development
     expose:
       - "8000"
     volumes:

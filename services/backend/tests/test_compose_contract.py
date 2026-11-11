@@ -121,6 +121,10 @@ def test_split_apps_do_not_bundle_postgres_or_other_service():
     assert environment["WAYLANE_DEVICE_WEBHOOK_SECRET"] == "${WAYLANE_DEVICE_WEBHOOK_SECRET:?}"
     assert environment["OTLP_ENDPOINT"] == "${OTEL_ENDPOINT:?}"
     assert environment["OTLP_BEARER_TOKEN"] == "${OTEL_BEARER_TOKEN:?}"
+    assert environment["OTEL_NAMESPACE"] == "WayLane"
+    assert environment["OTEL_SERVICE_NAME"] == "backend"
+    assert environment["DEPLOYMENT_ENVIRONMENT"] == "development"
+    assert "OTEL_SERVICE_NAMESPACE" not in environment
     assert "SQLALCHEMY_DATABASE_URL" not in environment
     assert api["entrypoint"] == ["/code/.venv/bin/python", "/code/compose_db_entrypoint.py"]
     assert "127.0.0.1:8000/health" in api["healthcheck"]["test"][1]
