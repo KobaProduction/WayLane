@@ -38,6 +38,9 @@ services:
       # namespaced mount; neither unconfined nor docker-default permits both.
       - seccomp=unconfined
       - apparmor=rootlesskit
+      # Required to permit nested rootless runc to mount its private /proc.
+      # Does not grant host root; outer Agent remains UID 1000 and nonprivileged.
+      - systempaths=unconfined
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:

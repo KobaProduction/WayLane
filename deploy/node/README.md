@@ -111,12 +111,22 @@ transitions to the restricted `unprivileged_userns` profile and denies
 provides an installed `rootlesskit` AppArmor profile with an explicit
 `userns,` rule. An ephemeral non-root container using that profile
 passed `unshare -Ur -m` and `mount --make-rprivate /` inside the isolated
-mount namespace. Thus, the Agent must use `apparmor=rootlesskit`,
-`seccomp=unconfined`, non-root UID/GID 1000 and only SETUID/SETGID
-outer capabilities. **Do not disable global AppArmor userns controls.**
-Confirm this named profile is installed on each host before deployment;
-a successful namespace probe does not replace actual dockerd/Node WSS
-runtime acceptance.
+mount namespace. The Agent therefore requires `apparmor=rootlesskit`
+and `seccomp=unconfined`. Additionally, Docker masks `/proc` paths in
+outer containers by default; nested rootless runc then fails to mount
+its own procfs (even for a minimal `docker run`). Set
+`systempaths=unconfined` on **only the non-root Agent**. This broadens
+access to previously masked kernel paths within that container, so it
+must remain UID/GID 1000, read-only rootfs, with dropped capabilities
+except SETUID/SETGID and a private Docker socket. On tambov, the exact
+configuration (with the existing `/dev/net/tun` device) passed an
+isolated rootless Docker nested-container test, and rebuilt the Node
+seed including the `RUN` instruction. Do not disable global AppArmor
+userns controls or mount a rootful host Docker socket.
+
+Verify the installed `rootlesskit` profile and the full nested runtime on
+each host. These tests do not by themselves confirm enrollment, WSS,
+Xray execution or externally reachable TCP/UDP VPN traffic.
 
 ## Host network and dynamic ports
 

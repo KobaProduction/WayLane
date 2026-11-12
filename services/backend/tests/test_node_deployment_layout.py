@@ -75,8 +75,9 @@ def test_classic_and_discovery_share_identical_node_runtime_and_security():
         assert agent["depends_on"]["bootstrap"]["condition"] == "service_completed_successfully"
         assert "ports" not in agent and "ports" not in bootstrap
         assert agent["cap_drop"] == ["ALL"]
-        assert "seccomp=unconfined" in agent["security_opt"]
-        assert "apparmor=rootlesskit" in agent["security_opt"]
+        assert agent["security_opt"] == [
+            "seccomp=unconfined", "apparmor=rootlesskit", "systempaths=unconfined",
+        ], "rootless nested OCI requires unmasked /proc without broadening host privileges"
         assert "apparmor=unconfined" not in agent["security_opt"]
         assert agent["read_only"] is True
         healthcheck = " ".join(agent["healthcheck"]["test"])
