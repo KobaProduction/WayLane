@@ -9,7 +9,7 @@ resources. **Do not** use the all-in-one root Compose or legacy
 | **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | **Manual only**; PostgreSQL is not redeployed for app changes |
 | **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
 | **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
-| **WayLane / Node** (server runtime pilot) | `/deploy/node/discovery` | `/docker-compose.yaml` (Raw mode) | **Manual only**; real panel-issued Discovery token and registration still required |
+| **WayLane / Node** (enrolled server pilot) | `/deploy/node/discovery` | `/docker-compose.yaml` (Raw mode) | **Manual only**; Agent/Node WSS telemetry accepted, VPN Core/client traffic pending |
 
 The resource named **WayLane / Dependencies** contains the single PostgreSQL
 service `waylane-postgres`; it is not a second application runtime.
@@ -28,10 +28,11 @@ resource and does not share the API database volume. The **stable Agent**
 owns rootless Docker and a replaceable internal Node container, which in
 turn manages its sibling VPN Cores. The outer Compose has only bootstrap
 and Agent; use the standalone [Node deployment guide](node/README.md).
-Do not deploy the Node until the panel has an authorized administrator,
-approved enrollment, independent named volumes and host-level runtime
-acceptance. Never expose or assume working VPN UDP traffic from health
-checks or source builds.
+The tambov Node is deployed, approved by a panel-issued Discovery
+invitation (now revoked), and retains identity and WSS telemetry on restart.
+Its named volumes are independent. New Nodes still require an authorized,
+panel-issued enrollment path. Do not expose or assume working VPN TCP/UDP
+traffic until the desired Core is applied and client traffic is accepted.
 
 ## Dependency isolation
 

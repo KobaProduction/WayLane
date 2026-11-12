@@ -32,6 +32,8 @@ Each mode has generic and Coolify Compose manifests.
   `network_mode: host`; using `docker-compose.coolify.yaml` in Raw mode
   causes a circular `extends` because Coolify renames it to
   `docker-compose.yaml` at runtime. Use the self-contained generic file.
+  The tracked `/docker-compose.coolify.yaml` adapter still exists as a
+  managed-parser source, but it is **not** the accepted tambov entrypoint.
   The service directory
   `/services/node` is **not** the Coolify Base Directory.
 - Compose project, volumes and credentials are unique to the selected
@@ -178,35 +180,47 @@ Discovery target, **not** the public WayLane panel. Observed acceptance:
 The synthetic pilot has since been **fully removed from KOBA-LAPTOP** at the
 operator's request: all WayLane pilot containers, images, named volumes and
 its temporary repository clone were removed. No laptop Node is installed.
-No authenticated panel WSS, approval, managed Xray child, AWG/TUN or external
-TCP/UDP client-traffic acceptance is claimed. A real pilot requires a
-panel-issued one-time invitation and an explicitly isolated deployment,
-followed by a real binary WSS handshake and client protocol tests.
+That *former laptop pilot* did not authenticate to the panel or test VPN
+traffic. The live tambov server acceptance is documented separately below.
 
 ## Current tambov development resource — 2026-11-12
 
-Coolify `WayLane / development` has an independent resource
-**WayLane / Node** (`o3tsn2bdcpxyhtqshpzfosfw`), pointed at
-`KobaProduction/WayLane` `main` on server `tambov`, destination
-`WayLane Development`, base `/deploy/node/discovery` and Compose
-`/docker-compose.coolify.yaml`. The resource has **not deployed** any
-containers or created Node persistent volumes; it is currently exited.
-No public domain or exposed host port was configured. The operator-defined
-`CONTROL_PANEL_URL` points at the existing WayLane HTTPS panel and is
-runtime-only. `DISCOVERY_TOKEN` is **not configured**; the Coolify
-Compose parser correctly requires a non-empty panel-issued invitation.
-Do not set a guessed token or redeploy in this state. Once the operator
-creates the first owner and issues an invitation under Nodes → Discovery,
-store the actual invitation as the protected **runtime-only**, not buildtime,
-`DISCOVERY_TOKEN` in the Node resource, verify Coolify's parsed Compose,
-then deploy the Node. Preserve its three dedicated named volumes thereafter.
+Coolify `WayLane / development` has the independent **WayLane / Node**
+resource (`o3tsn2bdcpxyhtqshpzfosfw`), sourced from
+`KobaProduction/WayLane` `main` on `tambov`, destination
+`WayLane Development`, base `/deploy/node/discovery`,
+`/docker-compose.yaml` with **Raw (deploy file as-is)** selected, on
+accepted commit `f56475f`. Deployment is **manual only**, without a
+separate public Node management domain or published host ports.
 
-Node machine metrics and state are carried to the WayLane Backend via the
-single authenticated binary-Protobuf WSS control channel. Backend persists
-node `machine_metrics` and `last_seen_at` in the registration model;
-this is not a direct OTLP export from the Node, and it cannot be observed
-until enrollment and a live handshake succeed. Backend's own OTLP export
-to SigNoz is a separate observability channel.
+Observed on the real server (not just source tests):
+
+- One-shot bootstrap exited **0**; the persistent Agent is **healthy**
+  and remains UID/GID 1000 with private rootless Docker
+- The nested `waylane-node-runtime` is **running**, with zero recorded
+  container restarts at the initial inspection, seeded from the approved
+  Agent image; the three dedicated named volumes are preserved
+- A real panel-issued Discovery invitation (ID 1, 24-hour lifetime,
+  auto-approve) enrolled one Node. PostgreSQL registration status is
+  **approved**, and its `machine_metrics` and `last_seen_at` are updated
+  over the authenticated binary-Protobuf WSS control channel
+- The invitation was **revoked** after enrollment, preventing further
+  registrations with that token. `DISCOVERY_TOKEN` remains stored in
+  Coolify as a protected **runtime-only** setting, never a build argument;
+  the already-enrolled Node reconnects with its own persistent identity
+- A controlled outer Agent restart completed successfully: Agent returned
+  **healthy**, the same nested Node container resumed, and the next
+  PostgreSQL inspection showed `approved`, non-null `machine_metrics`,
+  and a heartbeat only **12 seconds** old after restart
+
+The Node's machine metrics are persisted by the WayLane Backend via WSS,
+**not** sent directly to SigNoz as OTLP. Backend's own OTLP exporter is a
+separate observability channel. This establishes Node enrollment, remote
+control transport and telemetry acceptance, **not VPN service acceptance**:
+the Node has **zero** rows in `node_agent_xray_desired`, no accepted
+managed Xray Core action and no validated end-user TCP/UDP tunnel.
+Experimental AmneziaWG stays disabled. The first non-public Core action,
+traffic reachability and client connection are separate remaining gates.
 
 ## Runtime secrets and acceptance
 
@@ -217,14 +231,14 @@ Never commit or expose the token to the image build. Coolify should store
 it as a protected, runtime-only secret; no placeholders with live values.
 `DEV_ALLOW_HTTP` is **forced false by the Coolify adapter**.
 
-First validate Coolify's **parsed Deployable Compose**, rather than just
-YAML: two services, successful one-shot bootstrap (0), non-root agent
-UID/GID 1000, private volumes, host hostname mount, no published management
-ports and correct protected variables. Then on an isolated test server
-check the rootless daemon, HTTPS enrollment, authorized WSS Protobuf
-hello/ack and heartbeats, retained identity across restart and a single
-non-public Xray core action. Rootless networking and public TCP/UDP VPN
-client traffic are **not yet production accepted**.
+For this Node profile, verify Coolify's **Raw effective Compose** (not the
+managed parser): two services, successful one-shot bootstrap (0), non-root
+Agent UID/GID 1000, private volumes, read-only host hostname mount, no
+published management ports and protected runtime-only credentials. Server
+`tambov` has passed nested rootless Docker startup, HTTPS enrollment,
+authorized WSS/Protobuf heartbeats and retained identity after restart.
+A single non-public Xray Core action, rootless networking reachability
+and public TCP/UDP VPN client traffic remain **unaccepted**.
 
 Roll back by selecting the previous approved Git revision **without
 destroying volumes**, checking bootstrap/agent and restored WSS control.
