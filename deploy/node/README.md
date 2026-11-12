@@ -26,7 +26,12 @@ Each mode has generic and Coolify Compose manifests.
   Node repository is needed for the first pilot.
 - Coolify Base Directory: `/deploy/node/discovery` **or**
   `/deploy/node/classic`; Compose Location for either:
-  `/docker-compose.coolify.yaml`. The service directory
+  `/docker-compose.coolify.yaml`. **Select Raw (deploy file as-is)**
+  under Advanced → Docker compose: Coolify's managed parser adds a
+  `networks` entry incompatible with the installer bootstrap
+  `network_mode: none` and Agent `network_mode: host`.
+  The adapter omits Coolify-only `exclude_from_hc` so that standard
+  Docker Compose also accepts it. The service directory
   `/services/node` is **not** the Coolify Base Directory.
 - Compose project, volumes and credentials are unique to the selected
   installation. For multiple Nodes on one host assign distinct Compose

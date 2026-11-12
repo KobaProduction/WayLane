@@ -5,7 +5,6 @@ services:
     extends:
       file: ./docker-compose.yaml
       service: bootstrap
-    exclude_from_hc: true
   agent:
     extends:
       file: ./docker-compose.yaml

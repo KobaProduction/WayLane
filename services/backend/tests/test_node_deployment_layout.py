@@ -118,7 +118,11 @@ def test_coolify_adapters_extend_own_generic_compose_and_redeclare_inputs():
         bootstrap, agent = doc["services"]["bootstrap"], doc["services"]["agent"]
         for name, service in (("bootstrap", bootstrap), ("agent", agent)):
             assert service["extends"] == {"file": "./docker-compose.yaml", "service": name}
-        assert bootstrap["exclude_from_hc"] is True
+        # Raw Coolify mode preserves host/none network_mode and Docker
+        # Compose must accept this adapter without Coolify-only keys.
+        assert set(bootstrap) == {"extends"}
+        assert "exclude_from_hc" not in bootstrap
+        assert "network_mode" not in bootstrap and "networks" not in bootstrap
         env = agent["environment"]
         assert env["CONTROL_PANEL_URL"] == "${CONTROL_PANEL_URL:?}"
         assert env["DEV_ALLOW_HTTP"] == "false"
