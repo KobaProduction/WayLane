@@ -103,14 +103,20 @@ needed. Both profiles build the same Node runtime.
 ### Server user namespace policy
 
 On `tambov`, Linux has `kernel.apparmor_restrict_unprivileged_userns=1`
-and `kernel.apparmor_restrict_unprivileged_unconfined=1`. The outer
-Agent must retain Docker's **default AppArmor profile**: explicitly
-setting `apparmor=unconfined` prevented RootlessKit from creating its
-child user namespace (`operation not permitted`). A one-shot,
-non-root test under the default Docker profile accepted `unshare -Ur`.
-The Agent remains UID/GID 1000, with only SETUID/SETGID added and
-`seccomp=unconfined` for the rootless engine; no global host sysctls
-were modified. Confirm the actual private engine and Node WSS after deploy.
+and `kernel.apparmor_restrict_unprivileged_unconfined=1`. With
+`apparmor=unconfined`, RootlessKit cannot create its child namespace;
+under `docker-default`, namespace creation succeeds but the kernel
+transitions to the restricted `unprivileged_userns` profile and denies
+`CAP_SYS_ADMIN` needed for a private namespace mount. The host already
+provides an installed `rootlesskit` AppArmor profile with an explicit
+`userns,` rule. An ephemeral non-root container using that profile
+passed `unshare -Ur -m` and `mount --make-rprivate /` inside the isolated
+mount namespace. Thus, the Agent must use `apparmor=rootlesskit`,
+`seccomp=unconfined`, non-root UID/GID 1000 and only SETUID/SETGID
+outer capabilities. **Do not disable global AppArmor userns controls.**
+Confirm this named profile is installed on each host before deployment;
+a successful namespace probe does not replace actual dockerd/Node WSS
+runtime acceptance.
 
 ## Host network and dynamic ports
 

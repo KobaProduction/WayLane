@@ -34,9 +34,10 @@ services:
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID]
     security_opt:
-      # The server's docker-default AppArmor profile permits rootless userns.
-      # apparmor=unconfined is denied by Ubuntu's unconfined userns policy.
+      # Ubuntu's installed rootlesskit profile explicitly permits userns and
+      # namespaced mount; neither unconfined nor docker-default permits both.
       - seccomp=unconfined
+      - apparmor=rootlesskit
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
