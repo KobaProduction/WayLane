@@ -32,6 +32,22 @@ and Backend may deploy on all relevant commits without mandatory Watch Paths.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
 
+## Git delivery — validated direct push to main
+
+For this repository, the operator selected **local validation followed by a
+direct push to `main`**, without opening or extending pull requests by default.
+Use the current authorized checkout, verify the affected service owners with
+their native tests/build checks plus the root pre-push gate, and publish ordinary
+fast-forward commits directly to `origin/main`. Do not force-push, bypass
+hooks, or rewrite history. Confirm remote `main` still matches the tested
+base before sending commits.
+
+This direct workflow applies only while GitHub and the active transport allow
+writing to `main`. If branch protection, mandatory review or tool restrictions
+prevent it, stop and report the restriction; do not bypass it by switching
+credentials or transport. Pushing Git does **not** authorize a Coolify redeploy,
+database migration, Node enrollment or traffic cutover.
+
 ## Agent -> Node -> Core architecture
 
 The installation has exactly two outer Compose services: one-shot privileged

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-# The integration branch changes backend, frontend, Node and stable Agent.
-# Verify each affected source owner without running deployment side effects.
+# Verify each affected owner before direct publication, without deploying.
+# Unchanged owners are skipped; Agent and Node are independent build owners.
 base=""
 if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then
   base="$(git merge-base HEAD refs/remotes/origin/main)"

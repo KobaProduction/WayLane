@@ -3,11 +3,11 @@
 The monorepo was merged into main on 2026-10-26; this did not deploy
 WayLane to production. One Git source has independent service owners.
 The former frontend and node repositories were removed. The canonical
-GitHub source for all three services is KobaProduction/WayLane.
+GitHub source for all services is KobaProduction/WayLane.
 
 | Owner folder | Runtime | Deployment |
 | --- | --- | --- |
-| services/backend/ | Python 3.14, FastAPI, scheduler, node RPC | independent Coolify backend |
+| services/backend/ | Python 3.14, FastAPI, scheduler, binary WSS Node control | independent Coolify backend |
 | services/frontend/ | React/Bun, static Nginx | independent Coolify frontend |
 | services/agent/ | Go supervisor, private rootless Docker, immutable Node upgrades | stable outer Agent; separate Node image lifecycle |
 | services/node/ | Go WSS/Protobuf Node, child Xray, gated AWG 3.1 | replaceable internal Node (owned by Agent) |
@@ -23,12 +23,19 @@ DEV builds from source in Coolify; PROD releases use pinned image digests.
 
 ## Git validation
 
+**Delivery policy:** validate locally and push fast-forward commits directly to
+`origin/main` when it is unprotected and GitHub authorizes it. No PR is
+required by default. Never bypass branch protection, hooks or a required
+review; report the restriction instead. A source push does not imply a
+deployment of PostgreSQL or the unaccepted Node runtime.
+
 This monorepo already tracks a root `pre-push` gate. Use
 `git config --local core.hooksPath .githooks` in a regular checkout, or
 `git config --worktree core.hooksPath .githooks` in a linked worktree.
 The hook runs `scripts/verify-layout.py` and each affected owner's
-`services/{backend,frontend,node}/scripts/verify.sh` based on the changes
-since `origin/main`. A cross-service release checks all three owners.
+`services/{backend,frontend,node}/scripts/verify.sh` and
+`services/agent/verify.sh` based on the changes since `origin/main`.
+A cross-service release checks all four owners.
 Follow each service's documented toolchain requirements before pushing.
 This gate does not replace backend integration tests or real VPN/Node acceptance.
 
