@@ -233,7 +233,10 @@ func (m *manager) startNode(ctx context.Context, image string) error {
 		return err
 	}
 	_, err = m.run(ctx, "run", "-d", "--name", nodeContainer, "--label", "waylane.component=node",
-		"--restart", "unless-stopped", "--network", "host", "--read-only", "--user", "1000:1000",
+		// In the private rootless Docker daemon, container UID 0 maps to the
+		// Agent's non-root outer UID 1000 and can access its 0700 state/socket.
+		// Container UID 1000 instead maps to a subordinate UID and is denied.
+		"--restart", "unless-stopped", "--network", "host", "--read-only", "--user", "0:0",
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--tmpfs", "/tmp:rw,nosuid,nodev,size=32m",
 		"--env", "HOME=/tmp",

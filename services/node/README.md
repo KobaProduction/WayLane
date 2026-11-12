@@ -8,8 +8,16 @@ It uses the Agent-owned rootless Docker socket and never starts a
 second daemon. Changing a Node version does not restart Agent.
 
 Node and all VPN Cores use host networking on rootless Docker >=29.5,
-under an outer Agent with Linux host networking. Core TCP/UDP listen ports
-can be changed dynamically without editing Compose or restarting Agent.
+under an outer Agent with Linux host networking. The *inner* Node process
+uses container UID 0 inside its isolated rootless user namespace: that UID
+maps to the **outer non-root Agent UID 1000**, never host root. Running the
+inner Node as UID 1000 instead maps to a subordinate UID and cannot access
+the private 0700 Agent state volume or Docker socket. Agent enforces
+`--cap-drop ALL`, `no-new-privileges` and a read-only root filesystem;
+Node startup rejects a rootful UID map or unexpected effective capabilities.
+Do **not** weaken the private mounts to world-readable permissions.
+Core TCP/UDP listen ports can be changed dynamically without editing Compose
+or restarting Agent.
 Rootless privileged ports below 1024 and real external traffic acceptance
 still require separate verification.
 

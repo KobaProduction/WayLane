@@ -15,7 +15,13 @@ No inbound TCP management listener is created. Updates pull before cutover
 and attempt rollback to the prior Node image on startup failure.
 
 The Agent and its Node/core children use host networking through rootless
-Docker 29.5+; a Core opens/closes its own UDP/TCP listener, not a static
+Docker 29.5+. The outer Agent stays UID 1000 (non-root). The inner Node
+runs as UID 0 **only inside the private rootless user namespace**, which maps
+to the outer Agent's unprivileged UID 1000. This is needed for access to
+private 0700 state and Docker socket mounts; `--cap-drop ALL`,
+`no-new-privileges`, read-only root filesystem, and an explicit UID-map
+and effective-capability startup check are required. Rootful Node launches
+fail closed. A Core opens/closes its own UDP/TCP listener, not a static
 Docker Compose ports mapping. On Linux, this can expose unprivileged ports
 (1024 and above) without an Agent restart; reachability/firewall and
 bidirectional VPN traffic still need live acceptance. Docker Desktop host

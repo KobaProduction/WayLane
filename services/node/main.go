@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -293,9 +294,75 @@ func nodeHostNameFromFile(path string) (string, error) {
 
 var hostNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// The Node runs in Agent-owned *rootless* Docker. Container UID 0 must map
+// to the unprivileged outer Agent UID, never the host's root UID. The inner
+// UID 1000 maps to a different subordinate host UID and cannot access the
+// Agent's private state or Docker socket; do not "fix" this with chmod 0777.
+func validateNodeIdentity(euid int, uidMap, processStatus string) error {
+	if euid != 0 {
+		return nil
+	}
+	rows := strings.Split(strings.TrimSpace(uidMap), "\n")
+	if len(rows) < 2 {
+		return errors.New("rootless Node requires a subordinate UID mapping")
+	}
+	first := strings.Fields(rows[0])
+	if len(first) != 3 || first[0] != "0" || first[2] != "1" {
+		return errors.New("rootless Node UID 0 must map to one unprivileged outer UID")
+	}
+	// A second mapping must not expose host UID 0 as an alternative either.
+	for _, row := range rows {
+		fields := strings.Fields(row)
+		if len(fields) != 3 {
+			return errors.New("invalid Node user namespace mapping")
+		}
+		outerUID, err := strconv.ParseUint(fields[1], 10, 32)
+		if err != nil || outerUID == 0 {
+			return errors.New("Node must never map any UID to host root")
+		}
+		if _, err := strconv.ParseUint(fields[0], 10, 32); err != nil {
+			return errors.New("invalid Node user namespace mapping")
+		}
+		if _, err := strconv.ParseUint(fields[2], 10, 32); err != nil {
+			return errors.New("invalid Node user namespace mapping")
+		}
+	}
+	capabilitiesDisabled := false
+	noNewPrivileges := false
+	for _, line := range strings.Split(processStatus, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		switch fields[0] {
+		case "CapEff:":
+			bits, err := strconv.ParseUint(fields[1], 16, 64)
+			capabilitiesDisabled = err == nil && bits == 0
+		case "NoNewPrivs:":
+			noNewPrivileges = fields[1] == "1"
+		}
+	}
+	if !capabilitiesDisabled || !noNewPrivileges {
+		return errors.New("rootless Node requires all capabilities dropped and no-new-privileges")
+	}
+	return nil
+}
+
+func verifyNodeIdentity() error {
+	uidMap, err := os.ReadFile("/proc/self/uid_map")
+	if err != nil {
+		return errors.New("cannot verify Node user namespace mapping")
+	}
+	status, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return errors.New("cannot verify Node capability restrictions")
+	}
+	return validateNodeIdentity(os.Geteuid(), string(uidMap), string(status))
+}
+
 func run(ctx context.Context) error {
-	if os.Geteuid() == 0 {
-		return errors.New("WayLane Node must never run as host root")
+	if err := verifyNodeIdentity(); err != nil {
+		return err
 	}
 	if os.Getenv("NODE_MANAGED_BY_AGENT") != "true" {
 		return errors.New("Node must be installed and supervised by the stable WayLane Agent")

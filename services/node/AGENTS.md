@@ -7,7 +7,11 @@ Read root `AGENTS.md`, `services/node/README.md`,
 Node installs via `deploy/node/{classic,discovery}/` with exactly two
 outer services: one-shot privileged bootstrap and stable non-root Agent.
 The Agent owns private rootless Docker and upgrades the replaceable inner
-Node; the Node owns the WSS session and its child VPN Cores.
+Node; the Node owns the WSS session and its child VPN Cores. The inner Node
+runs with UID 0 *inside the rootless user namespace*, mapped to the outer
+non-root UID 1000. It must keep all capabilities dropped and
+no-new-privileges, validate UID mapping at startup, and never use rootful
+Docker or world-readable private Agent mounts.
 The control plane is **one outbound authenticated WSS connection** with
 binary Protobuf. No secondary management transport, host Docker socket,
 independent systemd service or extra Compose rootless sidecar.

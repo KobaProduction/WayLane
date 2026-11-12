@@ -255,3 +255,29 @@ func TestNodeRequiresStableAgentOwnership(t *testing.T) {
 		t.Fatalf("standalone Node unexpectedly started its own rootless daemon: %v", err)
 	}
 }
+
+// The private nested Docker Engine maps child UID 0 -> outer non-root UID
+// (for example 1000), while child UID 1000 maps to inaccessible subordinate
+// UID space. Reject any rootful Docker or loss of no-new-privileges policy.
+func TestNodeRootlessMappedIdentityOnly(t *testing.T) {
+	acceptedMap := "         0       1000          1\n         1     100000      65536\n"
+	acceptedStatus := "Uid:\t0\t0\t0\t0\nCapEff:\t0000000000000000\nNoNewPrivs:\t1\n"
+	if err := validateNodeIdentity(0, acceptedMap, acceptedStatus); err != nil {
+		t.Fatalf("rootless mapped UID denied: %v", err)
+	}
+	for _, tc := range []struct{ name, uidMap, status string }{
+		{"host-root", "0 0 4294967295\n", acceptedStatus},
+		{"rootful-userns", "0 0 1\n1 100000 65536\n", acceptedStatus},
+		{"wide-userns-mapping", "0 1000 65536\n", acceptedStatus},
+		{"host-root-in-second-map", "0 1000 1\n1 0 1\n", acceptedStatus},
+		{"broken-user-map", "0 1000 1\ninvalid\n", acceptedStatus},
+		{"capabilities", acceptedMap, "CapEff:\t0000000000000020\nNoNewPrivs:\t1\n"},
+		{"new-privileges", acceptedMap, "CapEff:\t0000000000000000\nNoNewPrivs:\t0\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateNodeIdentity(0, tc.uidMap, tc.status); err == nil {
+				t.Fatal("unsafe child identity accepted")
+			}
+		})
+	}
+}

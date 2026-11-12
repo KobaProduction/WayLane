@@ -141,7 +141,8 @@ func TestStableAgentStartsNodeOnPrivateRootlessDaemon(t *testing.T) {
 		count++
 		joined := strings.Join(args, " ")
 		for _, required := range []string{"--network host", "--env-file", "waylane.component=node",
-			"/run/user/1000", "waylane-node-seed:bootstrap", "--cap-drop ALL"} {
+			"/run/user/1000", "waylane-node-seed:bootstrap", "--cap-drop ALL",
+			"--user 0:0", "--security-opt no-new-privileges"} {
 			if !strings.Contains(joined, required) {
 				t.Fatalf("Node lacks expected isolation %q: %s", required, joined)
 			}
