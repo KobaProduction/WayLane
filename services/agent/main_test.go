@@ -21,6 +21,7 @@ type fakeDocker struct {
 	exists  bool
 	owned   bool
 	running bool
+	image   string
 	fail    string
 }
 
@@ -29,7 +30,8 @@ func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
 	if len(args) == 0 {
 		return "", errors.New("no args")
 	}
-	if args[0] == f.fail {
+	if args[0] == f.fail ||
+		(f.fail == "restore-image" && args[0] == "run" && args[len(args)-1] == nodeSeed) {
 		return "", errors.New("synthetic Docker failure")
 	}
 	switch args[0] {
@@ -51,6 +53,9 @@ func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
 			}
 			return "node", nil
 		}
+		if len(args) > 3 && strings.Contains(args[3], ".Config.Image") {
+			return f.image, nil
+		}
 		if f.running {
 			return "true", nil
 		}
@@ -62,6 +67,7 @@ func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
 		f.exists = true
 		f.owned = true
 		f.running = true
+		f.image = args[len(args)-1]
 		return "synthetic-container-id", nil
 	case "stop":
 		f.running = false
@@ -69,6 +75,7 @@ func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
 	case "rm":
 		f.exists = false
 		f.running = false
+		f.image = ""
 		return "", nil
 	}
 	return "", nil
@@ -299,5 +306,89 @@ func TestDockerCLIUsesWritablePrivateConfigEvenWithReadOnlyHome(t *testing.T) {
 	info, err := os.Stat(got)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		t.Fatal("Docker CLI config directory not private", err)
+	}
+}
+
+func TestAgentReconcilesRunningNodeWithPersistedRelease(t *testing.T) {
+	fake := &fakeDocker{exists: true, owned: true, running: true, image: testDigest}
+	m := &manager{run: fake.Run, stateDir: t.TempDir(), panelURL: "https://panel.invalid",
+		nodeToken: "synthetic", image: nodeSeed}
+	if err := m.ensureNode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.image != nodeSeed || !fake.running || !fake.has("stop") {
+		t.Fatal("Agent left a running child on the wrong release")
+	}
+	before := len(fake.calls)
+	if err := m.ensureNode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range fake.calls[before:] {
+		if call[0] == "stop" || call[0] == "rm" || call[0] == "run" {
+			t.Fatal("already reconciled Node was restarted again")
+		}
+	}
+}
+
+func TestAgentRestoresPreviousReleaseIfPersistenceFails(t *testing.T) {
+	fake := &fakeDocker{exists: true, owned: true, running: true, image: nodeSeed}
+	dir := t.TempDir()
+	// A directory at the persistence destination makes atomic rename fail,
+	// without making the fake Docker daemon's command execution fail.
+	if err := os.Mkdir(filepath.Join(dir, "node-release.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	m := &manager{run: fake.Run, stateDir: dir, panelURL: "https://panel.invalid",
+		nodeToken: "synthetic", image: nodeSeed}
+	if err := m.updateNode(context.Background(), testDigest); err == nil {
+		t.Fatal("unpersisted Node release was accepted")
+	}
+	if m.image != nodeSeed || fake.image != nodeSeed || !fake.running {
+		t.Fatalf("failed persistence left Agent on a mismatched runtime: selected=%s running=%s", m.image, fake.image)
+	}
+}
+
+func TestAgentFailsClosedIfReleaseRollbackAlsoFails(t *testing.T) {
+	fake := &fakeDocker{exists: true, owned: true, running: true, image: nodeSeed, fail: "restore-image"}
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "node-release.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	m := &manager{run: fake.Run, stateDir: dir, panelURL: "https://panel.invalid",
+		nodeToken: "synthetic", image: nodeSeed}
+	err := m.updateNode(context.Background(), testDigest)
+	if err == nil || !strings.Contains(err.Error(), "rollback failed") {
+		t.Fatalf("failed Node rollback incorrectly reported: %v", err)
+	}
+	if m.image != nodeSeed || fake.running {
+		t.Fatal("failed rollback silently reported a working old release")
+	}
+}
+
+func TestAgentDoesNotStopNodeIfDesiredImageCannotBeStaged(t *testing.T) {
+	fake := &fakeDocker{exists: true, owned: true, running: true, image: nodeSeed, fail: "pull"}
+	m := &manager{run: fake.Run, stateDir: t.TempDir(), panelURL: "https://panel.invalid",
+		nodeToken: "synthetic", image: testDigest}
+	if err := m.ensureNode(context.Background()); err == nil {
+		t.Fatal("unavailable desired image was incorrectly accepted")
+	}
+	if !fake.running || fake.image != nodeSeed || fake.has("stop") || fake.has("rm") {
+		t.Fatal("Agent interrupted a running Node before staging its target release")
+	}
+}
+
+func TestIdempotentReleaseRepairsDriftWithoutRestartingAgent(t *testing.T) {
+	fake := &fakeDocker{exists: true, owned: true, running: true, image: nodeSeed}
+	dir := t.TempDir()
+	m := &manager{run: fake.Run, stateDir: dir, panelURL: "https://panel.invalid",
+		nodeToken: "synthetic", image: testDigest}
+	if err := m.updateNode(context.Background(), testDigest); err != nil {
+		t.Fatal(err)
+	}
+	if fake.image != testDigest || !fake.running {
+		t.Fatal("idempotent Node release did not reconcile a stale child image")
+	}
+	if _, err := os.Stat(m.releasePath()); !os.IsNotExist(err) {
+		t.Fatal("idempotent update unexpectedly modified persisted release file")
 	}
 }

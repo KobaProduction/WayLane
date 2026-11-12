@@ -28,6 +28,12 @@ applied without changing the Agent. The current Panel does not yet have a
 public Node-release endpoint; Agent local Unix API is the authority.
 
 On restart, the Agent retains its desired Node image, identity volume and
-private daemon state. Health checks require both the Agent's Unix socket
-and a running labeled Node. Approval and migration from the former combined
+private daemon state. It verifies that the running Agent-owned Node image
+matches the persisted release. An unexpected image is replaced only after
+staging the selected image; if saving a new release fails, the previous
+release is restored, and the update reports an error. Failed rollback is
+explicitly reported and never silently counted as success.
+
+Health checks require both the Agent's Unix socket and a running labeled
+Node. Approval and migration from the former combined
 Agent/Node deployment require an isolated runtime test and rollback backup.

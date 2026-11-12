@@ -5,8 +5,9 @@ Read root `AGENTS.md`, `services/node/README.md`,
 `deploy/node/README.md` and relevant AI Agent Workflow skills.
 
 Node installs via `deploy/node/{classic,discovery}/` with exactly two
-outer services: one-shot privileged bootstrap, non-root steady-state
-agent controller that owns its private rootless Docker and VPN cores.
+outer services: one-shot privileged bootstrap and stable non-root Agent.
+The Agent owns private rootless Docker and upgrades the replaceable inner
+Node; the Node owns the WSS session and its child VPN Cores.
 The control plane is **one outbound authenticated WSS connection** with
 binary Protobuf. No secondary management transport, host Docker socket,
 independent systemd service or extra Compose rootless sidecar.

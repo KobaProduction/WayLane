@@ -253,6 +253,32 @@ func (m *manager) runningNode(ctx context.Context) (bool, error) {
 	}
 	return status == "true", nil
 }
+func (m *manager) runningNodeImage(ctx context.Context) (string, error) {
+	return m.run(ctx, "container", "inspect", "--format", "{{.Config.Image}}", nodeContainer)
+}
+
+// A failed update must not leave the selected release different from the
+// running Node. Never modify a container without first checking its owner.
+func (m *manager) restoreNode(ctx context.Context, previous string) error {
+	exists, err := m.ownedNode(ctx)
+	if err != nil {
+		return err
+	}
+	if exists {
+		if _, err := m.run(ctx, "rm", "-f", nodeContainer); err != nil {
+			return err
+		}
+	}
+	if err := m.startNode(ctx, previous); err != nil {
+		return err
+	}
+	running, err := m.runningNode(ctx)
+	if err != nil || !running {
+		return errors.New("previous Node release did not restart")
+	}
+	return nil
+}
+
 func (m *manager) ensureNode(ctx context.Context) error {
 	exists, err := m.ownedNode(ctx)
 	if err != nil {
@@ -264,7 +290,20 @@ func (m *manager) ensureNode(ctx context.Context) error {
 			return err
 		}
 		if running {
-			return nil
+			image, err := m.runningNodeImage(ctx)
+			if err != nil {
+				return err
+			}
+			if image == m.image {
+				return nil
+			}
+			// Stage the selected image before interrupting the running child.
+			if err := m.stageImage(ctx, m.image); err != nil {
+				return err
+			}
+			if _, err = m.run(ctx, "stop", "--time", "10", nodeContainer); err != nil {
+				return err
+			}
 		}
 		if _, err = m.run(ctx, "rm", nodeContainer); err != nil {
 			return err
@@ -272,12 +311,13 @@ func (m *manager) ensureNode(ctx context.Context) error {
 	}
 	return m.startNode(ctx, m.image)
 }
+
 func (m *manager) updateNode(ctx context.Context, next string) error {
 	if !nodeDigest.MatchString(next) {
 		return errors.New("Node image digest must be immutable and from approved registry")
 	}
 	if next == m.image {
-		return nil
+		return m.ensureNode(ctx)
 	}
 	if err := m.stageImage(ctx, next); err != nil {
 		return err
@@ -296,17 +336,23 @@ func (m *manager) updateNode(ctx context.Context, next string) error {
 		}
 	}
 	if err = m.startNode(ctx, next); err != nil {
-		_ = m.startNode(ctx, old)
-		return err
+		if m.restoreNode(ctx, old) != nil {
+			return errors.New("new Node failed and previous release could not be restored")
+		}
+		return errors.New("new Node failed; previous release restored")
 	}
 	running, err := m.runningNode(ctx)
 	if err != nil || !running {
-		_, _ = m.run(ctx, "rm", "-f", nodeContainer)
-		_ = m.startNode(ctx, old)
-		return errors.New("new Node exited; rollback attempted")
+		if m.restoreNode(ctx, old) != nil {
+			return errors.New("new Node exited and previous release could not be restored")
+		}
+		return errors.New("new Node exited; previous release restored")
 	}
 	if err = m.saveRelease(next); err != nil {
-		return err
+		if m.restoreNode(ctx, old) != nil {
+			return errors.New("Node release persistence failed and rollback failed")
+		}
+		return errors.New("Node release persistence failed; previous release restored")
 	}
 	m.image = next
 	return nil
