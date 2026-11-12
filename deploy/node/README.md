@@ -61,7 +61,7 @@ it. Do not precreate a Classic identity.
 | Coolify field | Value |
 | --- | --- |
 | Git repository | `KobaProduction/WayLane` |
-| Branch | `main`, after approved merge |
+| Branch | `main` after locally validated direct push; pin the tested commit for a pilot |
 | Base Directory | `/deploy/node/discovery` |
 | Compose Location | `/docker-compose.coolify.yaml` |
 | Build Pack | Docker Compose |
@@ -83,7 +83,7 @@ authenticated telemetry.
 | Coolify field | Value |
 | --- | --- |
 | Git repository | `KobaProduction/WayLane` |
-| Branch | `main`, after approved merge |
+| Branch | `main` after locally validated direct push; pin the tested commit for a pilot |
 | Base Directory | `/deploy/node/classic` |
 | Compose Location | `/docker-compose.coolify.yaml` |
 | Build Pack | Docker Compose |
@@ -124,6 +124,29 @@ A working UAPI socket and TUN character device in the outer Node do not
 prove externally reachable VPN ingress. Inspect the entire host → outer
 Compose → rootless daemon → child UDP forwarding chain and explicitly
 approve its networking model before adding public port mappings.
+
+## Isolated development pilot — 2026-11-12
+
+On KOBA-LAPTOP (Docker Desktop / Ubuntu WSL2), an isolated Compose project
+built from `main` at `0b3f7a1` was exercised with a synthetic local
+Discovery target, **not** the public WayLane panel. Observed acceptance:
+
+- One-shot bootstrap exited 0; stable non-root Agent started embedded rootless
+  Docker 29.5.3, with private persistent volumes and no public management port
+- Agent rebuilt its local Node seed from the bundled binary after source
+  update; the Node container's immutable image ID matched the seed image ID
+- Inner Node ran in the private user namespace, mapped its UID 0 to outer
+  non-root UID 1000, and created `identity.json` with mode 0600
+- Node reached `POST /api/node-control/enroll` at the intentionally absent
+  local test endpoint, which returned connection refused; no real credentials
+  or live WayLane enrollment were attempted
+
+The synthetic pilot Agent was **stopped** after verification; its bootstrap
+and Agent containers plus all three isolated named volumes are preserved.
+No authenticated panel WSS, approval, managed Xray child, AWG/TUN or external
+TCP/UDP client-traffic acceptance is claimed. A real pilot requires a
+panel-issued one-time invitation and an explicitly isolated deployment,
+followed by a real binary WSS handshake and client protocol tests.
 
 ## Runtime secrets and acceptance
 
