@@ -9,7 +9,7 @@ resources. **Do not** use the all-in-one root Compose or legacy
 | **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | **Manual only**; PostgreSQL is not redeployed for app changes |
 | **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
 | **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
-| **WayLane / Node** (future isolated pilot) | `/deploy/node/discovery` (or `/deploy/node/classic`) | `/docker-compose.coolify.yaml` | **Manual only** until identity, rootless Docker and VPN traffic acceptance |
+| **WayLane / Node** (created, not deployed) | `/deploy/node/discovery` | `/docker-compose.coolify.yaml` | **Manual only**; real panel-issued Discovery token and registration still required |
 
 The resource named **WayLane / Dependencies** contains the single PostgreSQL
 service `waylane-postgres`; it is not a second application runtime.

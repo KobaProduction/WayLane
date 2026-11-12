@@ -141,12 +141,38 @@ Discovery target, **not** the public WayLane panel. Observed acceptance:
   local test endpoint, which returned connection refused; no real credentials
   or live WayLane enrollment were attempted
 
-The synthetic pilot Agent was **stopped** after verification; its bootstrap
-and Agent containers plus all three isolated named volumes are preserved.
+The synthetic pilot has since been **fully removed from KOBA-LAPTOP** at the
+operator's request: all WayLane pilot containers, images, named volumes and
+its temporary repository clone were removed. No laptop Node is installed.
 No authenticated panel WSS, approval, managed Xray child, AWG/TUN or external
 TCP/UDP client-traffic acceptance is claimed. A real pilot requires a
 panel-issued one-time invitation and an explicitly isolated deployment,
 followed by a real binary WSS handshake and client protocol tests.
+
+## Current tambov development resource — 2026-11-12
+
+Coolify `WayLane / development` has an independent resource
+**WayLane / Node** (`o3tsn2bdcpxyhtqshpzfosfw`), pointed at
+`KobaProduction/WayLane` `main` on server `tambov`, destination
+`WayLane Development`, base `/deploy/node/discovery` and Compose
+`/docker-compose.coolify.yaml`. The resource has **not deployed** any
+containers or created Node persistent volumes; it is currently exited.
+No public domain or exposed host port was configured. The operator-defined
+`CONTROL_PANEL_URL` points at the existing WayLane HTTPS panel and is
+runtime-only. `DISCOVERY_TOKEN` is **not configured**; the Coolify
+Compose parser correctly requires a non-empty panel-issued invitation.
+Do not set a guessed token or redeploy in this state. Once the operator
+creates the first owner and issues an invitation under Nodes → Discovery,
+store the actual invitation as the protected **runtime-only**, not buildtime,
+`DISCOVERY_TOKEN` in the Node resource, verify Coolify's parsed Compose,
+then deploy the Node. Preserve its three dedicated named volumes thereafter.
+
+Node machine metrics and state are carried to the WayLane Backend via the
+single authenticated binary-Protobuf WSS control channel. Backend persists
+node `machine_metrics` and `last_seen_at` in the registration model;
+this is not a direct OTLP export from the Node, and it cannot be observed
+until enrollment and a live handshake succeed. Backend's own OTLP export
+to SigNoz is a separate observability channel.
 
 ## Runtime secrets and acceptance
 

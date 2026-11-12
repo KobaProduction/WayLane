@@ -18,8 +18,10 @@ these three running resources.
   to SigNoz as `WayLane/frontend`; no Nginx log exporter or collector is used.
   `SERVICE_FQDN_FRONTEND_8080` is **not** an operator input or required
   second public-domain directive.
-- **WayLane / Node** — separate, manual-only future deployment at
-  `/deploy/node/discovery` (or `/deploy/node/classic`). Exactly two outer
+- **WayLane / Node** — separate, manual-only Coolify resource created but
+  **not deployed**, sourced from `/deploy/node/discovery`; the Classic profile
+  remains an alternative. First-owner onboarding and a panel-issued Discovery
+  invitation are pending. Exactly two outer
   Compose services: one-shot bootstrap and stable Agent with its own private
   rootless Docker. The Agent starts a replaceable inner Node, which owns
   Panel WSS and VPN Cores. No additional public management domain, system
