@@ -6,7 +6,11 @@ The Node owns the single outbound WSS/Protobuf connection to the Panel,
 and manages its own VPN Core siblings through the private rootless daemon.
 
 On first installation, Agent builds a local seed Node from a binary bundled
-in the installer image; a subsequently published immutable Node image can be
+in the installer image. On Agent restart the local seed image is rebuilt from
+its embedded binary (using Docker build cache) and its immutable image ID is
+compared to the running child; a stale child is replaced without touching
+identity volumes. A child stuck in Docker's `restarting` state is not
+considered ready. A subsequently published immutable Node image can be
 installed independently without restarting Agent. The stable Agent API v1
 uses only a private Unix socket at NODE_STATE_DIR/control/agent.sock:
 - GET /v1/node: current chosen Node image

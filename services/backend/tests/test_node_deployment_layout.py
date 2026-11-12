@@ -76,7 +76,10 @@ def test_classic_and_discovery_share_identical_node_runtime_and_security():
         assert "ports" not in agent and "ports" not in bootstrap
         assert agent["cap_drop"] == ["ALL"]
         assert agent["read_only"] is True
-        assert "waylane-node-runtime" in " ".join(agent["healthcheck"]["test"])
+        healthcheck = " ".join(agent["healthcheck"]["test"])
+        assert "waylane-node-runtime" in healthcheck
+        assert ".State.Status" in healthcheck
+        assert "running node" in healthcheck
         assert agent["healthcheck"]["start_period"] == "120s"
         assert any(
             isinstance(v, dict) and v["source"] == "/etc/hostname"

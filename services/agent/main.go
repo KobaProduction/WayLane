@@ -184,9 +184,9 @@ func (m *manager) ownedNode(ctx context.Context) (bool, error) {
 }
 func (m *manager) stageImage(ctx context.Context, image string) error {
 	if image == nodeSeed {
-		if _, err := m.run(ctx, "image", "inspect", nodeSeed); err == nil {
-			return nil
-		}
+		// The Agent image bundles the seed binary. A previously cached image
+		// with this stable tag may contain an older binary: Docker rebuild
+		// detects updated COPY input and re-tags it without deleting data.
 		if _, err := m.run(ctx, "build", "--tag", nodeSeed, "-f", "/opt/waylane/node-seed/Dockerfile", "/opt/waylane/node-seed"); err != nil {
 			return errors.New("Node seed build failed")
 		}
@@ -250,14 +250,23 @@ func (m *manager) startNode(ctx context.Context, image string) error {
 	return nil
 }
 func (m *manager) runningNode(ctx context.Context) (bool, error) {
-	status, err := m.run(ctx, "container", "inspect", "--format", "{{.State.Running}}", nodeContainer)
+	status, err := m.run(ctx, "container", "inspect", "--format", "{{.State.Status}}", nodeContainer)
 	if err != nil {
 		return false, err
 	}
-	return status == "true", nil
+	return status == "running", nil
 }
 func (m *manager) runningNodeImage(ctx context.Context) (string, error) {
 	return m.run(ctx, "container", "inspect", "--format", "{{.Config.Image}}", nodeContainer)
+}
+
+// Compare immutable image IDs for the mutable local seed tag. Comparing
+// Config.Image strings alone would silently preserve an outdated seed Node.
+func (m *manager) runningNodeImageID(ctx context.Context) (string, error) {
+	return m.run(ctx, "container", "inspect", "--format", "{{.Image}}", nodeContainer)
+}
+func (m *manager) seededImageID(ctx context.Context) (string, error) {
+	return m.run(ctx, "image", "inspect", "--format", "{{.Id}}", nodeSeed)
 }
 
 // A failed update must not leave the selected release different from the
@@ -297,18 +306,34 @@ func (m *manager) ensureNode(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if image == m.image {
-				return nil
+			if image == m.image && image != nodeSeed {
+				return nil // Immutable digest already matches.
 			}
 			// Stage the selected image before interrupting the running child.
 			if err := m.stageImage(ctx, m.image); err != nil {
 				return err
 			}
+			if image == nodeSeed && m.image == nodeSeed {
+				currentID, err := m.runningNodeImageID(ctx)
+				if err != nil {
+					return err
+				}
+				seedID, err := m.seededImageID(ctx)
+				if err != nil || seedID == "" {
+					return errors.New("cannot inspect selected Node seed image")
+				}
+				if currentID == seedID {
+					return nil
+				}
+			}
 			if _, err = m.run(ctx, "stop", "--time", "10", nodeContainer); err != nil {
 				return err
 			}
 		}
-		if _, err = m.run(ctx, "rm", nodeContainer); err != nil {
+		// A child under Docker's restart policy can be in "restarting":
+		// normal rm is rejected, so remove only the already owned child
+		// forcefully after checking its label.
+		if _, err = m.run(ctx, "rm", "-f", nodeContainer); err != nil {
 			return err
 		}
 	}

@@ -17,12 +17,15 @@ import (
 const testDigest = "ghcr.io/kobaproduction/waylane-node@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type fakeDocker struct {
-	calls   [][]string
-	exists  bool
-	owned   bool
-	running bool
-	image   string
-	fail    string
+	calls       [][]string
+	exists      bool
+	owned       bool
+	running     bool
+	restarting  bool
+	image       string
+	imageID     string
+	seedImageID string
+	fail        string
 }
 
 func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
@@ -38,10 +41,16 @@ func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
 	case "info":
 		return `["name=rootless"]`, nil
 	case "image":
+		if len(args) > 3 && strings.Contains(args[3], ".Id") {
+			return f.seedImageID, nil
+		}
 		return "", nil
 	case "pull":
 		return "", nil
 	case "build":
+		if f.seedImageID == "" {
+			f.seedImageID = "sha256:seed-image-v1"
+		}
 		return "", nil
 	case "container":
 		if !f.exists {
@@ -56,10 +65,19 @@ func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
 		if len(args) > 3 && strings.Contains(args[3], ".Config.Image") {
 			return f.image, nil
 		}
-		if f.running {
-			return "true", nil
+		if len(args) > 3 && args[3] == "{{.Image}}" {
+			return f.imageID, nil
 		}
-		return "false", nil
+		if len(args) > 3 && strings.Contains(args[3], ".State.Status") {
+			if f.restarting {
+				return "restarting", nil
+			}
+			if f.running {
+				return "running", nil
+			}
+			return "exited", nil
+		}
+		return "", errors.New("unrecognized Docker inspect request")
 	case "run":
 		if f.fail == "new-image" && args[len(args)-1] == testDigest {
 			return "", errors.New("synthetic replacement startup failure")
@@ -67,15 +85,23 @@ func (f *fakeDocker) Run(_ context.Context, args ...string) (string, error) {
 		f.exists = true
 		f.owned = true
 		f.running = true
+		f.restarting = false
 		f.image = args[len(args)-1]
+		f.imageID = f.image
+		if f.image == nodeSeed {
+			f.imageID = f.seedImageID
+		}
 		return "synthetic-container-id", nil
 	case "stop":
 		f.running = false
+		f.restarting = false
 		return "", nil
 	case "rm":
 		f.exists = false
 		f.running = false
+		f.restarting = false
 		f.image = ""
+		f.imageID = ""
 		return "", nil
 	}
 	return "", nil
@@ -127,8 +153,8 @@ func TestStableAgentStartsNodeOnPrivateRootlessDaemon(t *testing.T) {
 	if err := m.ensureNode(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !docker.has("run") || !docker.has("image") {
-		t.Fatal("Node seed installation did not run")
+	if !docker.has("run") || !docker.has("build") {
+		t.Fatal("Node seed installation was not built and started")
 	}
 	if err := m.ensureNode(context.Background()); err != nil {
 		t.Fatal(err)
@@ -391,5 +417,49 @@ func TestIdempotentReleaseRepairsDriftWithoutRestartingAgent(t *testing.T) {
 	}
 	if _, err := os.Stat(m.releasePath()); !os.IsNotExist(err) {
 		t.Fatal("idempotent update unexpectedly modified persisted release file")
+	}
+}
+
+func TestAgentRebuildsOutdatedSeedAndReplacesChild(t *testing.T) {
+	fake := &fakeDocker{exists: true, owned: true, running: true,
+		image: nodeSeed, imageID: "sha256:old-seed", seedImageID: "sha256:current-seed"}
+	m := &manager{run: fake.Run, stateDir: t.TempDir(),
+		panelURL: "https://panel.invalid", nodeToken: "synthetic", image: nodeSeed}
+	if err := m.ensureNode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fake.imageID != "sha256:current-seed" || !fake.has("build") || !fake.has("stop") {
+		t.Fatal("cached seed image was incorrectly considered current")
+	}
+	before := len(fake.calls)
+	if err := m.ensureNode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range fake.calls[before:] {
+		if call[0] == "stop" || call[0] == "rm" || call[0] == "run" {
+			t.Fatal("unchanged seed image should not restart the Node")
+		}
+	}
+}
+
+func TestAgentDoesNotAcceptRestartingChildAsRunning(t *testing.T) {
+	fake := &fakeDocker{exists: true, owned: true, restarting: true,
+		image: nodeSeed, imageID: "sha256:stale", seedImageID: "sha256:current-seed"}
+	m := &manager{run: fake.Run, stateDir: t.TempDir(),
+		panelURL: "https://panel.invalid", nodeToken: "synthetic", image: nodeSeed}
+	if err := m.ensureNode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.running || fake.restarting || fake.imageID != fake.seedImageID || !fake.has("rm") {
+		t.Fatal("Agent accepted a restarting child as healthy")
+	}
+	forced := false
+	for _, args := range fake.calls {
+		if len(args) == 3 && args[0] == "rm" && args[1] == "-f" && args[2] == nodeContainer {
+			forced = true
+		}
+	}
+	if !forced {
+		t.Fatal("restarting child was not removed with Docker's required force flag")
 	}
 }
