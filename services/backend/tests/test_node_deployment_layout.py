@@ -75,6 +75,8 @@ def test_classic_and_discovery_share_identical_node_runtime_and_security():
         assert agent["depends_on"]["bootstrap"]["condition"] == "service_completed_successfully"
         assert "ports" not in agent and "ports" not in bootstrap
         assert agent["cap_drop"] == ["ALL"]
+        assert "seccomp=unconfined" in agent["security_opt"]
+        assert "apparmor=unconfined" not in agent["security_opt"]
         assert agent["read_only"] is True
         healthcheck = " ".join(agent["healthcheck"]["test"])
         assert "waylane-node-runtime" in healthcheck

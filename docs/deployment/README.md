@@ -19,7 +19,8 @@ these three running resources.
   `SERVICE_FQDN_FRONTEND_8080` is **not** an operator input or required
   second public-domain directive.
 - **WayLane / Node** — separate, manual-only Coolify resource created but
-  **not deployed**, sourced from `/deploy/node/discovery`; the Classic profile
+  awaiting runtime acceptance, sourced from `/deploy/node/discovery`
+  with `/docker-compose.yaml` in Raw mode; the Classic profile
   remains an alternative. First-owner onboarding and a panel-issued Discovery
   invitation are pending. Exactly two outer
   Compose services: one-shot bootstrap and stable Agent with its own private

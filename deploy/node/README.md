@@ -26,12 +26,13 @@ Each mode has generic and Coolify Compose manifests.
   Node repository is needed for the first pilot.
 - Coolify Base Directory: `/deploy/node/discovery` **or**
   `/deploy/node/classic`; Compose Location for either:
-  `/docker-compose.coolify.yaml`. **Select Raw (deploy file as-is)**
-  under Advanced → Docker compose: Coolify's managed parser adds a
-  `networks` entry incompatible with the installer bootstrap
-  `network_mode: none` and Agent `network_mode: host`.
-  The adapter omits Coolify-only `exclude_from_hc` so that standard
-  Docker Compose also accepts it. The service directory
+  `/docker-compose.yaml` **when using Raw (deploy file as-is)** under
+  Advanced → Docker compose. The managed parser adds an incompatible
+  `networks` entry to the bootstrap `network_mode: none` and Agent
+  `network_mode: host`; using `docker-compose.coolify.yaml` in Raw mode
+  causes a circular `extends` because Coolify renames it to
+  `docker-compose.yaml` at runtime. Use the self-contained generic file.
+  The service directory
   `/services/node` is **not** the Coolify Base Directory.
 - Compose project, volumes and credentials are unique to the selected
   installation. For multiple Nodes on one host assign distinct Compose
@@ -68,7 +69,7 @@ it. Do not precreate a Classic identity.
 | Git repository | `KobaProduction/WayLane` |
 | Branch | `main` after locally validated direct push; pin the tested commit for a pilot |
 | Base Directory | `/deploy/node/discovery` |
-| Compose Location | `/docker-compose.coolify.yaml` |
+| Compose Location | `/docker-compose.yaml` (Raw mode) |
 | Build Pack | Docker Compose |
 
 Set `CONTROL_PANEL_URL` to the trusted public HTTPS Panel origin and
@@ -90,7 +91,7 @@ authenticated telemetry.
 | Git repository | `KobaProduction/WayLane` |
 | Branch | `main` after locally validated direct push; pin the tested commit for a pilot |
 | Base Directory | `/deploy/node/classic` |
-| Compose Location | `/docker-compose.coolify.yaml` |
+| Compose Location | `/docker-compose.yaml` (Raw mode) |
 | Build Pack | Docker Compose |
 
 Set `CONTROL_PANEL_URL` to the trusted public HTTPS Panel origin and
@@ -98,6 +99,18 @@ Set `CONTROL_PANEL_URL` to the trusted public HTTPS Panel origin and
 `DISCOVERY_TOKEN` is always empty, `DEV_ALLOW_HTTP` is forced false.
 No extra DNS listener, gRPC target or published Node management port is
 needed. Both profiles build the same Node runtime.
+
+### Server user namespace policy
+
+On `tambov`, Linux has `kernel.apparmor_restrict_unprivileged_userns=1`
+and `kernel.apparmor_restrict_unprivileged_unconfined=1`. The outer
+Agent must retain Docker's **default AppArmor profile**: explicitly
+setting `apparmor=unconfined` prevented RootlessKit from creating its
+child user namespace (`operation not permitted`). A one-shot,
+non-root test under the default Docker profile accepted `unshare -Ur`.
+The Agent remains UID/GID 1000, with only SETUID/SETGID added and
+`seccomp=unconfined` for the rootless engine; no global host sysctls
+were modified. Confirm the actual private engine and Node WSS after deploy.
 
 ## Host network and dynamic ports
 
