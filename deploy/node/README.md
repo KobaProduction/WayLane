@@ -17,8 +17,10 @@ Each mode has generic and Coolify Compose manifests.
 ## Source, build and deployment boundary
 
 - GitHub repository: `KobaProduction/WayLane`; use an explicitly accepted
-  and pinned source revision for a disposable development pilot. Use `main`
-  only after the independent review and merge have been approved.
+  and pinned source revision for a disposable development pilot. Source
+  changes are validated locally and pushed directly to `main` according
+  to the root `AGENTS.md`; no PR/merge is required by default. Node
+  deployments remain manual and independently approved.
 - Build context: **monorepo root**; Dockerfiles are
   `services/agent/bootstrap.Dockerfile` and
   `services/agent/agent.Dockerfile`. Coolify builds directly from Git.
