@@ -23,6 +23,7 @@ from app.db.models import (
     node_agent_registrations,
     node_agent_xray_desired,
     node_agent_xray_managed_inbounds,
+    node_agent_xray_usage_cursors,
     node_discovery_invitations,
 )
 from app.db.tls import agent_tls_bindings, tls_presets
@@ -961,6 +962,31 @@ async def apply_agent_tls_preset(
         results.append({"node_uuid": uuid, "status": "pending" if queued else "skipped"})
     await db.commit()
     return {"nodes": results}
+
+
+@node_registry_router.get("/nodes/{node_uuid}/xray/usage")
+async def read_node_xray_usage(
+    node_uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    """Read-only StatsService counters; never authoritative product billing."""
+    rows = (await db.execute(select(node_agent_xray_usage_cursors).where(
+        node_agent_xray_usage_cursors.c.node_uuid == str(node_uuid))
+        .order_by(node_agent_xray_usage_cursors.c.subscription_uuid)
+        .limit(1025))).mappings().all()
+    if len(rows) > 1024:
+        raise HTTPException(409, "Too many per-subscription observations for this Node")
+    return {
+        "billing_authoritative": False,
+        "source": "xray-statsquery/private-wss",
+        "samples": [
+            {"subscription_uuid": row["subscription_uuid"],
+             "total_uplink": str(row["total_uplink"]), "total_downlink": str(row["total_downlink"]),
+             "epoch_started_at": row["epoch_started_at"], "observed_at": row["observed_at"]}
+            for row in rows
+        ],
+    }
 
 
 class ManagedInboundInput(BaseModel):

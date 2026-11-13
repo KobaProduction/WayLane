@@ -166,6 +166,21 @@ Alembic revision `b31d7a92c060` creates only the opt-in binding table;
 no existing Node, Core or subscription is opted in by the migration. A source
 push does not authorize deployment or enabling commercial traffic on `tambov`.
 
+
+## Read-only Xray traffic WSS telemetry (Issue #21)
+
+Only when the operator explicitly enables `WAYLANE_XRAY_STATS_READONLY=true`
+on that Node (default off), an approved Node may report bounded, non-reset StatsService counters by
+canonical subscription UUID over binary WSS. `node_agent_xray_usage_cursors`
+persists a monotonic per-Node/per-UUID cursor and cumulative totals across
+Xray process restarts; duplicate frames, stale epochs and decreases cannot
+charge bytes twice. The admin `/api/node-registry/nodes/{node_uuid}/xray/usage`
+view is deliberately read-only and not a commercial billing source.
+Xray requires the administrator to enable `stats` and user policy counters in
+Core Editor and deliberately restart the Core when required. The runtime
+Agent/Node/actual traffic was **not** accepted by source tests; legacy billing
+and traffic jobs remain authoritative pending the rest of Issue #21.
+
 ## TLS certificate presets (feature migration `bd1c0d80d86f`)
 
 After the historical migration chain, `21bec95874f4` performs only the

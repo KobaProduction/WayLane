@@ -274,3 +274,17 @@ A source rollback cannot reverse changed persistent registration data;
 back up the identity volumes before a planned migration. The pilot must not modify unrelated services, credentials, or client routing.
 See [Node architecture](../../services/node/README.md) and
 [wire protocol](../../shared/contracts/NODE_CONTROL.md).
+
+
+### Optional read-only Xray StatsService reporting
+
+`WAYLANE_XRAY_STATS_READONLY` defaults to `false` in both Classic and
+Discovery Compose profiles and their Coolify adapters. To permit the replaceable
+Node to query its private Xray StatsService and send bounded user counter
+observations on the existing binary WSS, set it explicitly to `true` **only
+after** validating the Backend `c41a5e8dbe23` migration, Node image, and
+correct `stats`/`policy` settings. The stable Agent carries the opt-in into the
+private Node env file; the Node must be independently replaced to pick up a
+changed env value. This is not a hot configuration change and never grants
+commercial billing authority. Do not change existing live Node deployments
+solely to turn this on without explicit operator acceptance.

@@ -219,6 +219,7 @@ func (m *manager) startNode(ctx context.Context, image string) error {
 		{"CONTROL_PANEL_URL", m.panelURL}, {"DISCOVERY_TOKEN", m.discoveryToken},
 		{"NODE_TOKEN", m.nodeToken}, {"DEV_ALLOW_HTTP", m.devHTTP},
 		{"AWG_EXPERIMENTAL_DEV", os.Getenv("AWG_EXPERIMENTAL_DEV")},
+		{"WAYLANE_XRAY_STATS_READONLY", os.Getenv("WAYLANE_XRAY_STATS_READONLY")},
 	} {
 		if strings.ContainsAny(p[1], "\r\n") {
 			envFile.Close()

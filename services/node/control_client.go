@@ -148,6 +148,9 @@ func controlDesiredFromPayload(payload *structpb.Struct) (xrayDesired, error) {
 }
 func controlTelemetryPayload(state string) (map[string]any, error) {
 	capabilities := []string{"docker.rootless.inspect", "xray.protobuf.binary"}
+	if xrayReadOnlyTrafficEnabled() {
+		capabilities = append(capabilities, "xray.stats.readonly")
+	}
 	if experimentalAWGEnabled() {
 		capabilities = append(capabilities, "awg.protobuf.binary")
 	}
@@ -215,6 +218,17 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 			case <-ticker.C:
 				if err := sendTelemetry(); err != nil {
 					return
+				}
+				// Keep statistics on the existing authenticated binary WSS.
+				// A missing/disabled StatsService must not interrupt heartbeat or
+				// cause a spurious Node reconnect. Never use counter reset.
+				if xray, registered := drivers["xray/default"].(xrayCoreDriver); registered && xrayReadOnlyTrafficEnabled() {
+					if traffic, err := readXrayTraffic(ctx, xray.socket); err == nil && traffic != nil {
+						usage, encodeErr := newControlMessage(ident.UUID, "usage", "xray/default", 0, traffic)
+						if encodeErr == nil && send(usage) != nil {
+							return
+						}
+					}
 				}
 				// Receive-side liveness: server replies with a binary pong
 				// so idle connections do not hit the read deadline.

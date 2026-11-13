@@ -74,3 +74,19 @@ Node identity and Core state persist across updates. Agent controls Node
 image lifetime only, through its local versioned Unix socket. See
 shared/contracts/NODE_CONTROL.md, services/agent/README.md and
 deploy/node/README.md. Live RootlessKit TUN/UDP client testing is pending.
+
+
+### Read-only Xray StatsService (Issue #21)
+
+The optional `WAYLANE_XRAY_STATS_READONLY=true` Node runtime flag must be
+explicitly configured by the operator; it defaults to off. No source push
+starts recurring statistics reads. When an Xray child has user counters
+enabled (`stats: {}` and policy level
+0 `statsUserUplink`/`statsUserDownlink`), the replaceable Node can read its
+private StatsService with a bounded `xray api statsquery` call. Values are
+cumulative; the Node never passes `-reset=true`. It reports UUID-first
+counter samples and the Docker child start epoch on the **existing** binary
+WSS. Failing to query stats does not interrupt heartbeats or restart Xray.
+The Backend stores read-only, epoch-aware cursors; these observations are **not
+commercially billable** until separate real-traffic and exactly-once usage
+acceptance. Never expose the private StatsService port to the public network.

@@ -90,6 +90,39 @@ Source readiness is **not runtime acceptance**; do not enable this control on
 production Nodes until the matching Backend migration and Node version are
 validated, including revocation and reconnect under actual client traffic.
 
+
+## Read-only cumulative Xray traffic observations (not billing)
+
+The existing binary WSS permits an authenticated Node to send a Protobuf
+`Envelope(kind="usage", core_id="xray/default", generation=0)` after it
+advertises `xray.protobuf.binary` and **explicit** `xray.stats.readonly` in
+that session. Collection is disabled unless the Node environment sets
+`WAYLANE_XRAY_STATS_READONLY=true` (no new monitoring from a Git push).
+`payload` is a
+Struct with `epoch` (Docker Xray container's RFC3339 StartedAt timestamp) and
+bounded `samples`: each sample contains canonical UUIDv4 `subscription_uuid`,
+`uplink` and `downlink` cumulative bytes (exact integers, at most 2^53-1).
+The Node reads *only* its private child Xray StatsService through a bounded
+Docker exec using `xray api statsquery -pattern user>>> -reset=false`. A
+missing StatsService or absent counters must not terminate the WSS heartbeat.
+No public StatsService port, separate gRPC connection or text frame is added.
+
+The Backend deduplicates consecutive and repeated reports in
+`node_agent_xray_usage_cursors` by `(node_uuid, subscription_uuid)` and newer
+Xray epoch. Observations for unopted-in/manual Nodes, unknown subscriptions,
+older epochs or ambiguous counter resets are ignored rather than billed or
+allowed to tear down the control channel. The admin read endpoint
+`GET /api/node-registry/nodes/{node_uuid}/xray/usage` explicitly reports
+`billing_authoritative=false`; total byte counters are encoded as decimal
+strings to preserve 64-bit accuracy in JavaScript.
+
+**Not automatically enabled:** Xray itself requires `stats: {}` and policy
+level 0 `statsUserUplink=true`, `statsUserDownlink=true`; these runtime fields
+can require a deliberate Xray restart. Source tests do not prove counters are
+collecting. No code in this flow increments `Subscription.used_traffic` or
+changes commercial entitlement. Exactly-once billing/quotas, multi-Node
+telemetry reconciliation and actual VPN traffic are separate acceptance gates.
+
 ## Deploy and acceptance
 
 The Panel's existing same-origin reverse proxy must forward

@@ -15,6 +15,7 @@ services:
       DISCOVERY_TOKEN: ""
       DEV_ALLOW_HTTP: "false"
       AWG_EXPERIMENTAL_DEV: "false"
+      WAYLANE_XRAY_STATS_READONLY: ${WAYLANE_XRAY_STATS_READONLY:-false}
 
 # A Coolify resource owns its own volumes/Compose project identity.
 volumes:

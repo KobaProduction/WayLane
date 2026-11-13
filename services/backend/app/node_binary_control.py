@@ -156,6 +156,25 @@ class AgentBinarySession:
                     .values(**changes)
                 )
                 await db.commit()
+        elif message.kind == "usage":
+            # Strict binary WSS only; a Node lacking current-session Xray
+            # capability cannot create even read-only traffic observations.
+            if (message.core_id != CORE_ID or message.generation != 0
+                    or "xray.protobuf.binary" not in self._session_capabilities
+                    or "xray.stats.readonly" not in self._session_capabilities):
+                raise ValueError("Xray usage report was not negotiated")
+            from pydantic import ValidationError
+
+            from app.node_traffic_reporting import XrayTrafficSnapshot, record_xray_traffic
+
+            try:
+                snapshot = XrayTrafficSnapshot.model_validate(
+                    MessageToDict(message.payload, preserving_proto_field_name=True)
+                )
+            except ValidationError as exc:
+                raise ValueError("invalid Xray traffic observation") from exc
+            async with SessionLocal() as db:
+                await record_xray_traffic(db, self.node_uuid, snapshot)
         elif message.kind == "result":
             if message.core_id not in (CORE_ID, "awg/default") or message.generation <= 0:
                 raise ValueError("unknown core result")

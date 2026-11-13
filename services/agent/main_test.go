@@ -463,3 +463,33 @@ func TestAgentDoesNotAcceptRestartingChildAsRunning(t *testing.T) {
 		t.Fatal("restarting child was not removed with Docker's required force flag")
 	}
 }
+
+func TestAgentPassesExplicitReadOnlyTrafficOptInInPrivateNodeEnv(t *testing.T) {
+	t.Setenv("WAYLANE_XRAY_STATS_READONLY", "true")
+	docker := &fakeDocker{}
+	found := false
+	m := &manager{stateDir: t.TempDir(), panelURL: "https://test.invalid", image: nodeSeed}
+	m.run = func(ctx context.Context, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "run" {
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "--env-file" {
+					file, err := os.ReadFile(args[i+1])
+					if err != nil {
+						return "", err
+					}
+					found = strings.Contains(string(file), "WAYLANE_XRAY_STATS_READONLY=true\n")
+				}
+			}
+			if strings.Contains(strings.Join(args, " "), "WAYLANE_XRAY_STATS_READONLY=true") {
+				t.Fatal("stats opt-in leaked into docker CLI arguments")
+			}
+		}
+		return docker.Run(ctx, args...)
+	}
+	if err := m.startNode(context.Background(), nodeSeed); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("explicit StatsService opt-in not forwarded to the private Node")
+	}
+}

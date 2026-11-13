@@ -36,6 +36,19 @@ type XrayInboundInfo = {
   identities: string[]
 }
 
+type XrayUsageRow = {
+  subscription_uuid: string
+  total_uplink: string
+  total_downlink: string
+  epoch_started_at: string
+  observed_at: string
+}
+type XrayUsageState = {
+  billing_authoritative: false
+  source: string
+  samples: XrayUsageRow[]
+}
+
 type XrayStatus = {
   configured: boolean
   generation?: number
@@ -109,6 +122,7 @@ export default function NodeDiscoveryPanel() {
   const canBindTLS = hasPermission(admin, 'cores', 'update')
   const [xrayTarget, setXrayTarget] = useState<string | null>(null)
   const [xrayStates, setXrayStates] = useState<Record<string, XrayStatus>>({})
+  const [xrayUsageStates, setXrayUsageStates] = useState<Record<string, XrayUsageState>>({})
   const [xrayVersion, setXrayVersion] = useState('26.10.21')
   const [xrayRegion, setXrayRegion] = useState('')
   const [xrayConfig, setXrayConfig] = useState('')
@@ -262,6 +276,16 @@ export default function NodeDiscoveryPanel() {
       setXrayInboundStates(previous => ({ ...previous, [uuid]: response.inbounds }))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось прочитать Xray inbounds')
+    }
+  }
+
+  const readXrayUsage = async (uuid: string) => {
+    try {
+      const values = await $fetch<XrayUsageState>(
+        '/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray/usage')
+      setXrayUsageStates(previous => ({ ...previous, [uuid]: values }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить счётчики Xray')
     }
   }
 
@@ -622,6 +646,7 @@ export default function NodeDiscoveryPanel() {
                       void readXray(node.node_uuid)
                       void readXrayInbounds(node.node_uuid)
                       void readManagedInbounds(node.node_uuid)
+                      void readXrayUsage(node.node_uuid)
                       void refreshTLSBindings(node.node_uuid)
                       void readEditorCores()
                       void $fetch<TLSPresetSummary[]>('/api/tls-presets')
@@ -807,6 +832,36 @@ export default function NodeDiscoveryPanel() {
                           onClick={() => void synchronizeInboundUsers(node.node_uuid)}>
                           Синхронизировать пользователей
                         </Button>
+                      </div>
+                      <div className="space-y-2 border-t pt-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-medium">Статистика Xray по UUID подписок</p>
+                          <Button size="sm" variant="outline" disabled={xrayBusy}
+                            onClick={() => void readXrayUsage(node.node_uuid)}>Обновить счётчики</Button>
+                        </div>
+                        <p className="text-muted-foreground text-xs">
+                          Только наблюдение через приватный StatsService/WSS при явном разрешении
+                          WAYLANE_XRAY_STATS_READONLY=true на Node. Эти показания не используются
+                          для расчёта оплаченного трафика. Для получения чисел требуется включить
+                          stats и statsUserUplink/statsUserDownlink в policy Xray, затем явно перезапустить
+                          ядро для применения настроек.
+                        </p>
+                        {xrayUsageStates[node.node_uuid]?.samples.length === 0 && (
+                          <p className="text-muted-foreground text-xs">Счётчики пока не поступали.</p>
+                        )}
+                        {xrayUsageStates[node.node_uuid]?.samples.slice(0, 20).map(sample => (
+                          <div key={sample.subscription_uuid} className="min-w-0 border-b pb-2 text-xs">
+                            <p className="break-all font-mono">{sample.subscription_uuid}</p>
+                            <p className="text-muted-foreground">
+                              ↑ {BigInt(sample.total_uplink).toLocaleString('ru-RU')} Б ·
+                              {' '}↓ {BigInt(sample.total_downlink).toLocaleString('ru-RU')} Б ·
+                              {' '}наблюдение {new Date(sample.observed_at).toLocaleString()}
+                            </p>
+                          </div>
+                        ))}
+                        {(xrayUsageStates[node.node_uuid]?.samples.length ?? 0) > 20 && (
+                          <p className="text-muted-foreground text-xs">Показаны первые 20 записей из {xrayUsageStates[node.node_uuid]?.samples.length}.</p>
+                        )}
                       </div>
                       {xrayStates[node.node_uuid]?.last_error && (
                         <p role="alert" className="text-destructive text-xs">{xrayStates[node.node_uuid].last_error}</p>

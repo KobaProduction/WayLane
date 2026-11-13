@@ -73,8 +73,9 @@ def test_revision_map_cli_keeps_product_user_unavailable():
     backend_dir = Path(__file__).resolve().parents[1]
     history = ScriptDirectory.from_config(Config("alembic.ini"))
     merged_head = history.get_current_head()
-    assert merged_head == "b31d7a92c060", "Managed subscriptions must extend the Core Editor/Node lineage"
-    assert history.get_revision(merged_head).down_revision == "e62b47a9d5c1"
+    assert merged_head == "c41a5e8dbe23", "Read-only autonomous stats must extend managed subscription lineage"
+    assert history.get_revision(merged_head).down_revision == "b31d7a92c060"
+    assert history.get_revision("b31d7a92c060").down_revision == "e62b47a9d5c1"
     assert history.get_revision("e62b47a9d5c1").down_revision == "f0556e841d8b"
     assert set(history.get_revision("f0556e841d8b").down_revision) == {
         "d9f2e8714c33", "a7e36d1b4f90"

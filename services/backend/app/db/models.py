@@ -795,6 +795,27 @@ node_agent_xray_managed_inbounds = Table(
 Index("ix_node_agent_xray_managed_inbounds_tag", node_agent_xray_managed_inbounds.c.inbound_tag)
 
 
+# Read-only cumulative Xray StatsService cursors. This is not a commercial
+# billing source until live epoch/traffic acceptance and reconciliation pass.
+# The subscription UUID remains available for forensic reads after deletion;
+# no alternate user identity is introduced.
+node_agent_xray_usage_cursors = Table(
+    "node_agent_xray_usage_cursors",
+    Base.metadata,
+    Column("node_uuid", String(36),
+           ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    Column("subscription_uuid", Uuid(as_uuid=True), primary_key=True),
+    Column("epoch_started_at", DateTime(timezone=True), nullable=False),
+    Column("uplink", BigInteger, nullable=False),
+    Column("downlink", BigInteger, nullable=False),
+    Column("total_uplink", BigInteger, nullable=False),
+    Column("total_downlink", BigInteger, nullable=False),
+    Column("observed_at", DateTime(timezone=True), nullable=False),
+)
+Index("ix_node_agent_xray_usage_cursors_subscription_uuid",
+      node_agent_xray_usage_cursors.c.subscription_uuid)
+
+
 # Independent desired generation and status for AWG; do not reuse Xray state.
 # AWG cores are queued only for explicitly capability-advertising DEV Nodes.
 node_agent_awg_desired = Table(
