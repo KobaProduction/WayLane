@@ -18,6 +18,11 @@ Vue has been implemented yet.
 - Saved Xray Core Editor profiles can be explicitly applied to autonomous
   Nodes from the Node Registry. This is separate from the still-unmigrated
   PasarGuard RPC compatibility paths tracked in Issue #21.
+- `/nodes` renders the UUID-first Node Registry and its Classic/Discovery
+  registration form. The unmounted PasarGuard numeric Node list, dialogs,
+  per-Node user popups and associated forms have been deleted. This does not
+  remove still-used legacy Backend RPC consumers, historical metric views,
+  or the independently operated Core Editor; Issue #21 remains open.
 
 The existing subscription-page HTML lives in backend until Vue replacement is
 built, to avoid breaking client links. Commercial subscriptions stay in
