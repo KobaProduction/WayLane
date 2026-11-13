@@ -781,6 +781,20 @@ node_agent_xray_desired = Table(
 )
 
 
+# Explicit opt-in for auto-managed subscription accounts on autonomous Xray.
+# No credentials live in this table or the persisted Xray desired config;
+# current commercial admission is resolved only into authenticated WSS frames.
+node_agent_xray_managed_inbounds = Table(
+    "node_agent_xray_managed_inbounds",
+    Base.metadata,
+    Column("node_uuid", String(36),
+           ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    Column("inbound_tag", String(128), primary_key=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+Index("ix_node_agent_xray_managed_inbounds_tag", node_agent_xray_managed_inbounds.c.inbound_tag)
+
+
 # Independent desired generation and status for AWG; do not reuse Xray state.
 # AWG cores are queued only for explicitly capability-advertising DEV Nodes.
 node_agent_awg_desired = Table(

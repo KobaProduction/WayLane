@@ -64,6 +64,32 @@ until rootless TUN, routing, peer handshake, recovery and bidirectional client
 tests pass. The control channel never
 carries client VPN traffic and does not publish child core TCP/UDP ports.
 
+
+## Optional subscription admission for autonomous Xray inbounds
+
+The Core Editor's *public* desired-state JSON is never an entitlement source.
+An administrator must explicitly opt an approved Xray Node inbound into
+WayLane-managed admission (`/api/node-registry/nodes/{node_uuid}/xray/managed-inbounds/{tag}`).
+This is supported only for VLESS, VMess and Trojan, with a registered inbound
+in the subscription Groups catalog and an initially empty manual client list.
+SOCKS/HTTP test proxies are not enrolled implicitly.
+
+The Panel computes client identities at authenticated binary WSS delivery
+from the current durable `Subscription.uuid` and entitlement, group membership,
+status, expiry, usage limit and administrator policy. The Xray-specific
+`client.email` is always the **canonical subscription UUID**, never a
+contact email. Raw client secrets are assembled only in memory for the WSS
+`desired` payload; the stored Xray desired config and Node registry read API
+contain no injected managed accounts. Subscription writes enqueue new Xray
+generations (live reconfigure where supported); stopped Nodes remain stopped.
+The WSS result/ack confirms Core configuration acceptance, **not** measured
+VPN ingress, paid usage accounting, subscriber traffic or billing correctness.
+Those require separate StatsService and ingress acceptance.
+
+Source readiness is **not runtime acceptance**; do not enable this control on
+production Nodes until the matching Backend migration and Node version are
+validated, including revocation and reconnect under actual client traffic.
+
 ## Deploy and acceptance
 
 The Panel's existing same-origin reverse proxy must forward

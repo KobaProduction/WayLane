@@ -115,6 +115,7 @@ export default function NodeDiscoveryPanel() {
   const [xrayBusy, setXrayBusy] = useState(false)
   const [xrayInboundTag, setXrayInboundTag] = useState('waylane-socks5-qa')
   const [xrayInboundStates, setXrayInboundStates] = useState<Record<string, XrayInboundInfo[]>>({})
+  const [managedInboundStates, setManagedInboundStates] = useState<Record<string, string[]>>({})
   const [xrayUsersJSON, setXrayUsersJSON] = useState('')
   const [editorCoreIds, setEditorCoreIds] = useState<Record<string, string>>({})
   const [editorCores, setEditorCores] = useState<EditorCoreOption[]>([])
@@ -262,6 +263,42 @@ export default function NodeDiscoveryPanel() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось прочитать Xray inbounds')
     }
+  }
+
+  const readManagedInbounds = async (uuid: string) => {
+    try {
+      const response = await $fetch<{ inbound_tags: string[] }>(
+        '/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray/managed-inbounds')
+      setManagedInboundStates(previous => ({ ...previous, [uuid]: response.inbound_tags }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить управление подписками')
+    }
+  }
+
+  const changeManagedInbound = async (uuid: string, tag: string, enabled: boolean) => {
+    if (!canManageXray) return
+    const generation = xrayStates[uuid]?.generation
+    if (!generation) {
+      toast.error('Обновите состояние Xray перед изменением доступа')
+      return
+    }
+    const warning = enabled
+      ? `Разрешить WayLane управлять клиентами inbound ${tag}? Доступ будет определяться статусом подписки, entitlement и группами. Ручные клиенты не сохраняются.`
+      : `Отключить автоматическую синхронизацию для ${tag}? Управляемые клиенты будут удалены при применении новой конфигурации.`
+    if (!window.confirm(warning)) return
+    setXrayBusy(true)
+    try {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) +
+        '/xray/managed-inbounds/' + encodeURIComponent(tag), {
+        method: enabled ? 'PUT' : 'DELETE',
+        ...(enabled ? { body: { expected_generation: generation } }
+          : { query: { expected_generation: generation } }),
+      })
+      toast.success('Изменение синхронизации подписок поставлено в очередь Node')
+      await Promise.all([readManagedInbounds(uuid), readXray(uuid), readXrayInbounds(uuid)])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось настроить автоматическую синхронизацию')
+    } finally { setXrayBusy(false) }
   }
 
   const refreshTLSBindings = async (uuid: string) => {
@@ -584,6 +621,7 @@ export default function NodeDiscoveryPanel() {
                       setXrayTarget(xrayTarget === node.node_uuid ? null : node.node_uuid)
                       void readXray(node.node_uuid)
                       void readXrayInbounds(node.node_uuid)
+                      void readManagedInbounds(node.node_uuid)
                       void refreshTLSBindings(node.node_uuid)
                       void readEditorCores()
                       void $fetch<TLSPresetSummary[]>('/api/tls-presets')
@@ -725,16 +763,38 @@ export default function NodeDiscoveryPanel() {
                         )}
                       </div>
                       <div className="space-y-2 border-t pt-3">
-                        <p className="text-sm font-medium">Пользователи inbound (синхронизация)</p>
-                        <p className="text-muted-foreground text-xs">Заменяет аккаунты выбранного inbound, остальные inbounds и outbounds сохраняет. Пароли передаются только авторизованной ноде через API. Пустой массив удаляет всех пользователей выбранного inbound.</p>
-                        <div className="space-y-1 text-xs text-muted-foreground">
-                          {(xrayInboundStates[node.node_uuid] || []).map(inbound => (
-                            <p key={inbound.tag} className="break-all">
-                              {inbound.tag} · {inbound.protocol} · {inbound.user_count} пользователей
-                              {inbound.identities.length ? ': ' + inbound.identities.join(', ') : ''}
-                            </p>
-                          ))}
+                        <p className="text-sm font-medium">Пользователи Xray и коммерческие подписки</p>
+                        <p className="text-muted-foreground text-xs">
+                          Для VLESS, VMess и Trojan можно включить автоматическую синхронизацию.
+                          WayLane будет допускать только оплаченные активные подписки из связанных групп,
+                          используя UUID подписки в качестве технической идентичности. Выключенные, истёкшие
+                          и превысившие лимиты подписки исключаются. Привязку к группе/inbound задайте в каталоге.
+                          SOCKS5 и остальные протоколы по умолчанию остаются под ручным управлением.
+                        </p>
+                        <div className="space-y-2 text-xs text-muted-foreground">
+                          {(xrayInboundStates[node.node_uuid] || []).map(inbound => {
+                            const managed = managedInboundStates[node.node_uuid]?.includes(inbound.tag) ?? false
+                            const supported = ['vless', 'vmess', 'trojan'].includes(inbound.protocol)
+                            return (
+                              <div key={inbound.tag} className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+                                <span className="break-all">
+                                  {inbound.tag} · {inbound.protocol} · {managed
+                                    ? 'управляется коммерческими подписками (актуальное количество только в WSS)'
+                                    : `${inbound.user_count} ручных клиентов`}
+                                  {!managed && inbound.identities.length ? ': ' + inbound.identities.join(', ') : ''}
+                                </span>
+                                {supported && <Button size="sm" variant="outline" disabled={xrayBusy || xrayStates[node.node_uuid]?.runtime_status !== 'running'}
+                                  onClick={() => void changeManagedInbound(node.node_uuid, inbound.tag, !managed)}>
+                                  {managed ? 'Отключить подписки' : 'Управлять подписками'}
+                                </Button>}
+                              </div>
+                            )
+                          })}
                         </div>
+                        <p className="text-muted-foreground text-xs">
+                          Ручная синхронизация ниже заменяет всех клиентов выбранного inbound.
+                          Для inbound под управлением подписок она запрещена.
+                        </p>
                         <Input aria-label="Xray inbound tag" placeholder="Tag inbound"
                           value={xrayInboundTag} onChange={e => setXrayInboundTag(e.target.value)} maxLength={128} />
                         <Textarea aria-label="Xray inbound users JSON" value={xrayUsersJSON}
@@ -742,7 +802,8 @@ export default function NodeDiscoveryPanel() {
                           placeholder={'[{"user":"qa","pass":"strong-password"}]'}
                           onChange={e => setXrayUsersJSON(e.target.value)} />
                         <Button size="sm" variant="outline"
-                          disabled={xrayBusy || !xrayUsersJSON.trim() || !xrayStates[node.node_uuid]?.configured}
+                          disabled={xrayBusy || !xrayUsersJSON.trim() || !xrayStates[node.node_uuid]?.configured ||
+                            (managedInboundStates[node.node_uuid] || []).includes(xrayInboundTag.trim())}
                           onClick={() => void synchronizeInboundUsers(node.node_uuid)}>
                           Синхронизировать пользователей
                         </Button>

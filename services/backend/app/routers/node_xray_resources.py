@@ -114,6 +114,22 @@ async def node_facing_editor_core_json(db: AsyncSession, core_id: int, public_co
     return config
 
 
+async def materialize_node_xray_config(db: AsyncSession, node_uuid: str, desired: dict) -> dict | None:
+    """Prepare the transient Xray WSS configuration from public source state.
+
+    Encrypted preset secrets and eligible subscription credentials are
+    materialized only in this request scope, never persisted to desired JSON.
+    """
+    from app.node_subscription_desired import inject_managed_subscriptions
+
+    config = desired["config"]
+    if not config:
+        return None
+    if desired["source_core_id"] is not None:
+        config = await node_facing_editor_core_json(db, desired["source_core_id"], config)
+    return await inject_managed_subscriptions(db, node_uuid, config)
+
+
 async def queue_assigned_editor_cores(
     db: AsyncSession, core_id: int, *, restart_only: bool = False, live_update: bool = False
 ) -> int:

@@ -201,6 +201,18 @@ class CoreOperation(BaseOperation):
                 )
             except ValueError as exc:
                 await self.raise_error(message=str(exc), code=422, db=db)
+        # A saved profile may be assigned to multiple autonomous Nodes, each
+        # owning explicit managed subscription inbounds. Never persist an edit
+        # that would replace those generated clients with manual credentials.
+        from app.node_subscription_desired import (
+            ManagedSubscriptionError,
+            ensure_assigned_editor_core_compatible,
+        )
+
+        try:
+            await ensure_assigned_editor_core_compatible(db, core_id, modified_core.config)
+        except ManagedSubscriptionError as exc:
+            await self.raise_error(message=str(exc), code=409, db=db)
         # What nodes run now, read before update_core replaces it.
         before = node_facing(await core_manager.get_core(db_core.id))
         try:

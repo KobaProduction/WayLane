@@ -18,7 +18,7 @@ from sqlalchemy import case, select, update
 
 from app.controlpb import control_pb2 as pb
 from app.db.base import SessionLocal, begin_immediate_if_sqlite
-from app.db.models import node_agent_registrations, node_agent_xray_desired, node_agent_awg_desired
+from app.db.models import node_agent_awg_desired, node_agent_registrations, node_agent_xray_desired
 
 PROTOCOL_VERSION = 1
 MAX_BINARY_FRAME = 2_000_000
@@ -220,17 +220,14 @@ class AgentBinarySession:
                 ))).mappings().one_or_none()
             )
             if xray and xray["generation"] > self._last_sent_generation:
-                from app.routers.node_xray_resources import agent_tls_material, node_facing_editor_core_json
+                from app.routers.node_xray_resources import agent_tls_material, materialize_node_xray_config
 
                 # Decrypt managed presets only into this authenticated WSS frame.
                 # Fail closed and report a sanitized error if a stored binding
                 # becomes inconsistent; never send half-hydrated credentials.
                 prepared = None
                 try:
-                    runtime_config = (
-                        await node_facing_editor_core_json(db, xray["source_core_id"], xray["config"])
-                        if xray["source_core_id"] is not None and xray["config"] else xray["config"]
-                    )
+                    runtime_config = await materialize_node_xray_config(db, self.node_uuid, xray)
                     prepared = {
                         "configured": True,
                         "generation": xray["generation"],

@@ -26,6 +26,18 @@ from waylane_node_bridge.common.service_pb2 import Subscription as ProtoSubscrip
 logger = get_logger("node-sync")
 
 
+async def _queue_autonomous_subscription_reconcile() -> None:
+    """Notify opted-in autonomous Nodes after committed commercial changes.
+
+    Credentials are never sent through the old RPC. The binary WSS publisher
+    reads current database state at delivery time, including revoked access.
+    """
+    from app.node_subscription_desired import enqueue_managed_subscription_changes
+
+    async with GetDB() as db:
+        await enqueue_managed_subscription_changes(db)
+
+
 def _chunk_serialized_subscriptions_for_nats(users: list[dict]) -> list[list[dict]]:
     if not users:
         return []
@@ -140,10 +152,12 @@ async def _blocked_admin_ids_for_subscriptions(users: list[Subscription]) -> set
 if runtime_settings.role.runs_node:
 
     async def _dispatch_subscription_update(proto_subscription):
+        await _queue_autonomous_subscription_reconcile()
         await node_manager.update_subscription(proto_subscription)
 
     async def _dispatch_subscriptions_update(proto_subscriptions, *, await_dispatch: bool = False):
         """Dispatch a batch locally, optionally waiting for node queue acceptance."""
+        await _queue_autonomous_subscription_reconcile()
         if await_dispatch:
             await node_manager.update_subscriptions(proto_subscriptions, await_dispatch=True)
         else:
@@ -154,11 +168,13 @@ else:
     # deployment are atomically switched; they are not product identifiers.
 
     async def _dispatch_subscription_update(proto_subscription):
+        await _queue_autonomous_subscription_reconcile()
         user_dict = serialize_proto_message(proto_subscription)
         await node_nats_client.publish(UPDATE_SUBSCRIPTION, {"subscription": user_dict})
 
     async def _dispatch_subscriptions_update(proto_subscriptions, *, await_dispatch: bool = False):
         """Publish bounded batches to the node worker before returning."""
+        await _queue_autonomous_subscription_reconcile()
         users_dicts = serialize_proto_messages(proto_subscriptions)
         for users_chunk in _chunk_serialized_subscriptions_for_nats(users_dicts):
             await node_nats_client.publish(UPDATE_SUBSCRIPTIONS, {"subscriptions": users_chunk})
@@ -275,12 +291,16 @@ async def sync_subscription_access(db_subscription: Subscription) -> None:
     cannot re-install credentials after a newer payment suspension.
     """
     if await _subscription_sync_blocked(db_subscription):
+        # A blocked admin must revoke previously admitted autonomous Node
+        # clients, not silently skip a WSS generation update.
+        await _queue_autonomous_subscription_reconcile()
         return
     await _dispatch_subscription_update(await serialize_subscription(db_subscription))
 
 
 async def sync_subscription(db_subscription: Subscription) -> None:
     if await _subscription_sync_blocked(db_subscription):
+        asyncio.create_task(_queue_autonomous_subscription_reconcile())
         return
 
     proto_subscription = await serialize_subscription(db_subscription)

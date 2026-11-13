@@ -145,6 +145,27 @@ bootstrap or overwriting existing credentials. Sign in through
 For normal managed environments use the existing one-time setup-key flow.
 
 
+
+## Autonomous Xray subscription admission (Issue #21, DEV)
+
+The admin Node Registry provides an explicit per-inbound switch for managed
+commercial subscribers on approved autonomous Nodes. The inbound must be a
+VLESS, VMess or Trojan entry with an empty public client list, and its tag must
+exist in the subscription Group/inbound catalog. The core's saved JSON and
+`node_agent_xray_desired` remain free of generated client credentials.
+
+On a committed subscription update, the Backend queues a new desired Xray
+generation. At WSS delivery it re-reads the latest UUID-first commercial
+admission, group memberships, expiration and quota, and hydrates clients only
+into the authenticated Protobuf payload. Empty admission revokes all managed
+clients on that inbound, but never edits manual SOCKS5 or unrelated listeners.
+This does not yet replace legacy per-user traffic accounting or prove real
+public ingress: the old bridge still has other callers (Issue #21 remains open).
+
+Alembic revision `b31d7a92c060` creates only the opt-in binding table;
+no existing Node, Core or subscription is opted in by the migration. A source
+push does not authorize deployment or enabling commercial traffic on `tambov`.
+
 ## TLS certificate presets (feature migration `bd1c0d80d86f`)
 
 After the historical migration chain, `21bec95874f4` performs only the

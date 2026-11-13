@@ -18,13 +18,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.wireguard import WireGuardConfig
 from app.db.base import begin_immediate_if_sqlite, get_db
 from app.db.models import (
+    ProxyInbound,
     node_agent_awg_desired,
     node_agent_registrations,
     node_agent_xray_desired,
+    node_agent_xray_managed_inbounds,
     node_discovery_invitations,
 )
 from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
+from app.node_subscription_desired import (
+    MAX_MANAGED_INBOUNDS,
+    SUPPORTED_PROTOCOLS,
+    ManagedSubscriptionError,
+    managed_inbound_tags,
+    validate_managed_inbound_baseline,
+)
 from app.operation.core_presets import CorePresetError
 from app.utils.crypto import validate_wireguard_key
 
@@ -32,6 +41,7 @@ from .authentication import require_permission
 from .node_xray_resources import (
     agent_tls_material,
     editor_core_json,
+    materialize_node_xray_config,
     node_facing_editor_core_json,
     queue_xray_refresh,
     replace_routing,
@@ -529,6 +539,12 @@ async def set_desired_xray(
         if previous["runtime_status"] == "pending":
             raise HTTPException(409, "An Xray operation is already pending")
     config = body.config if body.config is not None else (previous["config"] if previous else None)
+    if body.config is not None:
+        tags = await managed_inbound_tags(db, str(node_uuid))
+        try:
+            validate_managed_inbound_baseline(body.config, tags)
+        except ManagedSubscriptionError as exc:
+            raise HTTPException(409, str(exc)) from exc
     if body.action in {"deploy", "update", "reconfigure"} and not config:
         raise HTTPException(422, "Xray configuration required on first deployment")
     if body.action in {"restart", "stop", "reconfigure"} and previous is None:
@@ -614,6 +630,7 @@ async def deploy_editor_core(
         raise HTTPException(409, "Another Xray operation is already pending")
     try:
         core, public_config = await editor_core_json(db, body.core_id)
+        validate_managed_inbound_baseline(public_config, await managed_inbound_tags(db, str(node_uuid)))
         checked = XrayDesiredInput(action="deploy", image_version=body.image_version, config=public_config)
         await node_facing_editor_core_json(db, core.id, public_config)
     except ValidationError as exc:
@@ -946,6 +963,94 @@ async def apply_agent_tls_preset(
     return {"nodes": results}
 
 
+class ManagedInboundInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_generation: int = Field(ge=1)
+
+
+@node_registry_router.get("/nodes/{node_uuid}/xray/managed-inbounds")
+async def list_managed_xray_inbounds(
+    node_uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    """Show explicit UUID-first subscription synchronization owners, not secrets."""
+    return {"inbound_tags": await managed_inbound_tags(db, str(node_uuid))}
+
+
+@node_registry_router.put("/nodes/{node_uuid}/xray/managed-inbounds/{inbound_tag}")
+async def enable_managed_xray_inbound(
+    node_uuid: UUID,
+    inbound_tag: str,
+    body: ManagedInboundInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update_core")),
+):
+    """Opt a non-SOCKS, empty-client inbound into subscription admission."""
+    await begin_immediate_if_sqlite(db)
+    desired = await _mutable_xray(db, node_uuid, body.expected_generation)
+    if not inbound_tag or len(inbound_tag) > 128:
+        raise HTTPException(422, "Invalid managed Xray inbound tag")
+    capabilities = await db.scalar(select(node_agent_registrations.c.capabilities).where(
+        node_agent_registrations.c.node_uuid == str(node_uuid)))
+    if "xray.protobuf.binary" not in (capabilities or []):
+        raise HTTPException(409, "Node does not advertise Xray WSS control")
+    from app.node_subscription_desired import _inbound_map
+
+    try:
+        inbound = _inbound_map(desired["config"]).get(inbound_tag)
+    except ManagedSubscriptionError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if inbound is None or inbound.get("protocol") not in SUPPORTED_PROTOCOLS:
+        raise HTTPException(422, "Subscription sync currently supports VLESS, VMess and Trojan inbounds")
+    settings = inbound.get("settings")
+    if not isinstance(settings, dict) or settings.get("clients") not in (None, []):
+        raise HTTPException(409, "Clear manually managed clients before enabling subscription sync")
+    if not await db.scalar(select(ProxyInbound.id).where(ProxyInbound.tag == inbound_tag)):
+        raise HTTPException(409, "Register the inbound tag in the subscription Groups catalog first")
+    tags = await managed_inbound_tags(db, str(node_uuid))
+    if inbound_tag in tags:
+        raise HTTPException(409, "Inbound already has managed subscription admission")
+    if len(tags) >= MAX_MANAGED_INBOUNDS:
+        raise HTTPException(409, "Too many managed Xray inbounds")
+    await db.execute(insert(node_agent_xray_managed_inbounds).values(
+        node_uuid=str(node_uuid), inbound_tag=inbound_tag, created_at=datetime.now(UTC)
+    ))
+    await db.execute(update(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)).values(
+        generation=desired["generation"] + 1, action="reconfigure", runtime_status="pending",
+        last_error=None, updated_at=datetime.now(UTC),
+    ))
+    await db.commit()
+    return {"inbound_tag": inbound_tag, "generation": desired["generation"] + 1, "status": "pending"}
+
+
+@node_registry_router.delete("/nodes/{node_uuid}/xray/managed-inbounds/{inbound_tag}")
+async def disable_managed_xray_inbound(
+    node_uuid: UUID,
+    inbound_tag: str,
+    expected_generation: int,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update_core")),
+):
+    """Stop automatic admission and reapply the saved empty-client snapshot."""
+    await begin_immediate_if_sqlite(db)
+    desired = await _mutable_xray(db, node_uuid, expected_generation)
+    deleted = await db.execute(delete(node_agent_xray_managed_inbounds).where(
+        node_agent_xray_managed_inbounds.c.node_uuid == str(node_uuid),
+        node_agent_xray_managed_inbounds.c.inbound_tag == inbound_tag,
+    ))
+    if deleted.rowcount != 1:
+        raise HTTPException(404, "Managed Xray inbound binding not found")
+    await db.execute(update(node_agent_xray_desired).where(
+        node_agent_xray_desired.c.node_uuid == str(node_uuid)).values(
+        generation=desired["generation"] + 1, action="reconfigure", runtime_status="pending",
+        last_error=None, updated_at=datetime.now(UTC),
+    ))
+    await db.commit()
+    return {"inbound_tag": inbound_tag, "generation": desired["generation"] + 1, "status": "pending"}
+
+
 @node_registry_router.get("/nodes/{node_uuid}/xray/tls")
 async def list_agent_tls_bindings(
     node_uuid: UUID,
@@ -1106,6 +1211,8 @@ async def sync_xray_inbound_users(
     )
     if node_status != "approved":
         raise HTTPException(409, "Only approved Agents can synchronize Xray users")
+    if inbound_tag in await managed_inbound_tags(db, str(node_uuid)):
+        raise HTTPException(409, "This inbound is owned by automatic subscription synchronization")
     previous = (
         (await db.execute(select(node_agent_xray_desired).where(node_agent_xray_desired.c.node_uuid == str(node_uuid))))
         .mappings()
@@ -1184,8 +1291,7 @@ async def agent_xray_desired(
         "generation": entry["generation"],
         "action": entry["action"],
         "image_version": entry["image_version"],
-        "config": (await node_facing_editor_core_json(db, entry["source_core_id"], entry["config"])
-                   if entry["source_core_id"] is not None and entry["config"] else entry["config"]),
+        "config": await materialize_node_xray_config(db, str(node_uuid), entry),
         "region": entry["region"],
         "applied_generation": entry["applied_generation"],
         "tls_certificates": await agent_tls_material(db, str(node_uuid)),
