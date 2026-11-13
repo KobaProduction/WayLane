@@ -15,10 +15,9 @@ type Preset = {
   not_after: string
   revision: number
 }
-type Target = { node_id: number; node_name: string; core_id: number; inbound_tag: string }
-type Binding = { id: string; preset_id: string; node_id: number; core_id: number; inbound_tag: string }
-type ApplyResult = { node_id: number; status: string; detail?: string }
-type TLSProbe = { reachable: boolean; fingerprint_match: boolean; presented_fingerprint_sha256?: string }
+type Target = { node_uuid: string; node_name: string; core_id: number | null; inbound_tag: string; generation: number; runtime_status: string }
+type Binding = { node_uuid: string; preset_id: string; preset_name: string; revision: number; inbound_tag: string }
+type ApplyResult = { node_uuid: string; status: string }
 
 const base = '/api/tls-presets'
 const errorMessage = (reason: unknown) =>
@@ -27,7 +26,7 @@ const errorMessage = (reason: unknown) =>
 export default function TlsPresetsPage() {
   const [presets, setPresets] = useState<Preset[]>([])
   const [targets, setTargets] = useState<Target[]>([])
-  const [bindings, setBindings] = useState<Binding[]>([])
+  const [allBindings, setAllBindings] = useState<Binding[]>([])
   const [activeId, setActiveId] = useState('')
   const [name, setName] = useState('')
   const [renamedName, setRenamedName] = useState('')
@@ -39,16 +38,17 @@ export default function TlsPresetsPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
-  const [probes, setProbes] = useState<Record<string, TLSProbe>>({})
 
   const selected = presets.find(p => p.id === activeId)
+  const bindings = allBindings.filter(binding => binding.preset_id === activeId)
   const load = useCallback(async () => {
     const [items, available] = await Promise.all([
       $fetch<Preset[]>(base),
-      $fetch<Target[]>(base + '/targets'),
+      $fetch<{ targets: Target[]; bindings: Binding[] }>('/api/node-registry/tls-presets/targets'),
     ])
     setPresets(items)
-    setTargets(available)
+    setTargets(available.targets)
+    setAllBindings(available.bindings)
     if (activeId && !items.some(p => p.id === activeId)) setActiveId('')
   }, [activeId])
 
@@ -56,15 +56,6 @@ export default function TlsPresetsPage() {
     void load().catch(e => setError(errorMessage(e)))
   }, [load])
 
-  useEffect(() => {
-    if (!activeId) {
-      setBindings([])
-      return
-    }
-    void $fetch<Binding[]>(base + '/' + activeId + '/bindings')
-      .then(setBindings)
-      .catch(e => setError(errorMessage(e)))
-  }, [activeId])
 
   async function run(work: () => Promise<void>) {
     setBusy(true)
@@ -81,17 +72,18 @@ export default function TlsPresetsPage() {
 
   function recordResults(nodes: ApplyResult[]) {
     setApplyResult(nodes)
-    setNotice(nodes.length ? 'Обновление конфигураций нод завершено. Проверьте статусы ниже.' : 'Изменения сохранены.')
+    setNotice(nodes.length ? 'Операции переданы в очередь Node. Ожидайте подтверждения применения через WSS.' : 'Изменения сохранены. Привязанных работающих Node не найдено.')
   }
 
   async function saveCertificate() {
     await run(async () => {
       if (!certificate.trim() || !privateKey.trim()) throw new Error('Укажите сертификат и закрытый ключ в формате PEM.')
       if (activeId) {
-        const result = await $fetch<{ revision: number; nodes: ApplyResult[] }>(base + '/' + activeId, {
+        const result = await $fetch<{ revision: number; agent_count: number }>(base + '/' + activeId, {
           method: 'PUT', body: { certificate, private_key: privateKey },
         })
-        recordResults(result.nodes)
+        setApplyResult([])
+        setNotice(result.agent_count ? `Обновление сертификата поставлено в очередь для ${result.agent_count} Node. TLS-handshake ещё не подтверждён.` : 'Сертификат сохранён; привязанных автономных Node нет.')
       } else {
         if (!name.trim()) throw new Error('Введите название пресета.')
         const created = await $fetch<Preset>(base, {
@@ -128,7 +120,6 @@ export default function TlsPresetsPage() {
       setCertificate('')
       setPrivateKey('')
       setWebhookToken('')
-      setBindings([])
       await load()
       setNotice('TLS-пресет удалён.')
     })
@@ -136,38 +127,40 @@ export default function TlsPresetsPage() {
 
   async function bind() {
     await run(async () => {
-      const target = targets.find(t => selectedTarget === t.node_id + '|' + t.inbound_tag)
-      if (!target || !activeId) throw new Error('Выберите сертификат и ноду с TLS-inbound.')
-      const result = await $fetch<{ apply: ApplyResult[] }>(base + '/' + activeId + '/bindings', {
-        method: 'POST', body: { node_id: target.node_id, inbound_tag: target.inbound_tag },
+      const target = targets.find(item => selectedTarget === item.node_uuid + '|' + item.inbound_tag)
+      if (!target || !activeId) throw new Error('Выберите сертификат и автономную Node с TLS-inbound.')
+      if (target.runtime_status !== 'running') throw new Error('Для привязки TLS необходимо работающее Xray-ядро.')
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(target.node_uuid) +
+        '/xray/tls/' + encodeURIComponent(target.inbound_tag), {
+        method: 'PUT', body: { preset_id: activeId, expected_generation: target.generation },
       })
-      recordResults(result.apply)
-      setBindings(await $fetch<Binding[]>(base + '/' + activeId + '/bindings'))
+      setApplyResult([{ node_uuid: target.node_uuid, status: 'pending' }])
+      setNotice('Сертификат привязан к Node; отправка через WSS ожидает подтверждения.')
+      await load()
     })
   }
 
-  async function unbind(bindingId: string) {
+  async function unbind(binding: Binding) {
     await run(async () => {
-      const result = await $fetch<{ apply: ApplyResult[] }>(base + '/' + activeId + '/bindings/' + bindingId, { method: 'DELETE' })
-      recordResults(result.apply)
-      setBindings(await $fetch<Binding[]>(base + '/' + activeId + '/bindings'))
-    })
-  }
-
-  async function verifyBinding(bindingId: string) {
-    await run(async () => {
-      const probe = await $fetch<TLSProbe>(base + '/' + activeId + '/bindings/' + bindingId + '/check')
-      setProbes(previous => ({ ...previous, [bindingId]: probe }))
-      setNotice(probe.reachable && probe.fingerprint_match
-        ? 'TLS-handshake пройден: установленный сертификат совпадает с пресетом.'
-        : 'TLS-handshake или совпадение отпечатка не подтверждены.')
+      const target = targets.find(item => item.node_uuid === binding.node_uuid && item.inbound_tag === binding.inbound_tag)
+      if (!target) throw new Error('Node больше не доступна в реестре TLS. Обновите список.')
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(binding.node_uuid) +
+        '/xray/tls/' + encodeURIComponent(binding.inbound_tag), {
+        method: 'DELETE', query: { expected_generation: target.generation },
+      })
+      setApplyResult([{ node_uuid: binding.node_uuid, status: 'pending' }])
+      setNotice('TLS-привязка удалена; изменение поставлено в очередь Node.')
+      await load()
     })
   }
 
   async function applyAll() {
     await run(async () => {
-      const result = await $fetch<{ nodes: ApplyResult[] }>(base + '/' + activeId + '/apply', { method: 'POST' })
+      if (!activeId) return
+      const result = await $fetch<{ nodes: ApplyResult[] }>(
+        '/api/node-registry/tls-presets/' + encodeURIComponent(activeId) + '/apply', { method: 'POST' })
       recordResults(result.nodes)
+      await load()
     })
   }
 
@@ -182,10 +175,11 @@ export default function TlsPresetsPage() {
         body: JSON.stringify({ certificate, private_key: privateKey }),
       })
       if (!response.ok) throw new Error('Webhook отклонил обновление (HTTP ' + response.status + ')')
-      const result = await response.json() as { revision: number; nodes: ApplyResult[] }
+      const result = await response.json() as { revision: number; agent_count: number }
       setCertificate('')
       setPrivateKey('')
-      recordResults(result.nodes)
+      setApplyResult([])
+      setNotice(result.agent_count ? `Webhook принят; обновление отправлено в очередь для ${result.agent_count} Node.` : 'Webhook принят; подключённых автономных Node нет.')
       await load()
     })
   }
@@ -204,7 +198,7 @@ export default function TlsPresetsPage() {
         <h1 className="text-2xl font-semibold">TLS-сертификаты</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Централизованные пресеты X.509 для TLS-входящих ядра Xray. Закрытые ключи зашифрованы;
-          на ноды передаются только при применении конфигурации.
+          на Node передаются только через защищённый WSS при применении конфигурации.
         </p>
       </div>
 
@@ -270,7 +264,7 @@ export default function TlsPresetsPage() {
         </div>
         <p className="text-muted-foreground text-xs">Сертификат и ключ должны соответствовать друг другу и быть действительными. Закрытый ключ никогда не возвращается через API.</p>
         <Button disabled={busy} onClick={() => void saveCertificate()}>
-          {activeId ? 'Обновить и применить к нодам' : 'Сохранить пресет'}
+          {activeId ? 'Обновить сертификат и отправить WSS' : 'Сохранить пресет'}
         </Button>
       </section>
 
@@ -284,8 +278,8 @@ export default function TlsPresetsPage() {
             <div className="flex flex-col gap-3 sm:flex-row">
               <select className="bg-background min-w-0 flex-1 rounded-md border p-2 text-sm" value={selectedTarget} onChange={e => setSelectedTarget(e.target.value)}>
                 <option value="">Выберите ноду и TLS-inbound</option>
-                {targets.map(t => <option key={t.node_id + ':' + t.inbound_tag} value={t.node_id + '|' + t.inbound_tag}>
-                  {t.node_name} · {t.inbound_tag} · Core #{t.core_id}
+                {targets.map(t => <option key={t.node_uuid + ':' + t.inbound_tag} value={t.node_uuid + '|' + t.inbound_tag}>
+                  {t.node_name} · {t.inbound_tag} · {t.core_id == null ? 'Node Core' : 'Core #' + t.core_id} · {t.runtime_status}
                 </option>)}
               </select>
               <Button disabled={busy || !selectedTarget} onClick={() => void bind()}>Подключить</Button>
@@ -293,25 +287,23 @@ export default function TlsPresetsPage() {
             {!targets.length && <p className="text-muted-foreground text-sm">У нод пока нет TLS-inbound. Добавьте TLS в редакторе <Link className="underline" to="/nodes/cores">ядра</Link>.</p>}
             <div className="space-y-2">
               {bindings.map(b => (
-                <div key={b.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
+                <div key={b.node_uuid + ':' + b.inbound_tag} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
                   <div className="min-w-0 flex-1 space-y-1">
-                    <div>Node #{b.node_id} · {b.inbound_tag} · Core #{b.core_id}</div>
-                    {probes[b.id] && <p className="text-muted-foreground text-xs">
-                      TLS: {probes[b.id].reachable ? 'доступен' : 'недоступен'},
-                      отпечаток: {probes[b.id].fingerprint_match ? 'совпадает' : 'не совпадает'}
-                    </p>}
+                    <div>{targets.find(t => t.node_uuid === b.node_uuid)?.node_name ?? b.node_uuid} · {b.inbound_tag}</div>
+                    <div className="text-muted-foreground text-xs">{b.preset_name} · ревизия {b.revision} · доставка TLS не проверена</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" disabled={busy} onClick={() => void verifyBinding(b.id)}>Проверить TLS</Button>
-                    <Button variant="outline" size="sm" disabled={busy} onClick={() => void unbind(b.id)}>Отключить</Button>
+                    <Link className="text-sm underline" to="/nodes">Состояние Node</Link>
+                    <Button variant="outline" size="sm" disabled={busy}
+                      onClick={() => void unbind(b)}>Отключить</Button>
                   </div>
                 </div>
               ))}
             </div>
-            <Button variant="outline" disabled={busy || !bindings.length} onClick={() => void applyAll()}>Проверить и применить ко всем привязанным нодам</Button>
+            <Button variant="outline" disabled={busy || !bindings.length} onClick={() => void applyAll()}>Повторно отправить в очередь всех привязанных Node</Button>
             {!!applyResult.length && (
               <div aria-label="Результаты применения" className="space-y-2 text-sm">
-                {applyResult.map(r => <div key={r.node_id} className="rounded-md border p-2">Node #{r.node_id}: {r.status}{r.detail ? ' — ' + r.detail : ''}</div>)}
+                {applyResult.map(r => <div key={r.node_uuid} className="rounded-md border p-2">Node {r.node_uuid}: {r.status}</div>)}
               </div>
             )}
           </section>
@@ -321,7 +313,7 @@ export default function TlsPresetsPage() {
             <p className="text-muted-foreground text-sm">
               Отдельный Bearer-токен даёт только право заменить сертификат этого пресета.
               Отправляйте POST в <code className="break-all">/api/tls-presets/{activeId}/webhook</code> с JSON
-              <code> certificate</code> и <code>private_key</code>. После обновления привязанные ноды будут переподключены.
+              <code> certificate</code> и <code>private_key</code>. После обновления привязанные Node получат новую ревизию desired-state по WSS; это не подтверждение TLS-handshake.
             </p>
             <Button variant="outline" disabled={busy} onClick={() => void generateToken()}>Перевыпустить сервисный токен</Button>
             {webhookToken && (

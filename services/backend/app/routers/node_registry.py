@@ -840,6 +840,112 @@ async def sync_editor_routing(
     }
 
 
+@node_registry_router.get("/tls-presets/targets")
+async def list_agent_tls_targets(
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("cores", "read")),
+):
+    """Offer only UUID-first approved Node TLS inbounds to certificate UI.
+
+    The raw Xray desired JSON contains client credentials and is never returned.
+    """
+    nodes = (
+        await db.execute(
+            select(
+                node_agent_registrations.c.node_uuid,
+                node_agent_registrations.c.display_name,
+                node_agent_registrations.c.capabilities,
+                node_agent_xray_desired.c.config,
+                node_agent_xray_desired.c.generation,
+                node_agent_xray_desired.c.runtime_status,
+                node_agent_xray_desired.c.source_core_id,
+            ).join(node_agent_xray_desired,
+                   node_agent_registrations.c.node_uuid == node_agent_xray_desired.c.node_uuid)
+            .where(node_agent_registrations.c.status == "approved")
+            .order_by(node_agent_registrations.c.display_name, node_agent_registrations.c.node_uuid)
+            .limit(1025)
+        )
+    ).all()
+    if len(nodes) > 1024:
+        raise HTTPException(409, "Too many Nodes for the TLS certificate registry")
+    targets = []
+    for node in nodes:
+        if "xray.protobuf.binary" not in (node.capabilities or []):
+            continue
+        if not isinstance(node.config, dict):
+            continue
+        for inbound in node.config.get("inbounds", []):
+            if not isinstance(inbound, dict):
+                continue
+            stream = inbound.get("streamSettings")
+            if not isinstance(stream, dict) or stream.get("security") != "tls":
+                continue
+            tag = inbound.get("tag")
+            if not isinstance(tag, str) or not tag:
+                continue
+            targets.append({
+                "node_uuid": node.node_uuid,
+                "node_name": node.display_name,
+                "inbound_tag": tag,
+                "core_id": node.source_core_id,
+                "generation": node.generation,
+                "runtime_status": node.runtime_status,
+            })
+    bindings = (
+        await db.execute(select(
+            agent_tls_bindings.c.node_uuid,
+            agent_tls_bindings.c.inbound_tag,
+            agent_tls_bindings.c.preset_id,
+            tls_presets.c.name,
+            tls_presets.c.revision,
+        ).join(tls_presets, tls_presets.c.id == agent_tls_bindings.c.preset_id)
+         .order_by(agent_tls_bindings.c.node_uuid, agent_tls_bindings.c.inbound_tag))
+    ).all()
+    return {
+        "targets": targets,
+        "bindings": [
+            {"node_uuid": node_uuid, "inbound_tag": inbound_tag,
+             "preset_id": preset_id, "preset_name": name, "revision": revision}
+            for node_uuid, inbound_tag, preset_id, name, revision in bindings
+        ],
+    }
+
+
+@node_registry_router.post("/tls-presets/{preset_id}/apply")
+async def apply_agent_tls_preset(
+    preset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("cores", "update")),
+):
+    """Queue a refresh on each approved autonomous Node bound to this preset.
+
+    The response acknowledges enqueueing, not verified certificate delivery.
+    No old Node RPC calls are made by this path.
+    """
+    await begin_immediate_if_sqlite(db)
+    exists = await db.scalar(select(tls_presets.c.id).where(tls_presets.c.id == str(preset_id)))
+    if exists is None:
+        raise HTTPException(404, "TLS preset not found")
+    rows = (
+        await db.execute(
+            select(agent_tls_bindings.c.node_uuid)
+            .join(node_agent_registrations,
+                  node_agent_registrations.c.node_uuid == agent_tls_bindings.c.node_uuid)
+            .where(agent_tls_bindings.c.preset_id == str(preset_id),
+                   node_agent_registrations.c.status == "approved")
+            .distinct().order_by(agent_tls_bindings.c.node_uuid).limit(257)
+        )
+    ).scalars().all()
+    if len(rows) > 256:
+        raise HTTPException(409, "Too many Nodes are bound to one TLS preset")
+    results = []
+    for uuid in rows:
+        queued = await queue_xray_refresh(db, uuid)
+        results.append({"node_uuid": uuid, "status": "pending" if queued else "skipped"})
+    await db.commit()
+    return {"nodes": results}
+
+
 @node_registry_router.get("/nodes/{node_uuid}/xray/tls")
 async def list_agent_tls_bindings(
     node_uuid: UUID,
@@ -966,6 +1072,8 @@ async def list_xray_inbounds(
                 "tag": inbound.get("tag"),
                 "protocol": protocol,
                 "port": inbound.get("port"),
+                "security": (inbound.get("streamSettings") or {}).get("security")
+                if isinstance(inbound.get("streamSettings"), dict) else None,
                 "user_count": len(users),
                 "identities": [name for name in identities if isinstance(name, str)],
             }

@@ -128,3 +128,78 @@ def test_tls_preset_agent_binding_keeps_key_out_of_admin_api(tmp_path, monkeypat
         finally:
             await engine.dispose()
     asyncio.run(run())
+
+
+def test_tls_preset_registry_targets_and_uuid_wss_delivery(tmp_path, monkeypatch):
+    """TLS UI finds only approved UUID Nodes; apply schedules WSS, never legacy RPC."""
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+    from sqlalchemy import insert, update, select
+    from cryptography.fernet import Fernet
+    from app.db.models import node_agent_registrations, node_agent_xray_desired
+    from app.db.tls import tls_presets
+    from app.operation.tls_presets import encrypt_private_key
+    from app.routers.node_registry import (
+        AgentTLSBindingInput, bind_agent_tls, list_agent_tls_targets,
+        apply_agent_tls_preset, revoke,
+    )
+    monkeypatch.setenv("WAYLANE_TLS_SECRET_KEY", Fernet.generate_key().decode())
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///" + str(tmp_path / "tls-ui.db"))
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with factory() as db:
+                agent = await create_classic_node(db=db, _=object())
+                node_uuid = UUID(agent["node_uuid"])
+                config = qa_config()
+                config["inbounds"].append({
+                    "tag": "secure-inbound", "protocol": "vless", "port": 18444,
+                    "settings": {"clients": [], "decryption": "none"},
+                    "streamSettings": {"security": "tls", "tlsSettings": {}},
+                })
+                config["inbounds"][0]["settings"]["accounts"][0]["pass"] = "must-not-leak"
+                await set_desired_xray(node_uuid, XrayDesiredInput(action="deploy", config=config), db=db, _=object())
+                await agent_xray_report(XrayReport(node_uuid=node_uuid, generation=1, status="running"),
+                                        x_node_secret=agent["node_token"], db=db)
+                await db.execute(update(node_agent_registrations).where(
+                    node_agent_registrations.c.node_uuid == str(node_uuid)
+                ).values(capabilities=["xray.protobuf.binary"]))
+                preset_id = uuid4()
+                await db.execute(insert(tls_presets).values(
+                    id=str(preset_id), name="UI TLS", certificate_pem="synthetic-public-cert",
+                    encrypted_private_key=encrypt_private_key("never-return-private-key"),
+                    fingerprint_sha256="b" * 64, subject="CN=local.test",
+                    not_after=datetime.now(UTC) + timedelta(days=1), revision=1,
+                ))
+                await db.commit()
+                first = await list_agent_tls_targets(db=db, _=object())
+                assert first["targets"] == [{
+                    "node_uuid": str(node_uuid), "node_name": "node-" + str(node_uuid),
+                    "inbound_tag": "secure-inbound", "core_id": None,
+                    "generation": 1, "runtime_status": "running",
+                }]
+                assert first["bindings"] == []
+                assert "must-not-leak" not in repr(first)
+                assert "never-return-private-key" not in repr(first)
+                bound = await bind_agent_tls(node_uuid, "secure-inbound",
+                    AgentTLSBindingInput(preset_id=preset_id, expected_generation=1), db=db, _=object())
+                assert bound["status"] == "pending" and bound["generation"] == 2
+                second = await list_agent_tls_targets(db=db, _=object())
+                assert second["bindings"][0]["preset_id"] == str(preset_id)
+                assert second["bindings"][0]["node_uuid"] == str(node_uuid)
+                result = await apply_agent_tls_preset(preset_id, db=db, _=object())
+                assert result == {"nodes": [{"node_uuid": str(node_uuid), "status": "pending"}]}
+                state = (await db.execute(select(node_agent_xray_desired))).mappings().one()
+                assert state["generation"] == 3
+                assert state["runtime_status"] == "pending"
+                await revoke(node_uuid, db=db, _=object())
+                assert (await list_agent_tls_targets(db=db, _=object()))["targets"] == []
+                assert (await apply_agent_tls_preset(preset_id, db=db, _=object())) == {"nodes": []}
+                with pytest.raises(HTTPException) as missing:
+                    await apply_agent_tls_preset(uuid4(), db=db, _=object())
+                assert missing.value.status_code == 404
+        finally:
+            await engine.dispose()
+    asyncio.run(run())
