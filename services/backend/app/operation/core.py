@@ -1,6 +1,8 @@
 import asyncio
 from typing import NamedTuple
 
+from sqlalchemy import select
+
 from app import notification
 from app.core.hosts import host_manager
 from app.core.live_update import node_facing, only_live_parts_changed
@@ -24,7 +26,7 @@ from app.db.crud.wireguard import (
     wg_core_interfaces,
     wg_core_subnets,
 )
-from app.db.models import CoreType
+from app.db.models import CoreType, node_agent_xray_desired
 from app.models.admin import AdminDetails
 from app.models.core import (
     BulkCoreSelection,
@@ -171,8 +173,10 @@ class CoreOperation(BaseOperation):
         db_core = await self.get_validated_core_config(db, core_id)
         was_wg = bool(wg_core_interfaces(db_core))
         if modified_core.type not in (None, db_core.type):
-            from sqlalchemy import select
-
+            # An active autonomous Node references this saved Xray profile.
+            # Editing its contents is allowed, but converting it into a
+            # different Core type would invalidate the WSS desired binding.
+            await self._ensure_editor_core_not_bound(db, [core_id])
             from app.db.core_presets import core_preset_bindings
 
             bound = (
@@ -227,10 +231,18 @@ class CoreOperation(BaseOperation):
 
         return CoreModification(core, only_live_parts_changed(before, node_facing(validated_core)))
 
+    async def _ensure_editor_core_not_bound(self, db: AsyncSession, core_ids: list[int]) -> None:
+        """Never delete a profile referenced by an autonomous Node desired state."""
+        if core_ids and (await db.execute(select(node_agent_xray_desired.c.node_uuid).where(
+            node_agent_xray_desired.c.source_core_id.in_(core_ids)).limit(1))).first():
+            await self.raise_error(
+                "Core is assigned to an autonomous Node; apply another profile first", 409, db=db)
+
     async def delete_core(self, db: AsyncSession, core_id: int, admin: AdminDetails) -> None:
         if core_id == 1:
             return await self.raise_error(message="Cannot delete default core config", code=403)
 
+        await self._ensure_editor_core_not_bound(db, [core_id])
         db_core = await self.get_validated_core_config(db, core_id)
         was_wg = bool(wg_core_interfaces(db_core))
 
@@ -262,6 +274,7 @@ class CoreOperation(BaseOperation):
                 await self.raise_error(message="Cannot delete default core config", code=403)
 
         core_ids = [c.id for c in db_cores_list]
+        await self._ensure_editor_core_not_bound(db, core_ids)
         core_names = [c.name for c in db_cores_list]
         any_wg = any(wg_core_interfaces(c) for c in db_cores_list)
 

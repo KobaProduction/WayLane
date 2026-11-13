@@ -1,9 +1,6 @@
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import select
 
 from app.db import AsyncSession, get_db
-from app.db.crud.node import get_nodes
-from app.db.models import Node, NodeStatus
 from app.models.admin import AdminDetails
 from app.models.core import (
     BulkCoreSelection,
@@ -13,40 +10,18 @@ from app.models.core import (
     CoresSimpleResponse,
     RemoveCoresResponse,
 )
-from app.models.node import NodeListQuery
 from app.models.ordering import ReorderRequest
 from app.models.reality_scan import RealityScanRequest, RealityScanResult
 from app.operation import OperatorType
 from app.operation.core import CoreOperation
-from app.operation.node import NodeOperation
 from app.utils import responses
 
 from .authentication import require_permission
 from .dependencies import get_core_list_query, get_core_simple_list_query
+from .node_xray_resources import queue_assigned_editor_cores
 
 core_operator = CoreOperation(operator_type=OperatorType.API)
-node_operator = NodeOperation(operator_type=OperatorType.API)
 router = APIRouter(tags=["Core"], prefix="/api/core", responses={401: responses._401, 403: responses._403})
-
-
-async def _core_node_ids(db: AsyncSession, core_ids: list[int]) -> list[int]:
-    result = await db.scalars(select(Node.id).where(Node.core_config_id.in_(core_ids)))
-    return list(result.all())
-
-
-async def _restart_deleted_core_nodes(db: AsyncSession, node_ids: list[int]) -> None:
-    if not node_ids:
-        return
-
-    nodes, _ = await get_nodes(
-        db,
-        query=NodeListQuery(
-            ids=node_ids,
-            status=[NodeStatus.connected, NodeStatus.connecting, NodeStatus.error],
-        ),
-        load_usage_logs=False,
-    )
-    await node_operator.connect_nodes_bulk(db, nodes, force_start=True)
 
 
 @router.post("", response_model=CoreResponse, status_code=status.HTTP_201_CREATED)
@@ -97,9 +72,9 @@ async def modify_core_config(
     result = await core_operator.modify_core(db, core_id, modified_core, admin)
 
     if restart_nodes:
-        # Nodes apply routing and outbound edits to the running Xray, so only
-        # other edits need the Stop that forces a restart.
-        await node_operator.restart_all_node(db=db, core_id=core_id, admin=admin, stop_first=not result.live_on_nodes)
+        # This explicit editor action now queues a new Xray generation on each
+        # assigned autonomous Node. It never calls the old PasarGuard RPC.
+        await queue_assigned_editor_cores(db, core_id, live_update=result.live_on_nodes)
 
     return result.core
 
@@ -111,12 +86,12 @@ async def delete_core_config(
     admin: AdminDetails = Depends(require_permission("cores", "delete")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a core configuration."""
-    node_ids = await _core_node_ids(db, [core_id]) if restart_nodes else []
+    """Delete an unassigned profile; assigned autonomous Nodes block deletion.
+
+    The historical restart_nodes query is accepted but cannot restart a Node
+    after its Core source has been deleted. Reassign the profile first.
+    """
     await core_operator.delete_core(db, core_id, admin)
-
-    await _restart_deleted_core_nodes(db, node_ids)
-
     return {}
 
 
@@ -151,9 +126,8 @@ async def restart_core(
     admin: AdminDetails = Depends(require_permission("cores", "update")),
     db: AsyncSession = Depends(get_db),
 ):
-    """restart nodes related to the core config"""
-
-    await node_operator.restart_all_node(db=db, core_id=core_id, admin=admin)
+    """Restart the Xray Core on approved autonomous Nodes using this profile."""
+    await queue_assigned_editor_cores(db, core_id, restart_only=True)
     return {}
 
 
@@ -167,8 +141,5 @@ async def bulk_delete_cores(
     db: AsyncSession = Depends(get_db),
     admin: AdminDetails = Depends(require_permission("cores", "delete")),
 ):
-    """Delete selected cores by ID."""
-    node_ids = await _core_node_ids(db, list(bulk_cores.ids))
-    response = await core_operator.bulk_remove_cores(db, bulk_cores, admin)
-    await _restart_deleted_core_nodes(db, node_ids)
-    return response
+    """Delete selected unassigned Core Editor profiles by ID."""
+    return await core_operator.bulk_remove_cores(db, bulk_cores, admin)

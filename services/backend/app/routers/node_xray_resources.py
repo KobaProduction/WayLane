@@ -2,12 +2,15 @@
 
 import copy
 import json
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CoreConfig, node_agent_xray_desired
+from app.db.base import begin_immediate_if_sqlite
+from app.db.models import CoreConfig, CoreType, node_agent_registrations, node_agent_xray_desired
 from app.db.tls import agent_tls_bindings, tls_presets
+from app.operation.core_presets import hydrate_core_preset_config
 from app.operation.tls_presets import decrypt_private_key
 
 
@@ -44,6 +47,129 @@ async def routing_from_editor(db: AsyncSession, core_id: int) -> dict:
     if not isinstance(source, dict) or not isinstance(source.get("routing"), dict):
         raise ValueError("Saved Xray core has no routing configuration")
     return source["routing"]
+
+
+def validate_local_proxy_exposure(config: dict) -> None:
+    """Do not accidentally create a public unauthenticated HTTP/SOCKS proxy.
+
+    This validates only the exposure boundary; Xray remains responsible for
+    validating the complete protocol-specific configuration on deploy.
+    """
+    for inbound in config.get("inbounds", []):
+        if not isinstance(inbound, dict):
+            continue
+        protocol = inbound.get("protocol")
+        if protocol not in {"http", "socks", "mixed"}:
+            continue
+        listen = str(inbound.get("listen") or "0.0.0.0").strip().lower()
+        if listen in {"127.0.0.1", "::1", "localhost"}:
+            continue
+        settings = inbound.get("settings") or {}
+        if not isinstance(settings, dict):
+            raise ValueError("Public HTTP/SOCKS proxy settings must be an object")
+        accounts = settings.get("accounts")
+        protected = (
+            protocol != "mixed"
+            and isinstance(accounts, list)
+            and len(accounts) > 0
+            and all(isinstance(item, dict)
+                    and isinstance(item.get("user"), str) and item["user"]
+                    and isinstance(item.get("pass"), str) and item["pass"]
+                    for item in accounts)
+        )
+        if protocol == "socks":
+            protected = protected and settings.get("auth") == "password"
+        if not protected:
+            raise ValueError(
+                "Refusing public unauthenticated HTTP/SOCKS proxy; bind to loopback "
+                "or configure explicit per-user authentication"
+            )
+
+
+async def editor_core_json(db: AsyncSession, core_id: int) -> tuple[CoreConfig, dict]:
+    """Read a saved Xray editor profile without exposing its managed secrets."""
+    core = await db.get(CoreConfig, core_id)
+    if core is None or core.type != CoreType.xray:
+        raise ValueError("Saved Xray Core Editor profile not found")
+    source = json.loads(core.config) if isinstance(core.config, str) else core.config
+    if (not isinstance(source, dict) or
+            not isinstance(source.get("inbounds"), list) or
+            not isinstance(source.get("outbounds"), list) or
+            len(json.dumps(source, ensure_ascii=False).encode()) > 512_000):
+        raise ValueError("Saved Xray Core Editor profile must contain valid inbounds/outbounds <= 500 KiB")
+    validate_local_proxy_exposure(source)
+    return core, copy.deepcopy(source)
+
+
+async def node_facing_editor_core_json(db: AsyncSession, core_id: int, public_config: dict) -> dict:
+    """Hydrate bound secrets only while preparing the authenticated Node payload.
+
+    Desired state persists the public Core Editor projection, never decrypted
+    REALITY or VLESS preset keys. The returned object must not be logged.
+    """
+    hydrated = await hydrate_core_preset_config(db, json.dumps(public_config), core_id)
+    config = json.loads(hydrated)
+    if len(json.dumps(config, ensure_ascii=False).encode()) > 512_000:
+        raise ValueError("Hydrated Xray Core Editor profile exceeds the control limit")
+    return config
+
+
+async def queue_assigned_editor_cores(
+    db: AsyncSession, core_id: int, *, restart_only: bool = False, live_update: bool = False
+) -> int:
+    """Dispatch a saved Xray profile to its explicitly assigned autonomous Nodes.
+
+    A Core Editor save with restart_nodes=true queues the new public snapshot;
+    an explicit Core restart reuses the already-applied snapshot instead.
+    Routing/outbound-only edits use live reconfigure, not a disruptive deploy.
+    Deliberately stopped Nodes are never implicitly started by an edit.
+    """
+    await begin_immediate_if_sqlite(db)
+    rows = (
+        (await db.execute(
+            select(node_agent_xray_desired)
+            .join(node_agent_registrations,
+                  node_agent_xray_desired.c.node_uuid == node_agent_registrations.c.node_uuid)
+            .where(node_agent_xray_desired.c.source_core_id == core_id,
+                   node_agent_registrations.c.status == "approved")
+            .order_by(node_agent_xray_desired.c.node_uuid)
+            .limit(257)
+            .with_for_update()
+        )).mappings().all()
+    )
+    if len(rows) > 256:
+        raise ValueError("Too many Nodes are assigned to the same saved Core profile")
+    applicable = [row for row in rows if row["runtime_status"] != "stopped"]
+    if not applicable:
+        return 0
+    public_config = None
+    if not restart_only:
+        _, public_config = await editor_core_json(db, core_id)
+        # Validate all managed references before accepting the new generation.
+        await node_facing_editor_core_json(db, core_id, public_config)
+    for row in applicable:
+        live_reconfigure = (live_update and row["runtime_status"] == "running"
+                            and int(row["applied_generation"] or 0) > 0)
+        values = {
+            "generation": int(row["generation"]) + 1,
+            "action": "restart" if restart_only else "reconfigure" if live_reconfigure else "deploy",
+            "runtime_status": "pending",
+            "last_error": None,
+            "updated_at": datetime.now(UTC),
+        }
+        if not restart_only:
+            values["config"] = copy.deepcopy(public_config)
+        result = await db.execute(
+            update(node_agent_xray_desired)
+            .where(node_agent_xray_desired.c.node_uuid == row["node_uuid"],
+                   node_agent_xray_desired.c.generation == row["generation"])
+            .values(**values)
+        )
+        if result.rowcount != 1:
+            await db.rollback()
+            raise ValueError("Node generation changed while saving the Core profile")
+    await db.commit()
+    return len(applicable)
 
 
 async def agent_tls_material(db: AsyncSession, uuid: str) -> list[dict]:

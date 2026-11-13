@@ -10,7 +10,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,11 +25,14 @@ from app.db.models import (
 )
 from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
+from app.operation.core_presets import CorePresetError
 from app.utils.crypto import validate_wireguard_key
 
 from .authentication import require_permission
 from .node_xray_resources import (
     agent_tls_material,
+    editor_core_json,
+    node_facing_editor_core_json,
     queue_xray_refresh,
     replace_routing,
     routing_from_editor,
@@ -223,7 +226,6 @@ async def list_registrations(
         node_agent_registrations.c.display_name,
         node_agent_registrations.c.status,
         node_agent_registrations.c.agent_version,
-        node_agent_registrations.c.legacy_node_id,
         node_agent_registrations.c.last_seen_at,
         node_agent_registrations.c.observed_ip,
         node_agent_registrations.c.reported_ipv4,
@@ -240,6 +242,40 @@ async def list_registrations(
         entry["node_version"] = entry.pop("agent_version")
         result.append(entry)
     return {"nodes": result}
+
+
+class NodeNameUpdate(BaseModel):
+    """An operator-owned display name, independent from the Node hostname."""
+
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(min_length=1, max_length=128)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name or any(ord(character) < 32 for character in name):
+            raise ValueError("Node display name must contain printable characters")
+        return name
+
+
+@node_registry_router.patch("/nodes/{node_uuid}")
+async def rename_registration(
+    node_uuid: UUID,
+    body: NodeNameUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    """Rename a registered WayLane Node without recreating its identity."""
+    result = await db.execute(
+        update(node_agent_registrations)
+        .where(node_agent_registrations.c.node_uuid == str(node_uuid))
+        .values(display_name=body.display_name)
+    )
+    if result.rowcount != 1:
+        raise HTTPException(404, "Unknown Node identity")
+    await db.commit()
+    return {"node_uuid": str(node_uuid), "display_name": body.display_name}
 
 
 @node_registry_router.post("/nodes/{node_uuid}/approve")
@@ -507,6 +543,7 @@ async def set_desired_xray(
         "image_version": version,
         "config": config,
         "region": region,
+        "source_core_id": (None if body.config is not None else previous["source_core_id"] if previous else None),
         "runtime_status": "pending",
         "last_error": None,
         "updated_at": now,
@@ -527,6 +564,83 @@ async def set_desired_xray(
         "image_version": version,
         "region": region,
     }
+
+
+class EditorCoreDeployInput(BaseModel):
+    """Apply a saved Xray Core Editor profile to an autonomous Node."""
+    model_config = ConfigDict(extra="forbid")
+    core_id: int = Field(ge=1)
+    expected_generation: int = Field(ge=0)
+    image_version: str | None = None
+
+    @field_validator("image_version")
+    @classmethod
+    def official_version(cls, value: str | None) -> str | None:
+        return XrayDesiredInput.official_version(value)
+
+
+@node_registry_router.put("/nodes/{node_uuid}/xray/from-core")
+async def deploy_editor_core(
+    node_uuid: UUID,
+    body: EditorCoreDeployInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update_core")),
+    __: AdminDetails = Depends(require_permission("cores", "read")),
+):
+    """Explicitly deploy a saved Core profile through desired state / WSS.
+
+    Compare the generation under a database lock. Keep managed secrets in
+    encrypted presets, hydrating them only for the authenticated Node frame.
+    """
+    await begin_immediate_if_sqlite(db)
+    node = (
+        await db.execute(select(node_agent_registrations.c.status, node_agent_registrations.c.capabilities)
+                         .where(node_agent_registrations.c.node_uuid == str(node_uuid)))
+    ).one_or_none()
+    if node is None or node.status != "approved":
+        raise HTTPException(409, "Only approved Nodes accept Xray profiles")
+    if "xray.protobuf.binary" not in (node.capabilities or []):
+        raise HTTPException(409, "Node does not advertise Xray binary control")
+    previous = (
+        (await db.execute(select(node_agent_xray_desired)
+                          .where(node_agent_xray_desired.c.node_uuid == str(node_uuid))
+                          .with_for_update()))
+        .mappings().one_or_none()
+    )
+    generation = int(previous["generation"]) if previous else 0
+    if generation != body.expected_generation:
+        raise HTTPException(409, "Xray generation changed; reload Node status before deploying")
+    if previous and previous["runtime_status"] == "pending":
+        raise HTTPException(409, "Another Xray operation is already pending")
+    try:
+        core, public_config = await editor_core_json(db, body.core_id)
+        checked = XrayDesiredInput(action="deploy", image_version=body.image_version, config=public_config)
+        await node_facing_editor_core_json(db, core.id, public_config)
+    except ValidationError as exc:
+        # Pydantic error text can echo untrusted input, including private data.
+        raise HTTPException(422, "Saved Xray Core Editor profile failed validation") from exc
+    except (ValueError, CorePresetError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    values = {
+        "generation": generation + 1,
+        "action": "deploy",
+        "image_version": checked.image_version or (previous["image_version"] if previous else "26.10.21"),
+        "config": public_config,
+        "source_core_id": core.id,
+        "region": previous["region"] if previous else None,
+        "runtime_status": "pending",
+        "last_error": None,
+        "updated_at": datetime.now(UTC),
+    }
+    if previous:
+        await db.execute(update(node_agent_xray_desired)
+                         .where(node_agent_xray_desired.c.node_uuid == str(node_uuid))
+                         .values(**values))
+    else:
+        await db.execute(insert(node_agent_xray_desired).values(node_uuid=str(node_uuid), **values))
+    await db.commit()
+    return {"status": "pending", "action": "deploy", "generation": generation + 1,
+            "source_core_id": core.id, "source_core_name": core.name}
 
 
 class AWGDesiredInput(BaseModel):
@@ -935,6 +1049,7 @@ async def get_desired_xray(
         "action": entry["action"],
         "image_version": entry["image_version"],
         "region": entry["region"],
+        "source_core_id": entry["source_core_id"],
         "applied_generation": entry["applied_generation"],
         "runtime_status": entry["runtime_status"],
         "last_error": entry["last_error"],
@@ -961,7 +1076,8 @@ async def agent_xray_desired(
         "generation": entry["generation"],
         "action": entry["action"],
         "image_version": entry["image_version"],
-        "config": entry["config"],
+        "config": (await node_facing_editor_core_json(db, entry["source_core_id"], entry["config"])
+                   if entry["source_core_id"] is not None and entry["config"] else entry["config"]),
         "region": entry["region"],
         "applied_generation": entry["applied_generation"],
         "tls_certificates": await agent_tls_material(db, str(node_uuid)),

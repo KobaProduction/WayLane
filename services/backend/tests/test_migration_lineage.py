@@ -73,7 +73,9 @@ def test_revision_map_cli_keeps_product_user_unavailable():
     backend_dir = Path(__file__).resolve().parents[1]
     history = ScriptDirectory.from_config(Config("alembic.ini"))
     merged_head = history.get_current_head()
-    assert set(history.get_revision(merged_head).down_revision) == {
+    assert merged_head == "e62b47a9d5c1", "Core Editor/Node binding must extend the merged history"
+    assert history.get_revision(merged_head).down_revision == "f0556e841d8b"
+    assert set(history.get_revision("f0556e841d8b").down_revision) == {
         "d9f2e8714c33", "a7e36d1b4f90"
     }, "The AWG and UUID-only histories must join without rewriting either revision"
     for args in (("heads",), ("history",)):

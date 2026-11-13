@@ -772,6 +772,7 @@ node_agent_xray_desired = Table(
     Column("image_version", String(32), nullable=False),
     Column("config", JSON(), nullable=True),
     Column("region", String(64), nullable=True),
+    Column("source_core_id", SqliteCompatibleBigInteger, ForeignKey("core_configs.id", ondelete="RESTRICT"), nullable=True),
     Column("applied_generation", Integer, nullable=False, server_default="0"),
     Column("runtime_status", String(16), nullable=False, server_default="pending"),
     Column("last_error", String(300), nullable=True),

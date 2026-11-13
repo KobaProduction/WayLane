@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { $fetch } from '@/service/http'
 import { useAdmin } from '@/hooks/use-admin'
 import { hasPermission } from '@/utils/rbac'
@@ -43,8 +44,11 @@ type XrayStatus = {
   region?: string | null
   runtime_status?: string
   applied_generation?: number
+  source_core_id?: number | null
   last_error?: string | null
 }
+
+type EditorCoreOption = { id: number; name: string; type: string | null }
 
 type Invitation = {
   id: number
@@ -97,6 +101,8 @@ export default function NodeDiscoveryPanel() {
   const registrationRef = useRef<HTMLDivElement>(null)
   const [autoApprove, setAutoApprove] = useState(false)
   const [token, setToken] = useState('')
+  const [nameEditors, setNameEditors] = useState<Record<string, string>>({})
+  const [renameBusy, setRenameBusy] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const canManageXray = hasPermission(admin, 'nodes', 'update_core')
@@ -110,7 +116,8 @@ export default function NodeDiscoveryPanel() {
   const [xrayInboundTag, setXrayInboundTag] = useState('waylane-socks5-qa')
   const [xrayInboundStates, setXrayInboundStates] = useState<Record<string, XrayInboundInfo[]>>({})
   const [xrayUsersJSON, setXrayUsersJSON] = useState('')
-  const [editorCoreId, setEditorCoreId] = useState('')
+  const [editorCoreIds, setEditorCoreIds] = useState<Record<string, string>>({})
+  const [editorCores, setEditorCores] = useState<EditorCoreOption[]>([])
   const [tlsPresetId, setTlsPresetId] = useState('')
   const [tlsInboundTag, setTlsInboundTag] = useState('')
   const [agentTLSBindings, setAgentTLSBindings] = useState<Record<string, AgentTLSBinding[]>>({})
@@ -215,10 +222,33 @@ export default function NodeDiscoveryPanel() {
   }
 
 
+  const renameNode = async (uuid: string) => {
+    if (!canApprove || renameBusy) return
+    const name = nameEditors[uuid]?.trim()
+    if (!name || name.length > 128) {
+      toast.error('Имя ноды должно содержать от 1 до 128 символов')
+      return
+    }
+    setRenameBusy(uuid)
+    try {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid), {
+        method: 'PATCH', body: { display_name: name },
+      })
+      setNameEditors(prev => { const next = { ...prev }; delete next[uuid]; return next })
+      await refresh()
+      toast.success('Название Node сохранено')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось изменить название Node')
+    } finally { setRenameBusy(null) }
+  }
+
   const readXray = async (uuid: string) => {
     try {
       const state = await $fetch<XrayStatus>('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray')
       setXrayStates(prev => ({ ...prev, [uuid]: state }))
+      setEditorCoreIds(prev => prev[uuid] ? prev : {
+        ...prev, [uuid]: state.source_core_id ? String(state.source_core_id) : '',
+      })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось получить статус Xray')
     }
@@ -244,9 +274,41 @@ export default function NodeDiscoveryPanel() {
     }
   }
 
+  const readEditorCores = async () => {
+    try {
+      const list = await $fetch<{ cores: EditorCoreOption[] }>('/api/cores/simple?all=true')
+      setEditorCores(list.cores.filter(core => core.type === 'xray'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить профили Xray из Core Editor')
+    }
+  }
+
+  const applyEditorCore = async (uuid: string) => {
+    if (!canManageXray) return
+    const coreId = Number(editorCoreIds[uuid] ?? '')
+    if (!Number.isSafeInteger(coreId) || coreId < 1) {
+      toast.error('Сначала выберите сохранённый профиль Xray')
+      return
+    }
+    setXrayBusy(true)
+    try {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray/from-core', {
+        method: 'PUT', body: {
+          core_id: coreId,
+          expected_generation: xrayStates[uuid]?.generation ?? 0,
+        },
+      })
+      toast.success('Конфигурация Core Editor отправлена ноде через WSS')
+      await readXray(uuid)
+      await readXrayInbounds(uuid)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось применить профиль Xray')
+    } finally { setXrayBusy(false) }
+  }
+
   const synchronizeEditorRouting = async (uuid: string) => {
     const generation = xrayStates[uuid]?.generation
-    const coreId = Number(editorCoreId)
+    const coreId = Number(editorCoreIds[uuid] ?? '')
     if (!generation || !Number.isSafeInteger(coreId) || coreId < 1) {
       toast.error('Укажите существующий Core ID и обновите состояние Agent')
       return
@@ -290,7 +352,7 @@ export default function NodeDiscoveryPanel() {
     const password = Array.from(random, value => value.toString(16).padStart(2, '0')).join('')
     setXrayConfig(JSON.stringify({
       log: { loglevel: 'warning' },
-      inbounds: [{ tag: 'waylane-socks-qa', listen: '0.0.0.0', port: 18443,
+      inbounds: [{ tag: 'waylane-socks-qa', listen: '127.0.0.1', port: 18443,
         protocol: 'socks', settings: { auth: 'password', accounts: [{ user: 'waylane-qa', pass: password }], udp: false } }],
       outbounds: [{ tag: 'direct', protocol: 'freedom' }],
     }, null, 2))
@@ -478,6 +540,25 @@ export default function NodeDiscoveryPanel() {
                   <Badge variant="secondary">{node.status}</Badge>
                   <Badge variant="outline">{node.connection_mode === 'classic' ? 'Classic' : 'Discovery'}</Badge>
                 </div>
+                {canApprove && node.node_uuid in nameEditors && (
+                  <div className="flex flex-wrap gap-2">
+                    <Input aria-label="Новое название ноды" value={nameEditors[node.node_uuid]}
+                      maxLength={128} className="max-w-xs"
+                      onChange={event => setNameEditors(prev => ({ ...prev, [node.node_uuid]: event.target.value }))} />
+                    <Button size="sm" disabled={renameBusy !== null}
+                      onClick={() => void renameNode(node.node_uuid)}>Сохранить имя</Button>
+                    <Button size="sm" variant="outline" disabled={renameBusy !== null}
+                      onClick={() => setNameEditors(prev => { const next = { ...prev }; delete next[node.node_uuid]; return next })}>
+                      Отмена
+                    </Button>
+                  </div>
+                )}
+                {canApprove && !(node.node_uuid in nameEditors) && (
+                  <Button size="sm" variant="outline"
+                    onClick={() => setNameEditors(prev => ({ ...prev, [node.node_uuid]: node.display_name }))}>
+                    Переименовать
+                  </Button>
+                )}
                 <p className="text-muted-foreground break-all font-mono text-xs">{node.node_uuid}</p>
                 <p className="text-muted-foreground break-words text-xs">
                   Управляющий процесс {node.node_version} · {node.last_seen_at ? `Последнее взаимодействие: ${new Date(node.last_seen_at).toLocaleString()}` : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
@@ -504,6 +585,7 @@ export default function NodeDiscoveryPanel() {
                       void readXray(node.node_uuid)
                       void readXrayInbounds(node.node_uuid)
                       void refreshTLSBindings(node.node_uuid)
+                      void readEditorCores()
                       void $fetch<TLSPresetSummary[]>('/api/tls-presets')
                         .then(setTlsPresetChoices).catch(() => setTlsPresetChoices([]))
                     }} disabled={!node.capabilities?.includes('xray.protobuf.binary')}>Xray: управление (DEV)</Button>
@@ -558,15 +640,56 @@ export default function NodeDiscoveryPanel() {
                           onClick={() => void readXray(node.node_uuid)}>Статус</Button>
                       </div>
                       <div className="space-y-2 border-t pt-3">
-                        <p className="text-sm font-medium">Маршрутизация из Core Editor</p>
+                        <p className="text-sm font-medium">Профиль из Core Editor</p>
+                        <p className="text-muted-foreground text-xs">
+                          Выберите сохранённый профиль Xray по имени. Применение заменит конфигурацию
+                          Xray на этой ноде и может прервать подключения. Другие ноды не затрагиваются.
+                          Секреты управляемых пресетов не выводятся в браузер.
+                        </p>
+                        {xrayStates[node.node_uuid]?.source_core_id != null && (
+                          <p className="text-muted-foreground text-xs">
+                            Последний применённый профиль: <Link className="underline" to={'/nodes/cores/' + xrayStates[node.node_uuid].source_core_id}>
+                              {editorCores.find(core => core.id === xrayStates[node.node_uuid]?.source_core_id)?.name ?? 'Открыть профиль'}
+                            </Link>
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select aria-label="Сохранённый профиль Xray" className="border-input bg-background min-h-9 min-w-56 max-w-full rounded-md border px-3 py-1 text-sm"
+                            value={editorCoreIds[node.node_uuid] ?? ''}
+                            onChange={event => setEditorCoreIds(prev => ({ ...prev, [node.node_uuid]: event.target.value }))}>
+                            <option value="">Выберите Xray Core</option>
+                            {editorCores.map(core => <option key={core.id} value={core.id}>{core.name}</option>)}
+                          </select>
+                          {editorCoreIds[node.node_uuid] && <Link className="text-sm underline" to={'/nodes/cores/' + editorCoreIds[node.node_uuid]}>Открыть редактор</Link>}
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" disabled={xrayBusy || !editorCoreIds[node.node_uuid] || !xrayStates[node.node_uuid]}>
+                                Применить весь профиль к Xray
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Применить конфигурацию к этой Node?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Работающее ядро Xray может быть перезапущено. Проверяйте клиентские подключения после применения.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Отмена</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => void applyEditorCore(node.node_uuid)}>Применить конфигурацию</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                      <div className="space-y-2 border-t pt-3">
+                        <p className="text-sm font-medium">Только правила маршрутизации из Core Editor</p>
                         <p className="text-muted-foreground text-xs">
                           Использует сохранённые правила, balancers и параметры маршрутизации Xray Core Editor.
                           Остальные разделы текущего Xray не изменяются.
                         </p>
                         <div className="flex flex-wrap gap-2">
-                          <Input aria-label="Saved Xray core ID" className="max-w-52" type="number"
-                            min="1" placeholder="ID сохранённого Xray Core"
-                            value={editorCoreId} onChange={e => setEditorCoreId(e.target.value)} />
+                          <span className="text-muted-foreground text-xs">{editorCores.find(core => String(core.id) === editorCoreIds[node.node_uuid])?.name ?? 'Выберите профиль выше'}</span>
                           <Button size="sm" variant="outline" disabled={xrayBusy || !xrayStates[node.node_uuid]?.configured}
                             onClick={() => void synchronizeEditorRouting(node.node_uuid)}>
                             Применить правила редактора

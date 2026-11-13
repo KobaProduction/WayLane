@@ -11,7 +11,13 @@ Vue has been implemented yet.
 - Run `bun install --frozen-lockfile` and `VITE_BASE_API=/ bun run build`.
 - Build frontend from `services/frontend/` inside the single `KobaProduction/waylane` repository. No additional source checkout is required.
 - This directory builds its own `frontend` image inside the same monorepo; the backend image is built independently from `services/backend/`.
-- The supported Coolify DEV deployment is one Compose resource with two services (`backend` and `frontend`) from the same Git SHA.
+- Coolify DEV deploys **Backend**, **Frontend**, **Dependencies** (PostgreSQL) and
+  **Node** as four independently owned Compose resources in the `WayLane`
+  project. Backend/Frontend builds use `main` from the same monorepo; Node
+  deployment remains manual and preserves its own Agent/Node lifecycle.
+- Saved Xray Core Editor profiles can be explicitly applied to autonomous
+  Nodes from the Node Registry. This is separate from the still-unmigrated
+  PasarGuard RPC compatibility paths tracked in Issue #21.
 
 The existing subscription-page HTML lives in backend until Vue replacement is
 built, to avoid breaking client links. Commercial subscriptions stay in

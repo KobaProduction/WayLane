@@ -473,17 +473,18 @@ def _save_core(access_token, core, config):
     )
 
 
-def _stop_first_after_save(access_token, monkeypatch, change) -> bool:
-    restart = AsyncMock()
-    monkeypatch.setattr(core_router.node_operator, "restart_all_node", restart)
+def _live_update_after_save(access_token, monkeypatch, change) -> bool:
+    queue = AsyncMock(return_value=0)
+    monkeypatch.setattr(core_router, "queue_assigned_editor_cores", queue)
     core = create_core(access_token)
     config = copy.deepcopy(xray_config)
     change(config)
     try:
         response = _save_core(access_token, core, config)
         assert response.status_code == status.HTTP_200_OK
-        restart.assert_awaited_once()
-        return restart.await_args.kwargs["stop_first"]
+        queue.assert_awaited_once()
+        assert queue.await_args.args[1] == core["id"]
+        return queue.await_args.kwargs["live_update"]
     finally:
         delete_core(access_token, core["id"])
 
@@ -493,15 +494,15 @@ def test_core_save_with_rule_and_outbound_changes_skips_stop(access_token, monke
         config["routing"]["rules"].append({"type": "field", "domain": ["example.com"], "outboundTag": "BLOCK"})
         config["outbounds"].append({"tag": "DIRECT2", "protocol": "freedom"})
 
-    assert _stop_first_after_save(access_token, monkeypatch, change) is False
+    assert _live_update_after_save(access_token, monkeypatch, change) is True
 
 
 def test_unchanged_core_save_skips_stop(access_token, monkeypatch):
-    assert _stop_first_after_save(access_token, monkeypatch, lambda config: None) is False
+    assert _live_update_after_save(access_token, monkeypatch, lambda config: None) is True
 
 
 def test_core_save_with_other_changes_keeps_stop(access_token, monkeypatch):
     def change(config):
         config["routing"]["domainStrategy"] = "IPIfNonMatch"
 
-    assert _stop_first_after_save(access_token, monkeypatch, change) is True
+    assert _live_update_after_save(access_token, monkeypatch, change) is False

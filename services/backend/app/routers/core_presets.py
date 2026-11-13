@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.manager import core_manager
 from app.db import get_db
 from app.db.core_presets import core_preset_bindings, core_presets
-from app.db.models import CoreConfig, CoreType
+from app.db.models import CoreConfig, CoreType, node_agent_xray_desired
 from app.models.admin import AdminDetails
 from app.operation.core_presets import (
     ROUTING_TAG,
@@ -79,6 +79,18 @@ async def _project_binding(
     return core, projected, validated
 
 
+async def _ensure_preset_change_not_bound_to_node(db: AsyncSession, core_ids: list[int]) -> None:
+    """Keep an applied Node's public snapshot and encrypted secret in sync.
+
+    Saved editor bindings are re-materialized on authenticated WSS delivery.
+    Until versioned per-Node preset snapshots exist, mutating a live binding
+    could pair an old public key with a new private key after reconnect.
+    """
+    if core_ids and (await db.execute(select(node_agent_xray_desired.c.node_uuid).where(
+        node_agent_xray_desired.c.source_core_id.in_(core_ids)).limit(1))).first():
+        raise HTTPException(409, "Core is assigned to an autonomous Node; apply a different Core profile before changing its managed presets")
+
+
 async def _refresh_core(core, validated):
     # Call after commit: replace the in-memory/public projection and update
     # subscription metadata, without forcing a live node restart.
@@ -141,6 +153,7 @@ async def replace_preset(
             .mappings()
             .all()
         )
+        await _ensure_preset_change_not_bound_to_node(db, sorted({item["core_id"] for item in bindings}))
         projections_by_core = {}
         for binding in bindings:
             core_id = binding["core_id"]
@@ -231,6 +244,7 @@ async def bind_preset(
     _: AdminDetails = Depends(require_permission("cores", "update")),
 ):
     preset = await _lookup(db, body.preset_id)
+    await _ensure_preset_change_not_bound_to_node(db, [body.core_id])
     if preset["kind"] == "routing" and body.inbound_tag != ROUTING_TAG:
         raise HTTPException(422, "Routing binding must use __routing__ as the tag")
     if preset["kind"] != "routing" and body.inbound_tag == ROUTING_TAG:

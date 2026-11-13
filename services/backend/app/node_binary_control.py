@@ -220,22 +220,49 @@ class AgentBinarySession:
                 ))).mappings().one_or_none()
             )
             if xray and xray["generation"] > self._last_sent_generation:
-                from app.routers.node_xray_resources import agent_tls_material
+                from app.routers.node_xray_resources import agent_tls_material, node_facing_editor_core_json
 
-                payload = {
-                    "configured": True,
-                    "generation": xray["generation"],
-                    "applied_generation": xray["applied_generation"],
-                    "action": xray["action"],
-                    "image_version": xray["image_version"],
-                    "region": xray["region"] or "",
-                    "config": xray["config"],
-                    "tls_certificates": await agent_tls_material(db, self.node_uuid),
-                }
-                await self.outgoing.put(new_message(
-                    "desired", self.node_uuid, core_id=CORE_ID,
-                    generation=int(xray["generation"]), operation=xray["action"], payload=payload,
-                ))
+                # Decrypt managed presets only into this authenticated WSS frame.
+                # Fail closed and report a sanitized error if a stored binding
+                # becomes inconsistent; never send half-hydrated credentials.
+                prepared = None
+                try:
+                    runtime_config = (
+                        await node_facing_editor_core_json(db, xray["source_core_id"], xray["config"])
+                        if xray["source_core_id"] is not None and xray["config"] else xray["config"]
+                    )
+                    prepared = {
+                        "configured": True,
+                        "generation": xray["generation"],
+                        "applied_generation": xray["applied_generation"],
+                        "action": xray["action"],
+                        "image_version": xray["image_version"],
+                        "region": xray["region"] or "",
+                        "config": runtime_config,
+                        "tls_certificates": await agent_tls_material(db, self.node_uuid),
+                    }
+                except Exception as exc:
+                    logger.warning(
+                        "Cannot prepare Xray desired generation %s for Node %s (%s)",
+                        xray["generation"], self.node_uuid, type(exc).__name__,
+                    )
+                    await db.execute(
+                        update(node_agent_xray_desired)
+                        .where(
+                            node_agent_xray_desired.c.node_uuid == self.node_uuid,
+                            node_agent_xray_desired.c.generation == xray["generation"],
+                        ).values(
+                            runtime_status="error",
+                            last_error="Saved Xray Core preset cannot be prepared; reapply after repair",
+                            reported_at=datetime.now(UTC),
+                        )
+                    )
+                    await db.commit()
+                if prepared is not None:
+                    await self.outgoing.put(new_message(
+                        "desired", self.node_uuid, core_id=CORE_ID,
+                        generation=int(xray["generation"]), operation=xray["action"], payload=prepared,
+                    ))
                 self._last_sent_generation = int(xray["generation"])
 
             # AWG is independent from Xray and sent only to an approved Node

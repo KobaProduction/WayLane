@@ -31,6 +31,11 @@ VPN Core owns commercial entitlement and tariff policy; WayLane must reject
 administrator or legacy changes to Core-managed group/traffic/expiry/admission
 state, including indirect bulk and administrative operations.
 
-WayLane Node Agent discovery API, migrations and IP observation registry belong to
-`app/routers/node_discovery.py`. Registration must not silently mutate
-legacy `nodes`, hosts, certificates or subscription endpoints.
+WayLane Node registration/Discovery and the associated IP registry live in
+`app/routers/node_registry.py`; the authenticated binary WSS transport lives in
+`app/routers/node_control_ws.py` and `app/node_binary_control.py`.
+Old `app/node/`, `waylane_node_bridge/` and legacy Node RPC consumers are
+tracked for retirement in WayLane Issue #21. Do not delete those imports until
+all dependent subscription, usage and scheduler paths use the new protocol.
+Registration must not silently mutate legacy `nodes`, hosts, certificates or
+subscription endpoints.
