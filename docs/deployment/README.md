@@ -26,8 +26,10 @@ the active resources.
   confirmed WSS-delivered `machine_metrics` and recent `last_seen_at`
   both before and after a controlled Agent restart. The Classic profile
   remains an alternative. The Node has no public management domain, no
-  system Docker socket and **no applied Xray desired state**. VPN Core
-  execution and real client TCP/UDP traffic still require acceptance.
+  system Docker socket. One non-public Xray `26.10.21` desired
+  generation has been applied and validated with local SOCKS5 HTTPS
+  traffic (`200` from example.com). Public VPN client TCP/UDP traffic
+  and subscription provisioning still require acceptance.
 
 Frontend and Backend deployments are currently manual. Automated Git
 deployments, if deliberately activated, can use commits as the trigger; path

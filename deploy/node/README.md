@@ -215,12 +215,36 @@ Observed on the real server (not just source tests):
 
 The Node's machine metrics are persisted by the WayLane Backend via WSS,
 **not** sent directly to SigNoz as OTLP. Backend's own OTLP exporter is a
-separate observability channel. This establishes Node enrollment, remote
-control transport and telemetry acceptance, **not VPN service acceptance**:
-the Node has **zero** rows in `node_agent_xray_desired`, no accepted
-managed Xray Core action and no validated end-user TCP/UDP tunnel.
-Experimental AmneziaWG stays disabled. The first non-public Core action,
-traffic reachability and client connection are separate remaining gates.
+separate observability channel. Node enrollment, remote control transport
+and telemetry passed acceptance on 2026-11-12. A first non-public Xray
+Core action and TCP proxy egress passed on 2026-11-13 (see below).
+**Public VPN access and end-user client traffic are not accepted.**
+Experimental AmneziaWG remains disabled.
+
+## Minimal Xray TCP example — 2026-11-13
+
+An **explicitly manually applied** Xray desired-state example is tracked in
+[examples/xray-loopback-socks5.json](examples/xray-loopback-socks5.json).
+It has exactly one SOCKS5 inbound bound to `127.0.0.1:18443`, UDP disabled,
+and a direct outbound. **It has no authentication, so it must never be
+bound to a public or LAN address.** Nothing in the example deploys
+automatically or changes the Node's managed authentication.
+
+The tambov Node applied this JSON as Xray `26.10.21` desired generation
+`1`. PostgreSQL reported `applied_generation=1`,
+`runtime_status=running` and no error. The Agent-owned private rootless
+Docker showed `waylane-xray` running. A disposable curl container on the
+**same private rootless network** made an HTTPS request through SOCKS5 and
+received HTTP `200` from `https://example.com/`. Host `ss` showed no
+TCP listener on port 18443 and the Xray container has no host port
+bindings. Thus, the demo exercises the WSS → Node → Core → outbound TCP
+path without opening a remotely accessible proxy or VPN.
+
+This is not production client acceptance: real VLESS/TLS/Reality inbound,
+subscription provisioning, public TCP/UDP routing, firewall policies,
+traffic accounting and a client tunnel have **not** been tested. Remove or
+replace this loopback demonstration through the authenticated Xray desired
+state API before a public rollout.
 
 ## Runtime secrets and acceptance
 
@@ -237,8 +261,10 @@ Agent UID/GID 1000, private volumes, read-only host hostname mount, no
 published management ports and protected runtime-only credentials. Server
 `tambov` has passed nested rootless Docker startup, HTTPS enrollment,
 authorized WSS/Protobuf heartbeats and retained identity after restart.
-A single non-public Xray Core action, rootless networking reachability
-and public TCP/UDP VPN client traffic remain **unaccepted**.
+A non-public loopback-only Xray Core action and outbound SOCKS5
+TCP request have been accepted on the live Node (see example above).
+Public TCP/UDP reachability and external VPN-client traffic remain
+**unaccepted**.
 
 Roll back by selecting the previous approved Git revision **without
 destroying volumes**, checking bootstrap/agent and restored WSS control.

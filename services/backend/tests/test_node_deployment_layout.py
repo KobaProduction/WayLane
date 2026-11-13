@@ -1,6 +1,7 @@
 """Git-owned WayLane Node deployment sources remain independent and synchronized."""
 
 from copy import deepcopy
+import json
 from pathlib import Path
 
 import yaml
@@ -133,3 +134,15 @@ def test_coolify_adapters_extend_own_generic_compose_and_redeclare_inputs():
         assert env["NODE_TOKEN"] == ("${NODE_TOKEN:?}" if mode == "classic" else "")
         assert env["DISCOVERY_TOKEN"] == ("${DISCOVERY_TOKEN:?}" if mode == "discovery" else "")
         assert "CONTROL_TRANSPORT" not in env and "GRPC_DEV_INSECURE" not in env
+
+def test_first_xray_demo_is_loopback_only_and_tcp_only():
+    example = json.loads((ROOT / "deploy/node/examples/xray-loopback-socks5.json").read_text())
+    assert set(example) == {"log", "inbounds", "outbounds"}
+    assert len(example["inbounds"]) == 1
+    inbound = example["inbounds"][0]
+    assert inbound["tag"] == "waylane-local-socks-demo"
+    assert inbound["listen"] == "127.0.0.1"
+    assert inbound["port"] == 18443 and inbound["port"] >= 1024
+    assert inbound["protocol"] == "socks"
+    assert inbound["settings"] == {"auth": "noauth", "udp": False}
+    assert example["outbounds"] == [{"tag": "direct", "protocol": "freedom"}]

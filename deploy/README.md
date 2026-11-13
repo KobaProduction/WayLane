@@ -9,7 +9,7 @@ resources. **Do not** use the all-in-one root Compose or legacy
 | **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | **Manual only**; PostgreSQL is not redeployed for app changes |
 | **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
 | **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
-| **WayLane / Node** (enrolled server pilot) | `/deploy/node/discovery` | `/docker-compose.yaml` (Raw mode) | **Manual only**; Agent/Node WSS telemetry accepted, VPN Core/client traffic pending |
+| **WayLane / Node** (running server pilot) | `/deploy/node/discovery` | `/docker-compose.yaml` (Raw mode) | **Manual only**; WSS and local Xray SOCKS5 TCP test accepted, public VPN traffic pending |
 
 The resource named **WayLane / Dependencies** contains the single PostgreSQL
 service `waylane-postgres`; it is not a second application runtime.
@@ -31,8 +31,10 @@ and Agent; use the standalone [Node deployment guide](node/README.md).
 The tambov Node is deployed, approved by a panel-issued Discovery
 invitation (now revoked), and retains identity and WSS telemetry on restart.
 Its named volumes are independent. New Nodes still require an authorized,
-panel-issued enrollment path. Do not expose or assume working VPN TCP/UDP
-traffic until the desired Core is applied and client traffic is accepted.
+panel-issued enrollment path. A **loopback-only Xray SOCKS5 TCP test**
+now passes through the Node-managed Core; this is not public VPN service.
+Do not expose or assume working public VPN TCP/UDP traffic until
+external client connectivity, routing and firewall rules are accepted.
 
 ## Dependency isolation
 
