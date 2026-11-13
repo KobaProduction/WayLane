@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -64,6 +65,9 @@ func checkDocker(ctx context.Context, run dockerRun) error {
 func startDockerd(ctx context.Context) (<-chan error, error) {
 	if os.Geteuid() == 0 {
 		return nil, errors.New("Agent must not run as root")
+	}
+	if err := reclaimStaleContainerdRuntime(filepath.Join(filepath.Dir(dockerSocket), "docker/containerd")); err != nil {
+		return nil, fmt.Errorf("unsafe private Docker runtime state: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, "dockerd-entrypoint.sh", "dockerd", "--host=unix://"+dockerSocket, "--storage-driver=vfs", "--tls=false")
 	cmd.Stdout = os.Stdout
@@ -396,9 +400,7 @@ func (m *manager) serve(ctx context.Context) error {
 		return errors.New("Agent Unix control directory must be private")
 	}
 	sock := filepath.Join(path, "agent.sock")
-	if _, err := os.Lstat(sock); err == nil {
-		return errors.New("Agent Unix socket already occupied")
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := reclaimStaleAgentSocket(sock); err != nil {
 		return err
 	}
 	l, err := net.Listen("unix", sock)

@@ -47,3 +47,24 @@ explicitly reported and never silently counted as success.
 Health checks require both the Agent's Unix socket and a running labeled
 Node. Approval and migration from the former combined
 Agent/Node deployment require an isolated runtime test and rollback backup.
+
+
+### Recovering safely from stale Unix runtime files
+
+The Agent uses two independent persistent volumes: `agent-state` for identity,
+Node release selection and its private management socket, and `rootless-run`
+for the private Docker/containerd runtime. After a non-graceful exit, those
+volumes may retain a dead `containerd.pid`, Unix sockets or `control/agent.sock`.
+A stale containerd PID from RootlessKit's previous PID namespace is *not*
+proof that the process is alive in a fresh outer container: probing the
+recorded PID via the outer PID namespace can be misleading.
+
+At each **startup only**, the Agent verifies private directory ownership,
+file types, Unix socket ownership and actual listener state before reclaiming
+any orphaned runtime PID/socket. An active listener, unexpected symlink,
+nonprivate directory or other uncertain condition aborts startup rather than
+unlinking a running service. Persistent Docker images/containers, the Node
+identity, pinned release and Xray config are **not** removed. A successful
+recovery is logged without disclosing credentials or filesystem secrets.
+The Agent's only private Unix management API remains unchanged; no second
+Docker daemon or host Docker socket is introduced.

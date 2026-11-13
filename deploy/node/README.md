@@ -288,3 +288,19 @@ private Node env file; the Node must be independently replaced to pick up a
 changed env value. This is not a hot configuration change and never grants
 commercial billing authority. Do not change existing live Node deployments
 solely to turn this on without explicit operator acceptance.
+
+
+### Abnormal Agent exit and persistent runtime sockets
+
+`agent-state` and `rootless-run` are separate Coolify-scoped volumes and are
+preserved across Agent restart. If the outer container dies during embedded
+Rootless Docker startup, abandoned `containerd.pid`/private socket files in
+`rootless-run` or a dead `agent-state/control/agent.sock` can prevent further
+starts. The stable Agent reclaims **only** known-owned, demonstrably dead
+runtime endpoints before starting its Docker daemon and local Unix API. It
+fails closed if a socket remains active, the owner/type differs, or health
+is ambiguous. Do **not** delete `rootless-data`, Node identities, Core state,
+volume collections or unrelated Docker sockets while diagnosing this.
+First check Docker `restartCount`, the actual error in Agent logs and the
+private Rootless Docker health. Running status is not equivalent to a healthy
+Node/Xray; validate the existing private SOCKS5 traffic separately.
