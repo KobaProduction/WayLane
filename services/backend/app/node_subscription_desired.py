@@ -190,7 +190,7 @@ async def inject_managed_subscriptions(db: AsyncSession, node_uuid: str, config:
     return result
 
 
-async def enqueue_managed_subscription_changes(db: AsyncSession) -> int:
+async def enqueue_managed_subscription_changes(db: AsyncSession, *, commit: bool = True) -> int:
     """Queue fresh Xray generations for opted-in Nodes after subscription writes.
 
     This is event-driven, not polling. It never restarts intentionally stopped
@@ -200,7 +200,8 @@ async def enqueue_managed_subscription_changes(db: AsyncSession) -> int:
     # transaction for every ordinary subscription update in that case.
     if await db.scalar(select(node_agent_xray_managed_inbounds.c.node_uuid).limit(1)) is None:
         return 0
-    await begin_immediate_if_sqlite(db)
+    if commit:
+        await begin_immediate_if_sqlite(db)
     rows = (await db.execute(
         select(node_agent_xray_desired)
         .join(node_agent_registrations,
@@ -242,6 +243,6 @@ async def enqueue_managed_subscription_changes(db: AsyncSession) -> int:
         if result.rowcount != 1:
             await db.rollback()
             raise ManagedSubscriptionError("Concurrent subscription reconcile; retry with current state")
-    if rows:
+    if rows and commit:
         await db.commit()
     return len(rows)

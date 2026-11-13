@@ -40,8 +40,6 @@ from app.nats.router import router
 from app.subscription.base import normalize_and_remove_none_values
 from app.subscription.config_cache import clear_sub_config_cache
 from app.utils.logger import get_logger
-from config import runtime_settings
-from role import Role
 
 
 def _string_list(value) -> list[str]:
@@ -829,16 +827,12 @@ host_manager: HostManager = HostManager()
 
 @on_startup
 async def initialize_hosts():
-    if runtime_settings.role == Role.NODE:
-        return
     async with GetDB() as db:
         await host_manager.setup(db)
 
 
 @on_shutdown
 async def shutdown_hosts():
-    if runtime_settings.role == Role.NODE:
-        return
     # Close NATS connection
     if host_manager._nc:
         await host_manager._nc.close()

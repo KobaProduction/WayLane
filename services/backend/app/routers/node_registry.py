@@ -20,6 +20,7 @@ from app.db.base import begin_immediate_if_sqlite, get_db
 from app.db.models import (
     ProxyInbound,
     node_agent_awg_desired,
+    node_agent_events,
     node_agent_registrations,
     node_agent_xray_desired,
     node_agent_xray_managed_inbounds,
@@ -253,6 +254,189 @@ async def list_registrations(
         entry["node_version"] = entry.pop("agent_version")
         result.append(entry)
     return {"nodes": result}
+
+
+@node_registry_router.get("/cores/{core_id}/assignments")
+async def core_node_assignments(
+    core_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+    __: AdminDetails = Depends(require_permission("cores", "read")),
+):
+    """Sanitized Xray Core assignments, not an outbound latency measurement."""
+    if core_id < 1:
+        raise HTTPException(422, "Core ID must be positive")
+    rows = (await db.execute(
+        select(
+            node_agent_xray_desired.c.node_uuid,
+            node_agent_xray_desired.c.config,
+            node_agent_xray_desired.c.generation,
+            node_agent_xray_desired.c.applied_generation,
+            node_agent_xray_desired.c.runtime_status,
+            node_agent_registrations.c.display_name,
+            node_agent_registrations.c.status,
+        )
+        .join(node_agent_registrations,
+              node_agent_registrations.c.node_uuid == node_agent_xray_desired.c.node_uuid)
+        .where(node_agent_xray_desired.c.source_core_id == core_id)
+        .order_by(node_agent_registrations.c.display_name)
+        .limit(257)
+    )).all()
+    if len(rows) > 256:
+        raise HTTPException(409, "Too many Nodes assigned to this Core")
+    assignments = []
+    for row in rows:
+        config = row.config if isinstance(row.config, dict) else {}
+        outbounds = config.get("outbounds") if isinstance(config.get("outbounds"), list) else []
+        tags = sorted({
+            item["tag"] for item in outbounds
+            if isinstance(item, dict) and isinstance(item.get("tag"), str) and item["tag"]
+        })
+        assignments.append({
+            "node_uuid": row.node_uuid,
+            "display_name": row.display_name,
+            "registration_status": row.status,
+            "runtime_status": row.runtime_status,
+            "generation": row.generation,
+            "applied_generation": row.applied_generation,
+            "outbound_tags": tags[:256],
+            "latency_supported": False,
+        })
+    return {"assignments": assignments}
+
+
+@node_registry_router.get("/nodes/{node_uuid}/events")
+async def list_node_control_events(
+    node_uuid: UUID,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "logs")),
+):
+    """Bounded control-event history instead of legacy Node RPC SSE logs.
+
+    This is diagnostic metadata from the authenticated control plane, not
+    untrusted raw Xray traffic logs or privileged command output.
+    """
+    if not 1 <= limit <= 500:
+        raise HTTPException(422, "Event limit must be between 1 and 500")
+    if await db.scalar(select(node_agent_registrations.c.node_uuid).where(
+            node_agent_registrations.c.node_uuid == str(node_uuid))) is None:
+        raise HTTPException(404, "Node not registered")
+    events = (await db.execute(select(node_agent_events)
+        .where(node_agent_events.c.node_uuid == str(node_uuid))
+        .order_by(node_agent_events.c.created_at.desc(),
+                  node_agent_events.c.event_uuid.desc())
+        .limit(limit))).mappings().all()
+    return {"node_uuid": str(node_uuid), "events": [
+        {"event_uuid": row["event_uuid"],
+         "timestamp": row["created_at"],
+         "kind": row["kind"], "status": row["status"],
+         "core_id": row["core_id"], "generation": row["generation"]}
+        for row in events
+    ]}
+
+
+@node_registry_router.get("/analytics/summary")
+async def autonomous_nodes_summary(
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "stats")),
+):
+    """UUID-first Node telemetry; cumulative bytes are not link throughput."""
+    from collections import defaultdict
+
+    from app.db.models import node_agent_xray_usage_cursors
+
+    registrations = (await db.execute(select(
+        node_agent_registrations.c.node_uuid,
+        node_agent_registrations.c.display_name,
+        node_agent_registrations.c.status,
+        node_agent_registrations.c.last_seen_at,
+        node_agent_registrations.c.machine_metrics,
+    ).order_by(node_agent_registrations.c.display_name).limit(513))).all()
+    if len(registrations) > 512:
+        raise HTTPException(409, "Too many Node registrations for a single summary")
+    counters = (await db.execute(select(
+        node_agent_xray_usage_cursors.c.node_uuid,
+        node_agent_xray_usage_cursors.c.total_uplink,
+        node_agent_xray_usage_cursors.c.total_downlink,
+    ).limit(32_769))).all()
+    if len(counters) > 32_768:
+        raise HTTPException(409, "Too many Xray cursor records for a single summary")
+    totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for node_uuid, uplink, downlink in counters:
+        totals[node_uuid][0] += uplink
+        totals[node_uuid][1] += downlink
+    cutoff = datetime.now(UTC) - timedelta(seconds=90)
+    rows = []
+    for node in registrations:
+        seen = date(node.last_seen_at)
+        online = node.status == "approved" and seen is not None and seen >= cutoff
+        metrics = node.machine_metrics if isinstance(node.machine_metrics, dict) else {}
+        rows.append({
+            "node_uuid": node.node_uuid,
+            "display_name": node.display_name,
+            "status": node.status,
+            "wss_fresh": online,
+            "last_seen_at": seen,
+            "cpu_logical_count": metrics.get("cpu_logical_count"),
+            "memory_total_bytes": metrics.get("memory_total_bytes"),
+            "memory_available_bytes": metrics.get("memory_available_bytes"),
+            "uptime_seconds": metrics.get("uptime_seconds"),
+            "total_uplink": str(totals[node.node_uuid][0]),
+            "total_downlink": str(totals[node.node_uuid][1]),
+        })
+    from config import usage_settings
+    return {
+        "billing_authoritative": False,
+        "billing_enabled": usage_settings.xray_usage_billing_enabled,
+        "traffic_kind": "cumulative_xray_stats_not_bandwidth_speed",
+        "nodes": rows,
+        "registered_nodes": len(registrations),
+        "fresh_wss_nodes": sum(1 for node in rows if node["wss_fresh"]),
+    }
+
+
+@node_registry_router.get("/analytics/usage/hours")
+async def autonomous_xray_usage_hours(
+    node_uuid: UUID | None = None,
+    subscription_uuid: UUID | None = None,
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "stats")),
+):
+    """Bounded per-Node and per-Subscription Xray history, not live link speed."""
+    from app.db.models import node_agent_xray_usage_hours
+
+    if not 1 <= days <= 90:
+        raise HTTPException(422, "Usage window must be 1-90 days")
+    query = select(node_agent_xray_usage_hours).where(
+        node_agent_xray_usage_hours.c.bucket_start >= datetime.now(UTC) - timedelta(days=days)
+    )
+    if node_uuid is not None:
+        query = query.where(node_agent_xray_usage_hours.c.node_uuid == str(node_uuid))
+    if subscription_uuid is not None:
+        query = query.where(node_agent_xray_usage_hours.c.subscription_uuid == subscription_uuid)
+    result = (await db.execute(
+        query.order_by(node_agent_xray_usage_hours.c.bucket_start.desc())
+        .limit(5_001)
+    )).mappings().all()
+    if len(result) > 5_000:
+        raise HTTPException(409, "Too many Xray usage records; narrow the filter")
+    return {
+        "billing_authoritative": False,
+        "source": "xray-statsquery/private-wss",
+        "granularity": "observation_utc_hour",
+        "rows": [
+            {
+                "node_uuid": row["node_uuid"],
+                "subscription_uuid": row["subscription_uuid"],
+                "bucket_start": row["bucket_start"],
+                "uplink": str(row["uplink"]),
+                "downlink": str(row["downlink"]),
+            }
+            for row in result
+        ],
+    }
 
 
 class NodeNameUpdate(BaseModel):
@@ -977,8 +1161,10 @@ async def read_node_xray_usage(
         .limit(1025))).mappings().all()
     if len(rows) > 1024:
         raise HTTPException(409, "Too many per-subscription observations for this Node")
+    from config import usage_settings
     return {
         "billing_authoritative": False,
+        "billing_enabled": usage_settings.xray_usage_billing_enabled,
         "source": "xray-statsquery/private-wss",
         "samples": [
             {"subscription_uuid": row["subscription_uuid"],

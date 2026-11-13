@@ -2,14 +2,11 @@
 import base64
 import io
 import zipfile
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
 from app.core.wireguard import WireGuardConfig
-from app.models.subscription import SubscriptionInboundData, TLSConfig, TCPTransportConfig
-from app.operation.node import NodeOperation, require_amnezia_node_version
+from app.models.subscription import SubscriptionInboundData, TCPTransportConfig, TLSConfig
 from app.subscription.wireguard import WireGuardConfiguration
 from app.utils.crypto import generate_wireguard_keypair
 
@@ -112,27 +109,8 @@ def test_awg_client_config_export_has_all_matching_values():
     assert "H1 =" not in old_text
 
 
-@pytest.mark.parametrize("version,allowed", [
-    ("0.5.5", False), ("0.5.9", False), ("0.6.0", True),
-    ("0.6.1", True), ("1.0.0", True), ("invalid", False), (None, False),
-])
-def test_amnezia_node_version_gate(version, allowed):
-    if allowed:
-        require_amnezia_node_version(version)
-    else:
-        with pytest.raises(ValueError):
-            require_amnezia_node_version(version)
 
 
-@pytest.mark.asyncio
-async def test_awg_start_rejects_old_node_before_mutation():
-    core_config, _ = sample({"h1": "100"})
-    core = WireGuardConfig(core_config)
-    node = SimpleNamespace(info=AsyncMock(return_value=SimpleNamespace(node_version="0.5.5")))
-    db_node = SimpleNamespace(id=123, name="old", keep_alive=60)
-    with pytest.raises(ValueError, match="0.6.0"):
-        await NodeOperation._start_or_attach_node(node, db_node, core, [], 1)
-    node.info.assert_awaited_once()
 
 
 

@@ -3,7 +3,6 @@
 import asyncio
 import re
 from datetime import UTC, datetime, timedelta, timezone
-from unittest.mock import AsyncMock
 from uuid import UUID, uuid1, uuid4
 
 import pytest
@@ -535,58 +534,6 @@ def test_legacy_user_bulk_and_template_mutation_routes_are_retired():
     assert "/api/subscriptions/bulk/{action}" in routes
 
 
-def test_node_online_stats_use_scoped_subscription_uuid_not_numeric_id(access_token, monkeypatch):
-    """Node RPC keeps its private numeric ID, but public API exposes only UUID."""
-    from app.routers.node import node_operator
-
-    headers = auth_headers(access_token)
-    core = create_core(access_token)
-    group = create_group(access_token, inbound_tags=[get_inbounds(access_token)[0]])
-    sid = str(uuid4())
-    created = client.post("/api/subscriptions", headers=headers, json={"uuid": sid, "group_ids": [group["id"]]})
-    assert created.status_code == 201, created.text
-
-    async def internal_id() -> int:
-        async with TestSession() as db:
-            return (await db.execute(select(Subscription.uuid).where(Subscription.uuid == UUID(sid)))).scalar_one()
-
-    numeric_id = asyncio.run(internal_id())
-    online = AsyncMock(return_value={1: 2})
-    ips = AsyncMock(return_value={"ips": {"198.51.100.11": 1794090000}})
-    all_ips = AsyncMock(return_value={"nodes": {"1": {"ips": {"198.51.100.11": 1794090000}}}})
-    monkeypatch.setattr(node_operator, "get_subscription_online_stats_by_node", online)
-    monkeypatch.setattr(node_operator, "get_user_ip_list_by_node", ips)
-    monkeypatch.setattr(node_operator, "get_user_ip_list_all_nodes", all_ips)
-    try:
-        prefix = f"/api/node/1/subscriptions/{sid}"
-        response = client.get(f"{prefix}/online-stats", headers=headers)
-        assert response.status_code == 200, response.text
-        assert response.json() == {"1": 2}
-        online.assert_awaited_once()
-        assert online.await_args.kwargs["subscription_uuid"] == numeric_id
-        response = client.get(f"{prefix}/online-ips", headers=headers)
-        assert response.status_code == 200, response.text
-        ips.assert_awaited_once()
-        assert ips.await_args.kwargs["subscription_uuid"] == numeric_id
-        response = client.get(f"/api/node/subscriptions/{sid}/online-ips", headers=headers)
-        assert response.status_code == 200, response.text
-        all_ips.assert_awaited_once()
-        assert all_ips.await_args.kwargs["subscription_uuid"] == numeric_id
-
-        for endpoint in (
-            f"/api/node/1/online_stats/{numeric_id}",
-            f"/api/node/1/online_stats/{numeric_id}/ip",
-            f"/api/node/online_stats/{numeric_id}/ip",
-        ):
-            assert client.get(endpoint, headers=headers).status_code == 404, endpoint
-        assert client.get(f"{prefix}/online-stats").status_code == 401
-        assert client.get(f"/api/node/1/subscriptions/{uuid1()}/online-stats", headers=headers).status_code == 422
-        assert client.get(f"/api/node/1/subscriptions/{uuid4()}/online-stats", headers=headers).status_code == 404
-        assert online.await_count == 1, "Invalid / unrelated UUIDs never reach the node RPC"
-    finally:
-        client.delete(f"/api/subscriptions/{sid}", headers=headers)
-        delete_group(access_token, group["id"])
-        delete_core(access_token, core["id"])
 
 
 def test_subscription_template_api_does_not_expose_legacy_user_naming(access_token):
@@ -629,7 +576,9 @@ def test_no_admin_mass_subscriptions_or_user_named_system_routes():
         "/api/system/users",
     )
     assert not set(obsolete).intersection(paths)
-    assert "/api/node/subscription_counts/{metric}" in paths
+    assert "/api/node/subscription_counts/{metric}" not in paths
+    assert "/api/node-registry/analytics/summary" in paths
+    assert "/api/node-registry/analytics/usage/hours" in paths
     assert "/api/system/subscriptions" in paths
 
 

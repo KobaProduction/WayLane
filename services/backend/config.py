@@ -89,32 +89,8 @@ class NatsSettings(EnvSettings):
     enabled: bool = Field(default=False, validation_alias="NATS_ENABLED")
     url: str = Field(default="nats://localhost:4222", validation_alias="NATS_URL")
     worker_sync_subject: str = Field(default="waylane.worker_sync", validation_alias="NATS_WORKER_SYNC_SUBJECT")
-    node_command_subject: str = Field(default="waylane.node.command", validation_alias="NATS_NODE_COMMAND_SUBJECT")
-    node_rpc_subject: str = Field(default="waylane.node.rpc", validation_alias="NATS_NODE_RPC_SUBJECT")
     scheduler_rpc_subject: str = Field(default="waylane.scheduler.rpc", validation_alias="NATS_SCHEDULER_RPC_SUBJECT")
-    node_log_subject: str = Field(default="waylane.node.logs", validation_alias="NATS_NODE_LOG_SUBJECT")
-    node_rpc_timeout: float = Field(default=30.0, validation_alias="NATS_NODE_RPC_TIMEOUT")
     scheduler_rpc_timeout: float = Field(default=5.0, validation_alias="NATS_SCHEDULER_RPC_TIMEOUT")
-    node_command_max_payload_bytes: int = Field(default=900000, validation_alias="NATS_NODE_COMMAND_MAX_PAYLOAD_BYTES")
-    node_update_subscriptions_batch_size: int = Field(
-        default=100, validation_alias="NATS_NODE_UPDATE_SUBSCRIPTIONS_BATCH_SIZE"
-    )
-    core_pubsub_channel: str = Field(default="core_hosts_updates", validation_alias="CORE_PUBSUB_CHANNEL")
-    host_pubsub_channel: str = Field(default="host_manager_updates", validation_alias="HOST_PUBSUB_CHANNEL")
-    node_subscription_sync_kv_bucket: str = Field(
-        default="waylane_node_subscription_sync", validation_alias="NATS_NODE_SUBSCRIPTION_SYNC_KV_BUCKET"
-    )
-
-    @field_validator("node_subscription_sync_kv_bucket")
-    @classmethod
-    def require_v2_subscription_queue_namespace(cls, value: str) -> str:
-        if not value.strip() or value.strip() == "waylane_node_user_sync":
-            raise ValueError("NATS_NODE_SUBSCRIPTION_SYNC_KV_BUCKET must name a new v2 subscription KV bucket")
-        return value.strip()
-
-    node_lifecycle_kv_bucket: str = Field(
-        default="waylane_node_lifecycle", validation_alias="NATS_NODE_LIFECYCLE_KV_BUCKET"
-    )
     scheduler_leader_kv_bucket: str = Field(
         default="waylane_scheduler_leader", validation_alias="NATS_SCHEDULER_LEADER_KV_BUCKET"
     )
@@ -191,6 +167,9 @@ class AuthSettings(EnvSettings):
 
 
 class UsageSettings(EnvSettings):
+    # Requires explicit runtime acceptance of real Xray client traffic.
+    # Defaults off even when read-only StatsService sampling is enabled.
+    xray_usage_billing_enabled: bool = Field(default=False, validation_alias="WAYLANE_XRAY_USAGE_BILLING_ENABLED")
     disable_recording_node_usage: bool = Field(default=False, validation_alias="DISABLE_RECORDING_NODE_USAGE")
     enable_recording_nodes_stats: bool = Field(default=False, validation_alias="ENABLE_RECORDING_NODES_STATS")
     user_usage_history_flush_interval: int = Field(

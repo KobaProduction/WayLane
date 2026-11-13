@@ -3,7 +3,8 @@
 ROLE="${ROLE:-all-in-one}"
 
 if [ "${ROLE}" = "node" ]; then
-    exec python node_worker.py
+    echo "ROLE=node (legacy Node RPC worker) has been removed. Deploy an autonomous Agent/Node over WSS." >&2
+    exit 64
 elif [ "${ROLE}" = "scheduler" ]; then
     exec python scheduler_worker.py
 else

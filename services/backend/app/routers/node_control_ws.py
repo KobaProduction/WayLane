@@ -6,9 +6,23 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
+from app.db.base import SessionLocal
 from app.node_binary_control import MAX_BINARY_FRAME, AgentBinarySession, check_agent, decode_frame
+from app.node_events import append_node_event
+from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/node-control", tags=["Node agent binary control"])
+logger = get_logger("node-control-wss")
+
+
+async def record_connection_event(node_uuid: str, kind: str) -> None:
+    """Best-effort sanitized diagnostics; WSS availability is independent of logging."""
+    try:
+        async with SessionLocal() as db:
+            await append_node_event(db, node_uuid, kind=kind, status=kind)
+            await db.commit()
+    except Exception:
+        logger.warning("Node WSS event history unavailable (%s)", kind)
 
 
 @router.websocket("/control/ws")
@@ -30,6 +44,7 @@ async def control_websocket(ws: WebSocket):
         await ws.close(code=1008)
         return
     await ws.accept(subprotocol="waylane.pb.v1")
+    await record_connection_event(uuid, "connected")
     session = AgentBinarySession(uuid, secret)
 
     async def read_frames():
@@ -68,6 +83,7 @@ async def control_websocket(ws: WebSocket):
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
         await session.close()
+        await record_connection_event(uuid, "disconnected")
         for task in tasks:
             if not task.done():
                 task.cancel()

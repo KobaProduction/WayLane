@@ -16,13 +16,17 @@ Vue has been implemented yet.
   project. Backend/Frontend builds use `main` from the same monorepo; Node
   deployment remains manual and preserves its own Agent/Node lifecycle.
 - Saved Xray Core Editor profiles can be explicitly applied to autonomous
-  Nodes from the Node Registry. This is separate from the still-unmigrated
-  PasarGuard RPC compatibility paths tracked in Issue #21.
-- `/nodes` renders the UUID-first Node Registry and its Classic/Discovery
-  registration form. The unmounted PasarGuard numeric Node list, dialogs,
-  per-Node user popups and associated forms have been deleted. This does not
-  remove still-used legacy Backend RPC consumers, historical metric views,
-  or the independently operated Core Editor; Issue #21 remains open.
+  Nodes through UUID-first Node Registry and authenticated WSS. TLS bindings,
+  Node lifecycle events and commercial subscription admission use the same
+  control plane; the old numeric PasarGuard Node API and React consumers are
+  retired in Issue #21.
+- `/nodes` renders Classic/Discovery registration, Core assignment, per-Node
+  Xray/AWG desired state and read-only cumulative traffic diagnostics.
+  `/nodes/logs` displays sanitized WSS control events rather than raw old RPC
+  streaming logs. The statistics page separates historical numeric Node
+  records from autonomous UUID-first counters and heartbeats. Individual
+  outbound RTT remains unverified: Core Editor displays assignment/runtime
+  state instead of misrepresenting it as a network latency measurement.
 
 The existing subscription-page HTML lives in backend until Vue replacement is
 built, to avoid breaking client links. Commercial subscriptions stay in

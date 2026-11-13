@@ -13,7 +13,7 @@ from sqlalchemy import event, insert, select
 from app.db.models import Subscription, SubscriptionUpdate
 from app.jobs import cleanup_subscription_updates as job
 from app.models.proxy import ProxyTable
-from tests.test_record_usages import reset_user_usage_history_buffer, session_factory  # noqa: F401
+from tests.usage_fixtures import session_factory  # noqa: F401
 
 LIMIT = 3
 

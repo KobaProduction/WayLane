@@ -1,18 +1,23 @@
-import glob
-import importlib.util
-import sys
-from os.path import basename, dirname, join
+"""Explicit job owners for the UUID-first WayLane Backend.
 
-modules = glob.glob(join(dirname(__file__), "*.py"))
+The legacy PasarGuard NodeService jobs (Node health probes, bridge heartbeat,
+node reset and reset-on-read usage RPC) are intentionally not loaded.
+Autonomous Nodes report health/usage through authenticated binary WSS and
+persisted Node Registry instead. Other product and notification jobs retain
+their established scheduler entrypoints and configuration gates.
+"""
 
-for file in modules:
-    name = basename(file).replace(".py", "")
-    if name.startswith("_"):
-        continue
+from importlib import import_module
 
-    # Load job modules under the proper package path so multiprocessing pickling works
-    module_name = f"{__name__}.{name}"
-    spec = importlib.util.spec_from_file_location(module_name, file)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+_SCHEDULED_MODULES = (
+    "cleanup_subscription_updates",
+    "device_webhook_retry",
+    "remove_expired_subscriptions",
+    "reset_subscription_data_usage",
+    "review_admins",
+    "review_subscriptions",
+    "send_notifications",
+)
+
+for _module in _SCHEDULED_MODULES:
+    import_module(f"{__name__}.{_module}")

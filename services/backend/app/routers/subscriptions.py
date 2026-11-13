@@ -31,15 +31,14 @@ from app.models.subscription_models import (
     SubscriptionsUsageQuery,
     SubscriptionUpdateChart,
 )
-from app.node.sync import sync_subscription_access
 from app.operation import OperatorType
 from app.operation.hwid import HWIDOperation
-from app.operation.node import NodeOperation
 from app.operation.permissions import PermissionDenied, enforce_permission, is_scope_all
 from app.operation.subscription_management import SubscriptionManagementOperation
 from app.settings import subscription_settings
 from app.subscription.entitlements import SubscriptionEntitlement
 from app.subscription.identity import subscription_token
+from app.subscription_delivery import reconcile_subscriptions, sync_subscription_access
 
 from .authentication import get_current, require_permission
 from .dependencies.subscription_queries import get_subscriptions_usage_breakdown_query, get_subscriptions_usage_query
@@ -334,11 +333,16 @@ async def reset_all_subscription_usage(
     db: AsyncSession = Depends(get_db),
     admin: AdminDetails = Depends(require_core_usage_key),
 ):
-    """Core-authorized global technical reset; commercial entitlements remain unchanged."""
+    """Core-authorized global technical reset; re-evaluate UUID admission.
+
+    Resetting commercial counters must not restart unrelated VPN Cores.
+    Current Xray subscription entitlement is rebuilt over the authenticated
+    WSS desired-state channel. User counter telemetry is never reset here.
+    """
     if not is_scope_all(admin, "subscriptions", "reset_usage"):
         raise HTTPException(status_code=403, detail="Core global reset requires all scope")
     await SubscriptionManagementOperation(operator_type=OperatorType.API).reset_subscriptions_data_usage(db, admin)
-    await NodeOperation(operator_type=OperatorType.API).restart_all_node(db, admin)
+    await reconcile_subscriptions()
 
 
 class SubscriptionBatchAction(StrEnum):

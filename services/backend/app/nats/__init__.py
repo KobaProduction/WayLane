@@ -16,11 +16,6 @@ def is_multi_worker() -> bool:
     return runtime_settings.role.requires_nats or server_settings.workers > 1
 
 
-def needs_shared_bridge_memory() -> bool:
-    """NATS KV user-sync/lifecycle only when multiple uvicorn workers share NodeManager."""
-    return is_nats_enabled() and server_settings.workers > 1
-
-
 def require_nats_if_multiworker(multi_worker: bool):
     if multi_worker and not is_nats_enabled():
         raise RuntimeError(
@@ -33,6 +28,5 @@ __all__ = [
     "get_nats_config",
     "is_multi_worker",
     "is_nats_enabled",
-    "needs_shared_bridge_memory",
     "require_nats_if_multiworker",
 ]

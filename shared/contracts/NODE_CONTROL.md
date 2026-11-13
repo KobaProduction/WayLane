@@ -116,12 +116,29 @@ allowed to tear down the control channel. The admin read endpoint
 `billing_authoritative=false`; total byte counters are encoded as decimal
 strings to preserve 64-bit accuracy in JavaScript.
 
+**Commercial accounting (separate explicit gate):** Backend's
+`WAYLANE_XRAY_USAGE_BILLING_ENABLED=true` is opt-in and defaults off.
+After accepted live tests of UUID client attribution and authenticated WSS,
+each (Node, Subscription) cursor receives a first baseline without back
+billing; subsequent cumulative deltas update `Subscription.used_traffic`
+and the owning `Admin.used_traffic` in one database transaction.
+Idempotent retries, old process epochs and counter resets cannot charge the
+same recorded bytes twice. A quota crossing queues a new desired generation
+inside the same transaction. Any unowned subscription UUID is never billed.
+Turning billing off resets the baseline before a later re-enable.
+
+`node_agent_xray_usage_hours` records per-hour observations by UUID
+without a legacy numeric Node ID. Its time bucket represents receipt of
+incremental StatsService counters, not the precise moment of client traffic.
+These new hourly aggregates are separate from historical PasarGuard traffic.
+
 **Not automatically enabled:** Xray itself requires `stats: {}` and policy
 level 0 `statsUserUplink=true`, `statsUserDownlink=true`; these runtime fields
 can require a deliberate Xray restart. Source tests do not prove counters are
-collecting. No code in this flow increments `Subscription.used_traffic` or
-changes commercial entitlement. Exactly-once billing/quotas, multi-Node
-telemetry reconciliation and actual VPN traffic are separate acceptance gates.
+collecting. Commercial usage updates are gated and do not alter entitlement;
+without explicit accepted runtime opt-in, the entire stream remains read-only.
+Real-traffic correctness, quota enforcement and multi-Node reconciliation
+remain separate deployment acceptance gates.
 
 ## Deploy and acceptance
 

@@ -23,11 +23,12 @@ reformatting, relocating files, or deleting a license notice. Remove the
 upstream code and the corresponding copyleft obligations only once a
 verified clean replacement is available; maintain attribution until then.
 
-## Bundled Python node bridge
+## Retired Python Node bridge — historical GPL-3.0 source
 
-The `waylane_node_bridge/` code is adapted from the GPL-3.0 upstream
-implementation of `pasarguard-node-bridge`. Its full `LICENSE` and
-`UPSTREAM.md` identify the original authors, source revision and changes.
-The original copyright remains valid and the root MIT license does not
-replace GPL-3.0 for this component. The Python runtime no longer installs
-the external PyPI package.
+The prior `waylane_node_bridge/` package was adapted from the GPL-3.0
+`pasarguard-node-bridge` implementation. The legacy runtime, schemas and
+NodeService transport are retired under Issue #21, but the exact source,
+copyright, GPL-3.0 license and upstream attribution remain in repository Git
+history. Deleting current source does not erase historical GPL obligations,
+and the root MIT license does not relicense any remaining derived material.
+The active Node transport is the independent Agent/Node binary WSS implementation.

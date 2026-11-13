@@ -40,8 +40,8 @@ from app.models.core import (
     RemoveCoresResponse,
 )
 from app.models.reality_scan import RealityScanRequest, RealityScanResult
-from app.node.sync import sync_subscriptions
 from app.operation import BaseOperation
+from app.subscription_delivery import sync_subscriptions
 from app.utils.logger import get_logger
 from app.utils.reality_scan import RealityScanError, scan_reality_target
 

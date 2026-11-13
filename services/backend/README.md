@@ -2,10 +2,11 @@
 
 Repository owner: **Koba Production**; original integration: Intens. Python FastAPI control-plane backend derived from PasarGuard Panel.
 
-This project is **not** production-ready as WayLane. Its current control-plane
-model is UUID-first `Subscription`; old product `User` and numeric subscription
-API routes are intentionally absent. The independent legacy VPN node remains
-available pending explicit, coordinated runtime migration.
+WayLane uses UUID-first commercial `Subscription` identities and independent
+Agent/Node over authenticated binary WSS. The historic PasarGuard NodeService
+RPC, bundled Python bridge, numeric Node CRUD and reset-on-read worker code
+are retired in Issue #21. This source refactor is not proof of a deployed
+runtime migration, public VPN ingress or accepted commercial traffic billing.
 
 The dashboard frontend source is now part of this same repository at
 `services/frontend/`, with its own service and CI scope. Where an existing
@@ -36,39 +37,28 @@ deployment compatibility, or complete the eventual Vue/HA migration.
 
 Licensing note: GitHub root MIT `LICENSE` does not replace the upstream copyleft license applicable to derived code. See `LICENSING.md` and `LICENSE.UPSTREAM`.
 
-## Node subscription synchronization — NATS queue v2
+## UUID-first Node subscription synchronization — WSS desired state
 
-The WayLane-owned API and worker exchange the `update_subscription`,
-`update_subscriptions` and `sync_node_subscriptions` commands over the configured
-`NATS_NODE_COMMAND_SUBJECT`. Their payloads use `subscription`,
-`subscriptions`, and `flush_subscriptions`. The authenticated node-sync route
-`PUT /api/node/{node_id}/sync` uses the `flush_subscriptions` query parameter
-and rejects unrecognized query parameters rather than silently flushing.
+Only approved WayLane Node Registrations own autonomous VPN Cores. The stable
+Agent owns Rootless Docker; the replaceable Go Node keeps one outbound binary
+Protobuf WSS to the Backend. The historic NATS Node RPC subjects and JetStream
+node-user synchronization KV queues are not consumed or created by this
+implementation. NATS is still used independently for scheduler/product
+notifications and multi-worker coordination.
 
-For shared JetStream KV delivery the settings are
-`NATS_NODE_UPDATE_SUBSCRIPTIONS_BATCH_SIZE` (default `100`) and
-`NATS_NODE_SUBSCRIPTION_SYNC_KV_BUCKET` (default
-`waylane_node_subscription_sync`). The new bucket stores per-node CAS-guarded
-`p.<node_id>.<digest(subscription_uuid)>` entries with a
-`subscription_uuid` plus an encoded `subscription` Protobuf payload or a
-`refresh: true` marker. Full-snapshot fences and revision/claim tokens still
-protect against stale deliveries. These keys are WayLane-specific, **not**
-Xray's native `Account.email` identity.
+Administrators explicitly enroll a VLESS, VMess or Trojan inbound into
+managed subscription admission in Node Registry. Commercial state is read from
+the DB and included only in authenticated WSS Core desired-state payloads;
+no subscription credential is persisted in the public editor config. A change
+to entitlement, group, expiry, quota or admin policy queues the next generation
+without ever mutating unregistered/manual SOCKS5.
 
-**Breaking deployment boundary:** This source revision does **not** migrate
-messages from the former `waylane_node_user_sync` bucket, consume old `c.*`
-claims, accept old NATS command actions, or run a live cutover. Deploy API and
-node worker together only after confirming that pending work in the old bucket
-is drained or explicitly resolved. Establish a full current-subscription
-snapshot on each node and verify fencing/revocation before retiring the old
-bucket; do not discard outstanding credentials or delete KV data as a side
-effect of a code push. Live KV PUT notifications wake an attached node's lazy
-subscription worker even when another process writes the queue; disconnect
-unsubscribes, and watcher recovery replays existing keys after reconnect.
-This is event-driven and requires no additional NATS subject or polling loop.
-Real NATS state, DEV routing and VPN traffic require separate operational
-acceptance.
-
+The historic reset-on-read RPC usage job is removed. New Xray counters are
+collected only with explicit Node runtime opt-in, deduplicated by UUID and
+Xray process epoch, and can perform transactionally fenced commercial usage
+accounting only when a separate Backend operator flag is enabled after real
+traffic acceptance. The flags default OFF. See `shared/contracts/NODE_CONTROL.md`
+for the transport/usage boundary and explicit deployment acceptance gates.
 
 ## Database migrations — existing PasarGuard databases are supported
 
@@ -122,12 +112,13 @@ only their hashes are stored: reissue or rotate keys and update clients
 explicitly before deploying this breaking change. No existing database keys,
 client credentials or running VPN nodes are changed by this source update.
 
-The bundled legacy NodeService RPC was also renamed to the
-`waylane.node.v1` protobuf package and gRPC service path in both the Go node
-and the Python bridge. Deploy both sides together; older node binaries or
-clients using `service.NodeService` are intentionally incompatible.
-The autonomous Agent's separate `waylane.control.v1` protocol is unchanged.
-Original upstream copyright notices and AGPL/GPL licensing are preserved.
+The legacy PasarGuard NodeService RPC and the bundled Python bridge have
+been retired from active WayLane code under Issue #21. The only supported
+runtime Node transport is the autonomous outbound `waylane.pb.v1` binary
+WSS/Protobuf session; the stable Agent still owns the private Rootless Docker
+lifecycle. Historical upstream source/license notices remain in Git history
+and `LICENSING.md`. No old gRPC/REST Node credential or numeric Node API
+remains a supported deployment contract.
 
 ## First local development owner (CLI)
 
@@ -159,15 +150,16 @@ generation. At WSS delivery it re-reads the latest UUID-first commercial
 admission, group memberships, expiration and quota, and hydrates clients only
 into the authenticated Protobuf payload. Empty admission revokes all managed
 clients on that inbound, but never edits manual SOCKS5 or unrelated listeners.
-This does not yet replace legacy per-user traffic accounting or prove real
-public ingress: the old bridge still has other callers (Issue #21 remains open).
+This replaces the retired NodeService subscription-delivery RPC. It does
+not itself prove real public ingress or commercial traffic attribution: these
+remain separate acceptance gates for Issue #21.
 
 Alembic revision `b31d7a92c060` creates only the opt-in binding table;
 no existing Node, Core or subscription is opted in by the migration. A source
 push does not authorize deployment or enabling commercial traffic on `tambov`.
 
 
-## Read-only Xray traffic WSS telemetry (Issue #21)
+## UUID-first Xray traffic telemetry and gated billing (Issue #21)
 
 Only when the operator explicitly enables `WAYLANE_XRAY_STATS_READONLY=true`
 on that Node (default off), an approved Node may report bounded, non-reset StatsService counters by
@@ -175,11 +167,23 @@ canonical subscription UUID over binary WSS. `node_agent_xray_usage_cursors`
 persists a monotonic per-Node/per-UUID cursor and cumulative totals across
 Xray process restarts; duplicate frames, stale epochs and decreases cannot
 charge bytes twice. The admin `/api/node-registry/nodes/{node_uuid}/xray/usage`
-view is deliberately read-only and not a commercial billing source.
-Xray requires the administrator to enable `stats` and user policy counters in
-Core Editor and deliberately restart the Core when required. The runtime
-Agent/Node/actual traffic was **not** accepted by source tests; legacy billing
-and traffic jobs remain authoritative pending the rest of Issue #21.
+view remains diagnostic; displayed totals can include an unbilled initial
+baseline. Xray requires the administrator to enable `stats` and user policy
+counters in Core Editor and deliberately restart the Core when required.
+
+Only after successful client-traffic acceptance may the separate Backend flag
+`WAYLANE_XRAY_USAGE_BILLING_ENABLED=true` be enabled. It defaults to
+`false` and is not a regular admin preference. Billing cursors initialize to
+the current stats value without back-charging previous observations, then
+atomically increment Subscription and owning Admin usage only by new verified
+UUID deltas. Repeated frames, old epochs and counter resets are ignored.
+Quota transitions queue a new desired Xray generation. Hourly UUID usage
+aggregates power new analytics separately from archived numeric Node history.
+
+The source change alone does **not** validate an installed Node version,
+client traffic, commercial reconciliation or actual host firewall access.
+Keep both optional flags off until an authorized runtime acceptance verifies
+SOCKS5 unaffected and explicitly enrolled commercial inbounds.
 
 ## TLS certificate presets (feature migration `bd1c0d80d86f`)
 

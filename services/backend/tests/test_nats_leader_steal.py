@@ -34,9 +34,6 @@ def test_leader_key_is_scoped_by_role(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(leader.runtime_settings, "role", Role.SCHEDULER)
     assert leader.leader_key() == "job_leader.scheduler"
 
-    monkeypatch.setattr(leader.runtime_settings, "role", Role.NODE)
-    assert leader.leader_key() == "job_leader.node"
-
     monkeypatch.setattr(leader.runtime_settings, "role", Role.ALL_IN_ONE)
     assert leader.leader_key() == "job_leader.all-in-one"
 

@@ -19,6 +19,7 @@ from sqlalchemy import case, select, update
 from app.controlpb import control_pb2 as pb
 from app.db.base import SessionLocal, begin_immediate_if_sqlite
 from app.db.models import node_agent_awg_desired, node_agent_registrations, node_agent_xray_desired
+from app.node_events import append_node_event
 
 PROTOCOL_VERSION = 1
 MAX_BINARY_FRAME = 2_000_000
@@ -212,6 +213,12 @@ class AgentBinarySession:
                         last_error=message.error_code[:240] if message.error_code else None,
                         reported_at=datetime.now(UTC),
                     )
+                )
+                await append_node_event(
+                    db, self.node_uuid,
+                    kind="awg_result" if message.core_id == "awg/default" else "xray_result",
+                    core_id=message.core_id, generation=message.generation,
+                    status=message.status,
                 )
                 await db.commit()
             await self.outgoing.put(

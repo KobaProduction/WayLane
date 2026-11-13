@@ -16,10 +16,10 @@ from app.db.crud.subscription import (
 from app.db.models import ReminderType, Subscription, SubscriptionStatus
 from app.jobs.dependencies import SYSTEM_ADMIN
 from app.models.settings import Webhook
-from app.node.sync import sync_subscriptions
 from app.operation import OperatorType
 from app.operation.subscription_management import SubscriptionManagementOperation
 from app.settings import webhook_settings
+from app.subscription_delivery import sync_subscriptions
 from app.utils.logger import get_logger
 from config import job_settings, runtime_settings
 

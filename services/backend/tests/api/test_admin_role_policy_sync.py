@@ -7,29 +7,9 @@ from fastapi import status
 from sqlalchemy import update
 
 from app.db.models import Admin, AdminRole, AdminStatus, Subscription, SubscriptionStatus
-from app.node import node_manager
 from app.operation import admin_role as admin_role_operation, admin_sync
 from tests.api import GetTestDB, TestSession, client
 from tests.api.helpers import auth_headers, strong_password, unique_name
-
-UNREACHABLE_NODE_ID = 987654
-
-
-class UnreachableNode:
-    """Answers like the bridge does for a node it cannot reach: every user comes back as failed."""
-
-    def __init__(self):
-        self.chunked_calls = 0
-
-    async def _supports_chunked_sync(self):
-        return True, None
-
-    async def sync_subscriptions_chunked(self, users, chunk_size=100, flush_pending=False, timeout=None):
-        self.chunked_calls += 1
-        return list(users)
-
-    async def _sync_batch_subscriptions(self, users):
-        return list(users)
 
 
 def _role_payload(*, blocks: bool) -> dict:
@@ -142,21 +122,14 @@ def test_role_save_without_policy_change_does_not_dispatch(access_token, monkeyp
     _create_disabled_admin_with_users(access_token, role_id, [SubscriptionStatus.active])
     calls = _record_schedules(monkeypatch)
 
-    node = UnreachableNode()
-    node_manager._nodes[UNREACHABLE_NODE_ID] = node
-    try:
-        # The dashboard always sends both policy fields; a rename must not touch nodes.
-        response = client.put(
-            f"/api/admin-role/{role_id}",
-            headers=auth_headers(access_token),
-            json={**payload, "name": unique_name("renamed_role")},
-        )
-    finally:
-        node_manager._nodes.pop(UNREACHABLE_NODE_ID, None)
+    response = client.put(
+        f"/api/admin-role/{role_id}",
+        headers=auth_headers(access_token),
+        json={**payload, "name": unique_name("renamed_role")},
+    )
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert calls == []
-    assert node.chunked_calls == 0
 
 
 def test_role_policy_change_schedules_only_the_changed_status(access_token, monkeypatch):
@@ -210,17 +183,11 @@ def test_role_policy_sync_tolerates_an_unreachable_node(access_token, monkeypatc
     monkeypatch.setattr(admin_sync, "GetDB", GetTestDB)
     monkeypatch.setattr(admin_sync, "_role_sync_locks", {})
 
-    node = UnreachableNode()
-    node_manager._nodes[UNREACHABLE_NODE_ID] = node
-    try:
-        removed = asyncio.run(admin_sync.apply_role_users_block_sync(role_id, [AdminStatus.disabled]))
-        _set_disabled_policy(role_id, False)
-        restored = asyncio.run(admin_sync.apply_role_users_block_sync(role_id, [AdminStatus.disabled]))
-    finally:
-        node_manager._nodes.pop(UNREACHABLE_NODE_ID, None)
+    removed = asyncio.run(admin_sync.apply_role_users_block_sync(role_id, [AdminStatus.disabled]))
+    _set_disabled_policy(role_id, False)
+    restored = asyncio.run(admin_sync.apply_role_users_block_sync(role_id, [AdminStatus.disabled]))
 
     assert (removed, restored) == (1, 1)
-    assert node.chunked_calls == 2
 
 
 def test_role_policy_sync_failure_is_logged_not_raised(monkeypatch):

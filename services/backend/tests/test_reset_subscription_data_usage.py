@@ -38,20 +38,12 @@ from app.db.models import (
     SubscriptionTemplate,
     SubscriptionUsageResetLogs,
 )
-from app.jobs import record_usages
 from app.models.proxy import ProxyTable
 from app.models.settings import HWIDSettings
 from app.models.subscription_models import BulkSubscriptionsApplyTemplate, SubscriptionModify
 from app.operation import OperatorType, subscription_management as subscription_operation
 from app.operation.subscription_management import SubscriptionManagementOperation
-from tests.test_record_usages import reset_user_usage_history_buffer, session_factory  # noqa: F401
-
-
-@pytest.fixture(autouse=True)
-def clear_dialect_cache():
-    record_usages._dialect_cache.clear()
-    yield
-    record_usages._dialect_cache.clear()
+from tests.usage_fixtures import session_factory  # noqa: F401
 
 
 def _user(label: str, **kwargs) -> Subscription:
@@ -110,7 +102,13 @@ async def test_single_reset_keeps_traffic_recorded_after_user_was_loaded(session
     async with session_factory() as db:
         db_user = await get_subscription_by_uuid(db, subscription_uuid)
         assert db_user.next_plan is not None
-        await record_usages.update_users_traffic([{"uid": subscription_uuid, "value": 500}])
+        # A separate committed WSS accounting transaction races with a reset
+        # that has already loaded the subscription in this session.
+        from sqlalchemy import update
+        async with session_factory() as writer:
+            await writer.execute(update(Subscription).where(Subscription.uuid == subscription_uuid).values(
+                used_traffic=Subscription.used_traffic + 500))
+            await writer.commit()
         db_user = await reset_subscription_data_usage(db, db_user)
         assert (db_user.used_traffic, db_user.next_plan) == (0, None)
         assert db_user.lifetime_used_traffic == 1_500

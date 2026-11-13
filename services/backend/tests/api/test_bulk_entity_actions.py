@@ -1,13 +1,10 @@
 import asyncio
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from fastapi import status
 from sqlalchemy import func, select, update
 
-from app.db.crud.node import create_node as db_create_node, remove_node as db_remove_node
-from app.db.models import Admin, AdminUsageLogs, Node
-from app.models.node import NodeCreate
+from app.db.models import Admin, AdminUsageLogs
 from tests.api import TestSession, client
 from tests.api.helpers import (
     auth_headers,
@@ -37,46 +34,10 @@ KuUcpBWSPkvH6y3Ak+YsTMg=
 -----END CERTIFICATE-----"""
 
 
-def node_create_payload(name: str, core_config_id: int) -> dict:
-    return {
-        "name": name,
-        "address": "node.example.com",
-        "port": 62050,
-        "api_port": 62051,
-        "usage_coefficient": 1.0,
-        "server_ca": VALID_CERTIFICATE,
-        "connection_type": "grpc",
-        "keep_alive": 60,
-        "core_config_id": core_config_id,
-        "api_key": str(uuid4()),
-        "data_limit": 0,
-        "data_limit_reset_strategy": "no_reset",
-        "reset_time": -1,
-        "default_timeout": 10,
-        "internal_timeout": 15,
-    }
 
 
-def create_db_node(*, core_config_id: int, name: str | None = None) -> int:
-    async def _create():
-        async with TestSession() as session:
-            db_node = await db_create_node(
-                session,
-                NodeCreate(**node_create_payload(name or unique_name("bulk_node"), core_config_id)),
-            )
-            return db_node.id
-
-    return asyncio.run(_create())
 
 
-def delete_db_node(node_id: int) -> None:
-    async def _delete():
-        async with TestSession() as session:
-            db_node = await session.get(Node, node_id)
-            if db_node:
-                await db_remove_node(session, db_node)
-
-    asyncio.run(_delete())
 
 
 def set_admin_used_traffic(username: str, used_traffic: int) -> None:
@@ -231,90 +192,6 @@ def test_bulk_disable_and_enable_subscription_templates(access_token):
         delete_core(access_token, core["id"])
 
 
-def test_bulk_disable_enable_reset_update_and_reconnect_nodes(access_token, monkeypatch):
-    from app.routers import node as node_router
-
-    update_node_impl = AsyncMock()
-    connect_single_impl = AsyncMock()
-    disconnect_single_impl = AsyncMock()
-    connect_bulk_impl = AsyncMock()
-    update_node_api_impl = AsyncMock(return_value={"detail": "ok"})
-
-    monkeypatch.setattr(node_router.node_operator, "_update_node_impl", update_node_impl)
-    monkeypatch.setattr(node_router.node_operator, "_connect_single_impl", connect_single_impl)
-    monkeypatch.setattr(node_router.node_operator, "_disconnect_single_impl", disconnect_single_impl)
-    monkeypatch.setattr(node_router.node_operator, "_connect_bulk_impl", connect_bulk_impl)
-    monkeypatch.setattr(node_router.node_operator, "_update_node_api_impl", update_node_api_impl)
-
-    core = create_core(access_token, name=unique_name("bulk_nodes_core"))
-    node_id = create_db_node(core_config_id=core["id"], name=unique_name("bulk_node"))
-    try:
-        response = client.post(
-            "/api/nodes/bulk/disable",
-            headers=auth_headers(access_token),
-            json={"ids": [node_id]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-        node_response = client.get(f"/api/node/{node_id}", headers=auth_headers(access_token))
-        assert node_response.status_code == status.HTTP_200_OK
-        assert node_response.json()["status"] == "disabled"
-        assert disconnect_single_impl.await_count == 1
-
-        response = client.post(
-            "/api/nodes/bulk/enable",
-            headers=auth_headers(access_token),
-            json={"ids": [node_id]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-        node_response = client.get(f"/api/node/{node_id}", headers=auth_headers(access_token))
-        assert node_response.status_code == status.HTTP_200_OK
-        assert node_response.json()["status"] == "connecting"
-        assert update_node_impl.await_count >= 1
-        assert connect_single_impl.await_count == 1
-
-        async def _seed_usage():
-            async with TestSession() as session:
-                db_node = await session.get(Node, node_id)
-                db_node.uplink = 2048
-                db_node.downlink = 4096
-                await session.commit()
-
-        asyncio.run(_seed_usage())
-
-        response = client.post(
-            "/api/nodes/bulk/reset",
-            headers=auth_headers(access_token),
-            json={"ids": [node_id]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-        node_response = client.get(f"/api/node/{node_id}", headers=auth_headers(access_token))
-        assert node_response.status_code == status.HTTP_200_OK
-        assert node_response.json()["uplink"] == 0
-        assert node_response.json()["downlink"] == 0
-
-        response = client.post(
-            "/api/nodes/bulk/update",
-            headers=auth_headers(access_token),
-            json={"ids": [node_id]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-        assert update_node_api_impl.await_count == 1
-
-        response = client.post(
-            "/api/nodes/bulk/reconnect",
-            headers=auth_headers(access_token),
-            json={"ids": [node_id]},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 1
-        assert connect_bulk_impl.await_count == 1
-    finally:
-        delete_db_node(node_id)
-        delete_core(access_token, core["id"])
 
 
 def test_bulk_disable_enable_and_reset_admins(access_token):

@@ -1,16 +1,16 @@
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { Link } from 'react-router'
 import { SubscriptionFormActions } from '@/features/subscriptions/components/subscription-form-actions'
-import { Button } from '@/components/ui/button'
+
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DEFAULT_SHADOWSOCKS_METHOD } from '@/constants/Proxies'
-import { OnHoldTimeoutAction, ShadowsocksMethods, useGetGeneralSettings, useReconnectAllNode } from '@/service/api'
-import { queryClient } from '@/utils/query-client'
+import { OnHoldTimeoutAction, ShadowsocksMethods, useGetGeneralSettings } from '@/service/api'
+
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2, RefreshCcw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+
+import { useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -29,8 +29,8 @@ export default function General() {
   const { t } = useTranslation()
   const { isLoading, error, updateSettings, isSaving } = useSettingsContext()
   const { data: generalSettings, isLoading: isGeneralLoading, error: generalError } = useGetGeneralSettings()
-  const [isReconnectAllDialogOpen, setIsReconnectAllDialogOpen] = useState(false)
-  const reconnectAllNodeMutation = useReconnectAllNode()
+
+
 
   const generalFormValues = useMemo<GeneralSettingsFormInput>(
     () =>
@@ -74,36 +74,6 @@ export default function General() {
       on_hold_timeout_action: generalSettings.on_hold_timeout_action || OnHoldTimeoutAction.activate,
     })
     toast.success(t('settings.general.cancelSuccess'))
-  }
-
-  const handleReconnectAll = async () => {
-    try {
-      await reconnectAllNodeMutation.mutateAsync({
-        params: {},
-      })
-
-      toast.success(t('success', { defaultValue: 'Success' }), {
-        description: t('nodes.reconnectAllSuccess', {
-          defaultValue: 'All nodes have been reconnected successfully',
-        }),
-      })
-
-      // Invalidate nodes queries to refresh data
-      queryClient.invalidateQueries({
-        queryKey: ['/api/nodes'],
-      })
-      queryClient.invalidateQueries({
-        queryKey: ['/api/nodes/simple'],
-      })
-
-      setIsReconnectAllDialogOpen(false)
-    } catch (error) {
-      toast.error(t('error', { defaultValue: 'Error' }), {
-        description: t('nodes.reconnectAllFailed', {
-          defaultValue: 'Failed to reconnect all nodes',
-        }),
-      })
-    }
   }
 
   const loadError = error || generalError
@@ -226,63 +196,16 @@ export default function General() {
 
           <Separator className="my-3" />
 
-          {/* Reconnect All Nodes Section */}
-          <div className="flex flex-col gap-3 py-3 sm:gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-1">
-              <h3 className="text-base font-semibold sm:text-lg">{t('nodes.title', { defaultValue: 'Reconnect All Nodes' })}</h3>
-              <p className="text-muted-foreground text-xs sm:text-sm">{t('nodes.reconnectinfo', { defaultValue: 'Refresh all nodes connections' })}</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div>
+              <h3 className="text-base font-semibold">Управление автономными Node</h3>
+              <p className="text-muted-foreground text-sm">
+                Перезапуск, конфигурация Xray и состояние WSS управляются отдельно для каждой Node.
+                Глобальная команда PasarGuard для принудительного переподключения всех серверов удалена.
+              </p>
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              type="button"
-              onClick={() => setIsReconnectAllDialogOpen(true)}
-              disabled={reconnectAllNodeMutation.isPending}
-              className="w-full shrink-0 gap-2 sm:w-auto"
-            >
-              {reconnectAllNodeMutation.isPending ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  {t('nodes.reconnectingAll', { defaultValue: 'Reconnecting...' })}
-                </>
-              ) : (
-                <>
-                  <RefreshCcw className="h-3 w-3" />
-                  {t('nodes.reconnectAll', { defaultValue: 'Reconnect All Nodes' })}
-                </>
-              )}
-            </Button>
+            <Link className="rounded border px-4 py-2 text-sm underline" to="/nodes">Открыть Node Registry</Link>
           </div>
-
-          {/* Reconnect All Dialog */}
-          <AlertDialog open={isReconnectAllDialogOpen} onOpenChange={setIsReconnectAllDialogOpen}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2">
-                  <RefreshCcw className="h-5 w-5" />
-                  {t('nodes.reconnectAll', { defaultValue: 'Reconnect All Nodes' })}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t('nodes.reconnectAllPrompt', {
-                    defaultValue: 'Are you sure you want to reconnect all nodes? This will temporarily disconnect all active connections and may take a few moments to complete.',
-                  })}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={reconnectAllNodeMutation.isPending}>{t('cancel', { defaultValue: 'Cancel' })}</AlertDialogCancel>
-                <AlertDialogAction onClick={handleReconnectAll} disabled={reconnectAllNodeMutation.isPending} className="gap-2">
-                  {reconnectAllNodeMutation.isPending ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {t('nodes.reconnectingAll', { defaultValue: 'Reconnecting...' })}
-                    </>
-                  ) : (
-                    t('nodes.reconnectAll', { defaultValue: 'Reconnect All Nodes' })
-                  )}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
 
           <SubscriptionFormActions onCancel={handleCancel} isSaving={isSaving} className="mt-auto sm:mt-auto" />
         </form>

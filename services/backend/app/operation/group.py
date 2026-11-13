@@ -33,9 +33,9 @@ from app.models.group import (
     RemoveGroupsResponse,
 )
 from app.models.subscription_models import SubscriptionListQuery
-from app.node.sync import sync_subscriptions
 from app.operation import BaseOperation
 from app.operation.permissions import apply_group_access
+from app.subscription_delivery import sync_subscriptions
 from app.utils.logger import get_logger
 
 logger = get_logger("group-operation")

@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Enum as SQLEnum,
@@ -810,10 +811,50 @@ node_agent_xray_usage_cursors = Table(
     Column("downlink", BigInteger, nullable=False),
     Column("total_uplink", BigInteger, nullable=False),
     Column("total_downlink", BigInteger, nullable=False),
+    # The commercial cursor is separate from diagnostic totals. On first
+    # authorization, baseline without charging historic observations.
+    Column("billing_ready", Boolean, nullable=False, server_default=text("false")),
+    Column("accounted_uplink", BigInteger, nullable=False, server_default=text("0")),
+    Column("accounted_downlink", BigInteger, nullable=False, server_default=text("0")),
     Column("observed_at", DateTime(timezone=True), nullable=False),
 )
 Index("ix_node_agent_xray_usage_cursors_subscription_uuid",
       node_agent_xray_usage_cursors.c.subscription_uuid)
+
+
+# Incremental non-reset Xray observations grouped by UTC hour. No legacy
+# numeric Node ID and no credential/PII. Out-of-order epochs remain excluded
+# by the cursor before touching these aggregates.
+node_agent_xray_usage_hours = Table(
+    "node_agent_xray_usage_hours",
+    Base.metadata,
+    Column("node_uuid", String(36), ForeignKey(
+        "node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    Column("subscription_uuid", Uuid(as_uuid=True), primary_key=True),
+    Column("bucket_start", DateTime(timezone=True), primary_key=True),
+    Column("uplink", BigInteger, nullable=False),
+    Column("downlink", BigInteger, nullable=False),
+)
+Index("ix_node_agent_xray_usage_hours_bucket",
+      node_agent_xray_usage_hours.c.bucket_start)
+
+
+# Durable, sanitized control events replace the old Node RPC log stream.
+node_agent_events = Table(
+    "node_agent_events",
+    Base.metadata,
+    Column("event_uuid", String(36), primary_key=True),
+    Column("node_uuid", String(36),
+           ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"),
+           nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("kind", String(32), nullable=False),
+    Column("core_id", String(32), nullable=True),
+    Column("generation", Integer, nullable=True),
+    Column("status", String(24), nullable=True),
+)
+Index("ix_node_agent_events_node_created",
+      node_agent_events.c.node_uuid, node_agent_events.c.created_at)
 
 
 # Independent desired generation and status for AWG; do not reuse Xray state.

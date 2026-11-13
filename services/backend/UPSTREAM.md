@@ -10,7 +10,7 @@ template is included.
 
 ## Preserved upstream state and intentionally breaking RPC change
 
-- The full GPL-3.0 Python node bridge source (upstream `pasarguard-node-bridge` v0.9.4) is integrated in `waylane_node_bridge/`, with original LICENSE and source attribution. No external PyPI bridge package is installed. Generated Protobuf descriptors and gRPC method paths now use the WayLane namespace; older pre-WayLane node/bridge binaries cannot connect to this renamed RPC service.
+- The GPL-3.0 Python PasarGuard Node bridge was preserved in earlier Git history, then retired under WayLane Issue #21. The active source uses the independent UUID-first binary WSS/Protobuf Agent → Node → Core contract; neither the old bridge, its gRPC schemas nor NodeService RPC are shipped as a running component. Its prior source, authorship and GPL-3.0 license remain attributable through Git history. The remaining upstream Panel-derived code retains AGPL-3.0 obligations.
 - `waylane.*` NATS subjects and `waylane_*` JetStream KV buckets are defaults for a **new** deployment. Prior clusters with persisted `pasarguard.*` subject/bucket names need a separately planned state migration; no dual-read is automatically enabled.
 - Existing provider API response shapes and subscription tokens remain unchanged. The bundled legacy panel-node RPC namespace is intentionally incompatible with pre-WayLane clients; both sides must be upgraded together.
 - The container exposes `waylane-cli` and `waylane-tui` directly. Historic command aliases are not required by the fresh deployment.

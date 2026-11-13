@@ -271,10 +271,8 @@ def test_suspended_admin_and_role_disconnect_revoke_managed_xray_clients(tmp_pat
     asyncio.run(run())
 
 
-def test_subscription_dispatch_queues_new_node_before_old_transport(tmp_path, monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from app.node import sync as subscription_sync
+def test_subscription_dispatch_queues_uuid_wss_reconcile_without_node_rpc(tmp_path, monkeypatch):
+    from app import subscription_delivery
 
     async def run():
         engine, factory, agent, uid, _, _ = await setup_db(tmp_path)
@@ -293,11 +291,8 @@ def test_subscription_dispatch_queues_new_node_before_old_transport(tmp_path, mo
                 async def __aexit__(self, *args):
                     await self.db.close()
 
-            monkeypatch.setattr(subscription_sync, "GetDB", LocalDB)
-            old_transport = AsyncMock()
-            monkeypatch.setattr(subscription_sync.node_manager, "update_subscription", old_transport)
-            await subscription_sync._dispatch_subscription_update(object())
-            old_transport.assert_awaited_once()
+            monkeypatch.setattr(subscription_delivery, "GetDB", LocalDB)
+            assert await subscription_delivery.reconcile_subscriptions() == 1
             async with factory() as db:
                 entry = (await db.execute(select(node_agent_xray_desired))).mappings().one()
                 assert entry["generation"] == 3 and entry["action"] == "reconfigure"
@@ -306,11 +301,12 @@ def test_subscription_dispatch_queues_new_node_before_old_transport(tmp_path, mo
                     node_agent_xray_desired.c.node_uuid == str(uid)
                 ).values(generation=4, action="stop", runtime_status="pending"))
                 await db.commit()
-                assert await enqueue_managed_subscription_changes(db) == 0
+                assert await subscription_delivery.reconcile_subscriptions() == 0
                 stopped = (await db.execute(select(node_agent_xray_desired))).mappings().one()
                 assert stopped["generation"] == 4 and stopped["action"] == "stop"
         finally:
             await engine.dispose()
+
     asyncio.run(run())
 
 

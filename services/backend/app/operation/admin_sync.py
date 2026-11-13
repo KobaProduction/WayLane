@@ -6,7 +6,7 @@ from app.db.crud.admin import get_active_to_limited_admins, update_admin_status
 from app.db.crud.admin_role import get_role
 from app.db.crud.subscription import get_admin_subscriptions_for_node_sync, get_role_subscriptions_for_node_sync
 from app.db.models import Admin, AdminRole, AdminStatus, SubscriptionStatus
-from app.node.sync import remove_subscriptions as sync_remove_subscriptions, sync_subscriptions
+from app.subscription_delivery import remove_subscriptions as sync_remove_subscriptions, sync_subscriptions
 from app.utils.logger import get_logger
 
 logger = get_logger("admin-sync")

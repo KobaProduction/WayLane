@@ -3,7 +3,6 @@ from enum import Enum
 
 class Role(str, Enum):
     BACKEND = "backend"  # deprecated: remove in 7.0.0
-    NODE = "node"  # deprecated: remove in 7.0.0
     SCHEDULER = "scheduler"  # deprecated: remove in 7.0.0
     ALL_IN_ONE = "all-in-one"
 
@@ -11,11 +10,6 @@ class Role(str, Enum):
     def runs_panel(self):
         """HTTP server + dashboard + API routes"""
         return self in (Role.BACKEND, Role.ALL_IN_ONE)
-
-    @property
-    def runs_node(self):
-        """Node worker service + node-related jobs"""
-        return self in (Role.NODE, Role.ALL_IN_ONE)
 
     @property
     def runs_scheduler(self):
@@ -30,4 +24,4 @@ class Role(str, Enum):
     @property
     def is_deprecated(self) -> bool:
         """True for roles scheduled for removal in 7.0.0."""
-        return self in (Role.BACKEND, Role.NODE, Role.SCHEDULER)
+        return self in (Role.BACKEND, Role.SCHEDULER)

@@ -4,7 +4,6 @@ from uuid import uuid4
 
 import aiocache
 import pytest
-from aiorwlock import RWLock
 from sqlalchemy import select
 
 from app.db.models import Admin, Settings
@@ -35,12 +34,6 @@ def mock_db_session(monkeypatch: pytest.MonkeyPatch):
     # connection on a TestClient loop that is closed after the request.
     monkeypatch.setattr("app.utils.jwt.GetDB", GetTestDB)
     return db_session
-
-
-@pytest.fixture(autouse=True)
-def mock_lock(monkeypatch: pytest.MonkeyPatch):
-    _lock = MagicMock(spec=RWLock(fast=True))
-    monkeypatch.setattr("app.node.node_manager._lock", _lock)
 
 
 @pytest.fixture(autouse=True)

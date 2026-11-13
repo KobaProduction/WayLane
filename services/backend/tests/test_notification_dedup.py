@@ -1,8 +1,8 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from app.models.node import NodeNotification
 from app.notification import connect_node, dedup as notification_dedup, recovered_node
 
 
@@ -20,14 +20,14 @@ def _reset_notification_dedup(monkeypatch: pytest.MonkeyPatch):
 async def test_single_worker_does_not_dedup(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(notification_dedup.server_settings, "workers", 1)
     monkeypatch.setattr(notification_dedup, "_claim_shared", AsyncMock(side_effect=AssertionError("dedup must not run")))
-    node = NodeNotification(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
+    node = SimpleNamespace(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
     assert await notification_dedup.claim_notification_slot("connect_node", (node,), {}) is True
     assert await notification_dedup.claim_notification_slot("connect_node", (node,), {}) is True
 
 
 @pytest.mark.asyncio
 async def test_claim_notification_slot_drops_same_event_twice():
-    node = NodeNotification(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
+    node = SimpleNamespace(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
     assert await notification_dedup.claim_notification_slot("connect_node", (node,), {}) is True
     assert await notification_dedup.claim_notification_slot("connect_node", (node,), {}) is False
 
@@ -52,7 +52,7 @@ async def test_safe_notification_wrapper_emits_once(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("app.notification.notification_enable", _enabled)
     monkeypatch.setattr("app.notification.wh.notify", record_panel_event)
 
-    node = NodeNotification(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
+    node = SimpleNamespace(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
     await connect_node(node)
     await connect_node(node)
     await recovered_node(node)
@@ -66,13 +66,13 @@ async def test_claim_notification_slot_uses_shared_store_across_workers(monkeypa
     monkeypatch.setattr(notification_dedup, "is_nats_enabled", lambda: True)
     monkeypatch.setattr(notification_dedup, "_claim_shared", AsyncMock(return_value=False))
 
-    node = NodeNotification(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
+    node = SimpleNamespace(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
     assert await notification_dedup.claim_notification_slot("connect_node", (node,), {}) is False
 
 
 def test_fingerprint_is_stable_for_same_node_event():
-    node = NodeNotification(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
-    other = NodeNotification(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
+    node = SimpleNamespace(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
+    other = SimpleNamespace(id=3, name="Hetz Tunnel", node_version="0.5.4", xray_version="26.3.27")
     assert notification_dedup.notification_fingerprint("connect_node", (node,), {}) == (
         notification_dedup.notification_fingerprint("connect_node", (other,), {})
     )

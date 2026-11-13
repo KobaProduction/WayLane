@@ -45,6 +45,7 @@ type XrayUsageRow = {
 }
 type XrayUsageState = {
   billing_authoritative: false
+  billing_enabled: boolean
   source: string
   samples: XrayUsageRow[]
 }
@@ -841,10 +842,17 @@ export default function NodeDiscoveryPanel() {
                         </div>
                         <p className="text-muted-foreground text-xs">
                           Только наблюдение через приватный StatsService/WSS при явном разрешении
-                          WAYLANE_XRAY_STATS_READONLY=true на Node. Эти показания не используются
-                          для расчёта оплаченного трафика. Для получения чисел требуется включить
+                          WAYLANE_XRAY_STATS_READONLY=true на Node. Отображаемые суммарные
+                          счётчики не равны списанным коммерческим байтам: при включённом Backend
+                          флаге биллинга учитываются только новые проверенные приращения.
+                          Для получения чисел требуется включить
                           stats и statsUserUplink/statsUserDownlink в policy Xray, затем явно перезапустить
                           ядро для применения настроек.
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                          Коммерческое начисление: {xrayUsageStates[node.node_uuid]?.billing_enabled
+                            ? 'разрешено оператором Backend'
+                            : 'выключено (только диагностика)'}.
                         </p>
                         {xrayUsageStates[node.node_uuid]?.samples.length === 0 && (
                           <p className="text-muted-foreground text-xs">Счётчики пока не поступали.</p>

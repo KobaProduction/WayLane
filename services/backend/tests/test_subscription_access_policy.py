@@ -53,26 +53,3 @@ def test_subscription_access_uses_current_provider_state(monkeypatch, status, is
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(exercise())
         assert exc_info.value.status_code == 403
-
-
-@pytest.mark.parametrize("entitlement", ["payment_required", "suspended", "expired", "cancelled"])
-def test_inactive_subscription_never_reaches_node_inbounds(entitlement):
-    """Commercial refusal also revokes previously downloaded VPN credentials."""
-    from app.node.subscription import serialize_subscription
-
-    async def assigned_inbounds():
-        return ["test-inbound"]
-
-    subscription = SimpleNamespace(
-        uuid=uuid4(),
-        proxy_settings={},
-        status=SubscriptionStatus.active,
-        entitlement=entitlement,
-        inbounds=assigned_inbounds,
-    )
-    forbidden_node = asyncio.run(serialize_subscription(subscription))
-    assert list(forbidden_node.inbounds) == []
-
-    subscription.entitlement = "active"
-    allowed_node = asyncio.run(serialize_subscription(subscription))
-    assert list(allowed_node.inbounds) == ["test-inbound"]

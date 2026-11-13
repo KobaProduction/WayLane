@@ -16,7 +16,8 @@ from nats.js.kv import KeyValue
 from app.nats import is_nats_enabled
 from app.nats.client import create_nats_client, get_jetstream_context, get_or_create_kv_bucket
 from app.nats.kv_cas import kv_cas_json, kv_get_json
-from app.node.nats_memory import WORKER_ID
+
+WORKER_ID = uuid4().hex  # process-scoped NATS scheduler lease identity
 from app.utils.logger import get_logger
 from config import nats_settings, runtime_settings, server_settings
 

@@ -73,8 +73,11 @@ def test_revision_map_cli_keeps_product_user_unavailable():
     backend_dir = Path(__file__).resolve().parents[1]
     history = ScriptDirectory.from_config(Config("alembic.ini"))
     merged_head = history.get_current_head()
-    assert merged_head == "c41a5e8dbe23", "Read-only autonomous stats must extend managed subscription lineage"
-    assert history.get_revision(merged_head).down_revision == "b31d7a92c060"
+    assert merged_head == "f31d9a0b4c25", "UUID-first Xray hourly observations must extend usage billing migration"
+    assert history.get_revision(merged_head).down_revision == "e91c3d0a7f24"
+    assert history.get_revision("e91c3d0a7f24").down_revision == "d52a91e6c0b4"
+    assert history.get_revision("d52a91e6c0b4").down_revision == "c41a5e8dbe23"
+    assert history.get_revision("c41a5e8dbe23").down_revision == "b31d7a92c060"
     assert history.get_revision("b31d7a92c060").down_revision == "e62b47a9d5c1"
     assert history.get_revision("e62b47a9d5c1").down_revision == "f0556e841d8b"
     assert set(history.get_revision("f0556e841d8b").down_revision) == {

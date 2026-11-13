@@ -14,7 +14,6 @@ from app.db.crud import (
     get_core_config_by_id,
     get_group_by_id,
     get_host_by_id,
-    get_node_by_id,
     get_subscription_template,
 )
 from app.db.crud.admin import get_admin_by_id
@@ -25,7 +24,6 @@ from app.db.models import (
     ClientTemplate,
     CoreConfig,
     Group,
-    Node,
     ProxyHost,
     Subscription,
     SubscriptionStatus,
@@ -291,13 +289,6 @@ class BaseOperation:
         if not dbuser_template:
             await self.raise_error("Subscription Template not found", 404)
         return dbuser_template
-
-    async def get_validated_node(self, db: AsyncSession, node_id, *, load_usage_logs: bool = True) -> Node:
-        """Dependency: Fetch node or return not found error."""
-        db_node = await get_node_by_id(db, node_id, load_usage_logs=load_usage_logs)
-        if not db_node:
-            await self.raise_error(message="Node not found", code=404)
-        return db_node
 
     async def check_inbound_tags(self, tags: list[str]) -> None:
         for tag in tags:

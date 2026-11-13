@@ -11,7 +11,6 @@ class MessageTopic(str, Enum):
     HOST = "host"
     SETTING = "setting"
     CLIENT_TEMPLATE = "client_template"
-    NODE = "node"
 
 
 class NatsMessage(BaseModel):

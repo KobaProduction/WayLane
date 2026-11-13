@@ -38,11 +38,11 @@ from app.models.admin import (
 )
 from app.models.stats import Period, SubscriptionUsageStatsList
 from app.models.subscription_models import SubscriptionListQuery
-from app.node.sync import remove_subscription as sync_remove_subscription, sync_subscriptions
 from app.operation import BaseOperation
 from app.operation.admin_sync import admin_users_sync_blocked, sync_admin_users_for_block_transition
 from app.operation.permissions import PermissionDenied, enforce_permission
 from app.operation.subscription_management import SubscriptionManagementOperation
+from app.subscription_delivery import remove_subscription as sync_remove_subscription, sync_subscriptions
 from app.utils.logger import get_logger
 
 logger = get_logger("admin-operation")

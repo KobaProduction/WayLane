@@ -5,9 +5,9 @@ from app import notification, scheduler
 from app.db import GetDB
 from app.db.crud.subscription import bulk_reset_subscription_data_usage, get_subscriptions_to_reset_data_usage
 from app.jobs.dependencies import SYSTEM_ADMIN
-from app.node.sync import sync_subscriptions
 from app.operation import OperatorType
 from app.operation.subscription_management import SubscriptionManagementOperation
+from app.subscription_delivery import sync_subscriptions
 from app.utils.logger import get_logger
 from config import job_settings, runtime_settings, usage_settings
 

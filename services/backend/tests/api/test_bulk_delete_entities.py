@@ -1,12 +1,10 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 from fastapi import status
 from sqlalchemy import func, select, update
 
-from app.db.crud.node import create_node as db_create_node, remove_node as db_remove_node
 from app.db.models import (
     Admin,
     AdminNotificationReminder,
@@ -14,11 +12,6 @@ from app.db.models import (
     AdminUsageLogs,
     APIKey,
     NextPlan,
-    Node,
-    NodeStat,
-    NodeSubscriptionUsage,
-    NodeUsage,
-    NodeUsageResetLogs,
     PasskeyChallenge,
     ReminderType,
     Subscription,
@@ -26,7 +19,6 @@ from app.db.models import (
     subscriptions_groups_association,
     template_group_association,
 )
-from app.models.node import NodeCreate
 from tests.api import TestSession, client
 from tests.api.helpers import (
     auth_headers,
@@ -198,114 +190,16 @@ def count_api_keys(admin_id: int) -> int:
     return asyncio.run(_count())
 
 
-def node_create_payload(name: str, core_config_id: int) -> dict:
-    return {
-        "name": name,
-        "address": "node.example.com",
-        "port": 62050,
-        "api_port": 62051,
-        "usage_coefficient": 1.0,
-        "server_ca": VALID_CERTIFICATE,
-        "connection_type": "grpc",
-        "keep_alive": 60,
-        "core_config_id": core_config_id,
-        "api_key": str(uuid4()),
-        "data_limit": 0,
-        "data_limit_reset_strategy": "no_reset",
-        "reset_time": -1,
-        "default_timeout": 10,
-        "internal_timeout": 15,
-    }
 
 
-def create_db_node(*, core_config_id: int, name: str | None = None) -> int:
-    async def _create():
-        async with TestSession() as session:
-            db_node = await db_create_node(
-                session,
-                NodeCreate(**node_create_payload(name or unique_name("bulk_node"), core_config_id)),
-            )
-            return db_node.id
-
-    return asyncio.run(_create())
 
 
-def delete_db_node(node_id: int) -> None:
-    async def _delete():
-        async with TestSession() as session:
-            db_node = await session.get(Node, node_id)
-            if db_node:
-                await db_remove_node(session, db_node)
-
-    asyncio.run(_delete())
 
 
-def get_node_core_config_id(node_id: int) -> int | None:
-    async def _get():
-        async with TestSession() as session:
-            result = await session.execute(select(Node.core_config_id).where(Node.id == node_id))
-            return result.scalar_one_or_none()
-
-    return asyncio.run(_get())
 
 
-def seed_node_usage_rows(node_id: int, subscription_uuid: UUID) -> None:
-    async def _seed():
-        async with TestSession() as session:
-            now = datetime.now(UTC)
-            session.add_all(
-                [
-                    NodeSubscriptionUsage(subscription_uuid=subscription_uuid, node_id=node_id, created_at=now, used_traffic=1),
-                    NodeUsage(node_id=node_id, created_at=now + timedelta(minutes=1), uplink=2, downlink=3),
-                    NodeUsageResetLogs(node_id=node_id, uplink=4, downlink=5),
-                    NodeStat(
-                        node_id=node_id,
-                        mem_total=4096,
-                        mem_used=1024,
-                        cpu_cores=4,
-                        cpu_usage=50,
-                        incoming_bandwidth_speed=100,
-                        outgoing_bandwidth_speed=200,
-                    ),
-                ]
-            )
-            await session.commit()
-
-    asyncio.run(_seed())
 
 
-def get_node_related_counts(node_id: int) -> dict[str, int]:
-    async def _counts():
-        async with TestSession() as session:
-            return {
-                "nodes": (
-                    await session.execute(select(func.count()).select_from(Node).where(Node.id == node_id))
-                ).scalar_one(),
-                "subscription_usages": (
-                    await session.execute(
-                        select(func.count())
-                        .select_from(NodeSubscriptionUsage)
-                        .where(NodeSubscriptionUsage.node_id == node_id)
-                    )
-                ).scalar_one(),
-                "usages": (
-                    await session.execute(
-                        select(func.count()).select_from(NodeUsage).where(NodeUsage.node_id == node_id)
-                    )
-                ).scalar_one(),
-                "usage_logs": (
-                    await session.execute(
-                        select(func.count())
-                        .select_from(NodeUsageResetLogs)
-                        .where(NodeUsageResetLogs.node_id == node_id)
-                    )
-                ).scalar_one(),
-                "stats": (
-                    await session.execute(select(func.count()).select_from(NodeStat).where(NodeStat.node_id == node_id))
-                ).scalar_one(),
-            }
-
-    return asyncio.run(_counts())
 
 
 def get_group_association_counts(group_id: int) -> dict[str, int]:
@@ -542,84 +436,10 @@ def test_bulk_delete_client_templates_rejects_system_template(access_token):
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
-def test_delete_core_restarts_only_affected_nodes_with_default_core(access_token, monkeypatch):
-    target_core = create_core(access_token, name=unique_name("single_core"))
-    other_core = create_core(access_token, name=unique_name("other_core"))
-    target_node_id = create_db_node(core_config_id=target_core["id"])
-    other_node_id = create_db_node(core_config_id=other_core["id"])
-    default_node_id = create_db_node(core_config_id=1)
-    restart_nodes = AsyncMock()
-    monkeypatch.setattr("app.routers.core.node_operator.connect_nodes_bulk", restart_nodes)
-    try:
-        response = client.delete(
-            f"/api/core/{target_core['id']}",
-            headers=auth_headers(access_token),
-            params={"restart_nodes": True},
-        )
-
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert get_node_core_config_id(target_node_id) is None
-        assert get_node_core_config_id(other_node_id) == other_core["id"]
-        assert get_node_core_config_id(default_node_id) == 1
-        restart_nodes.assert_awaited_once()
-        db_nodes = restart_nodes.await_args.args[1]
-        assert [node.id for node in db_nodes] == [target_node_id]
-        assert db_nodes[0].core_config_id is None
-        assert restart_nodes.await_args.kwargs == {"force_start": True}
-    finally:
-        delete_db_node(target_node_id)
-        delete_db_node(other_node_id)
-        delete_db_node(default_node_id)
-        delete_core_if_present(access_token, target_core["id"])
-        delete_core_if_present(access_token, other_core["id"])
 
 
-def test_delete_core_without_restart_clears_node_core_reference(access_token, monkeypatch):
-    target_core = create_core(access_token, name=unique_name("single_core_no_restart"))
-    node_id = create_db_node(core_config_id=target_core["id"])
-    restart_nodes = AsyncMock()
-    monkeypatch.setattr("app.routers.core.node_operator.connect_nodes_bulk", restart_nodes)
-    try:
-        response = client.delete(f"/api/core/{target_core['id']}", headers=auth_headers(access_token))
-
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert get_node_core_config_id(node_id) is None
-        restart_nodes.assert_not_awaited()
-    finally:
-        delete_db_node(node_id)
-        delete_core_if_present(access_token, target_core["id"])
 
 
-def test_bulk_delete_cores_clears_node_core_references(access_token, monkeypatch):
-    seed_core = create_core(access_token, name=unique_name("bulk_core_seed"))
-    target_cores = [create_core(access_token, name=unique_name("bulk_core")) for _ in range(2)]
-    node_ids = [create_db_node(core_config_id=core["id"]) for core in target_cores]
-    seed_node_id = create_db_node(core_config_id=seed_core["id"])
-    restart_nodes = AsyncMock()
-    monkeypatch.setattr("app.routers.core.node_operator.connect_nodes_bulk", restart_nodes)
-    try:
-        response = client.post(
-            "/api/cores/bulk/delete",
-            headers=auth_headers(access_token),
-            json={"ids": [core["id"] for core in target_cores]},
-        )
-
-        assert response.status_code == status.HTTP_200_OK
-        assert response.json()["count"] == 2
-        assert all(get_node_core_config_id(node_id) is None for node_id in node_ids)
-        assert get_node_core_config_id(seed_node_id) == seed_core["id"]
-        restart_nodes.assert_awaited_once()
-        db_nodes = restart_nodes.await_args.args[1]
-        assert {node.id for node in db_nodes} == set(node_ids)
-        assert all(node.core_config_id is None for node in db_nodes)
-        assert restart_nodes.await_args.kwargs == {"force_start": True}
-    finally:
-        for node_id in node_ids:
-            delete_db_node(node_id)
-        delete_db_node(seed_node_id)
-        for core in target_cores:
-            delete_core_if_present(access_token, core["id"])
-        delete_core_if_present(access_token, seed_core["id"])
 
 
 def test_bulk_delete_cores_rejects_default_core(access_token):
@@ -734,27 +554,6 @@ def test_bulk_delete_unassigned_group_cleans_template_and_inbound_links(access_t
         delete_core_if_present(access_token, core["id"])
 
 
-def test_bulk_delete_nodes_cleans_subscription_usage_rows(access_token, monkeypatch):
-    from app.routers import node as node_router
-
-    monkeypatch.setattr(node_router.node_operator, "_remove_node_impl", AsyncMock())
-    subscription_uuid = seed_internal_subscription_for_usage()
-    node_id = create_db_node(core_config_id=1, name=unique_name("bulk_node"))
-    seed_node_usage_rows(node_id, subscription_uuid)
-    try:
-        response = client.post("/api/nodes/bulk/delete", headers=auth_headers(access_token), json={"ids": [node_id]})
-        assert response.status_code == status.HTTP_200_OK, response.text
-        assert response.json()["count"] == 1
-        assert get_node_related_counts(node_id) == {
-            "nodes": 0,
-            "subscription_usages": 0,
-            "usages": 0,
-            "usage_logs": 0,
-            "stats": 0,
-        }
-    finally:
-        delete_db_node(node_id)
-        delete_internal_subscription(subscription_uuid)
 
 
 def test_bulk_delete_subscription_templates_cleans_legacy_next_plan_records(access_token):

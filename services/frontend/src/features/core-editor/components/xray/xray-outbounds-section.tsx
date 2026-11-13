@@ -910,11 +910,11 @@ export function XrayOutboundsSection({ headerAddPulse, headerAddEpoch }: XrayOut
             className="h-9 px-2 sm:px-3"
             disabled={!hasOutbounds}
             onClick={() => setLatencyTestScope({ mode: 'all' })}
-            aria-label={t('coreEditor.outbound.latency.testAll', { defaultValue: 'Test all' })}
-            title={t('coreEditor.outbound.latency.testAll', { defaultValue: 'Test all' })}
+            aria-label={'Состояние outbound'}
+            title={'Состояние outbound'}
           >
             <Gauge className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('coreEditor.outbound.latency.testAll', { defaultValue: 'Test all' })}</span>
+            <span className="hidden sm:inline">{'Состояние outbound'}</span>
           </Button>
         }
         getSearchableText={outboundSearchHaystack}
@@ -955,7 +955,7 @@ export function XrayOutboundsSection({ headerAddPulse, headerAddEpoch }: XrayOut
         getRowActions={row => [
           {
             key: 'latency-test',
-            label: t('coreEditor.outbound.latency.menu', { defaultValue: 'Test latency' }),
+            label: 'Проверить состояние на Node',
             icon: <Gauge className="size-4 shrink-0" />,
             disabled: !String(row.tag ?? '').trim(),
             onSelect: () => setLatencyTestScope({ mode: 'single', outboundTag: String(row.tag ?? '') }),

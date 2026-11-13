@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { $fetch } from '@/service/http'
 import { useAdmin } from '@/hooks/use-admin'
 import { formatBytes } from '@/utils/formatByte'
-import type { NodeRealtimeStats } from '@/service/api'
+
 
 type Node = { id: number; name: string; status: string; core_id: number | null }
 type SubscriptionItem = { uuid: string; status: string; online_at: string | null }
@@ -29,13 +29,43 @@ type Devices = {
   systems: DeviceEntry[]; versions: DeviceEntry[]; models: DeviceEntry[]; user_agents: DeviceEntry[]
   recent: { subscription_uuid: string; system: string | null; version: string | null; model: string | null; last_used_at: string | null }[]
 }
-type Rates = Record<string, NodeRealtimeStats | null>
+type AutonomousNode = {
+  node_uuid: string
+  display_name: string
+  status: string
+  wss_fresh: boolean
+  last_seen_at: string | null
+  cpu_logical_count: number | null
+  memory_total_bytes: number | null
+  memory_available_bytes: number | null
+  uptime_seconds: number | null
+  total_uplink: string
+  total_downlink: string
+}
+type AutonomousSummary = {
+  billing_authoritative: false
+  traffic_kind: 'cumulative_xray_stats_not_bandwidth_speed'
+  nodes: AutonomousNode[]
+  registered_nodes: number
+  fresh_wss_nodes: number
+}
+type AutonomousHours = {
+  billing_authoritative: false
+  granularity: string
+  rows: {
+    node_uuid: string
+    subscription_uuid: string
+    bucket_start: string
+    uplink: string
+    downlink: string
+  }[]
+}
 type Settings = { excludedNodes: number[]; excludedSubscriptions: string[]; colors: Record<string, string> }
 type Direction = 'total' | 'upload' | 'download'
 const base = '/api/business-analytics'
 const palette = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#be185d', '#ca8a04', '#64748b', '#0d9488']
 const fmt = (n: number) => formatBytes(n, 2)
-const bps = (n: number) => (n * 8 / 1e6).toFixed(2) + ' Мбит/с'
+
 const errText = (e: unknown) => e instanceof Error ? e.message : 'Ошибка загрузки'
 const asDate = (d: Date) => d.toISOString().slice(0, 10)
 function loadSettings(): Settings {
@@ -98,7 +128,8 @@ export default function Statistics() {
   const [trafficSeries, setTrafficSeries] = useState<TrafficSeries>({ series: [], rows: [], truncated: false })
   const [history, setHistory] = useState<History>({ rows: [], truncated: false, direction_available: true, source: 'node_usages' })
   const [devices, setDevices] = useState<Devices | null>(null)
-  const [rates, setRates] = useState<Rates>({})
+  const [autonomous, setAutonomous] = useState<AutonomousSummary | null>(null)
+  const [autonomousHours, setAutonomousHours] = useState<AutonomousHours | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const excludedNodes = showExcluded ? [] : settings.excludedNodes
@@ -168,33 +199,23 @@ export default function Statistics() {
   }, [canRead, tab, query, span, nodeId, subscriptionUuid, status, period, chosenNodeKey, excludedNodeKey, excludedSubscriptionKey])
   useEffect(() => { void refresh() }, [refresh])
 
-  const refreshRates = useCallback(async () => {
+  const refreshAutonomous = useCallback(async () => {
     if (!canRead || !['overview', 'nodes'].includes(tab)) return
-    try { setRates(await $fetch<Rates>('/api/nodes/realtime_stats')) }
-    catch { setRates({}) }
+    try {
+      const [summary, hours] = await Promise.all([
+        $fetch<AutonomousSummary>('/api/node-registry/analytics/summary'),
+        $fetch<AutonomousHours>('/api/node-registry/analytics/usage/hours', { query: { days: 30 } }),
+      ])
+      setAutonomous(summary)
+      setAutonomousHours(hours)
+    } catch {
+      setAutonomous(null)
+      setAutonomousHours(null)
+    }
   }, [canRead, tab])
-  useEffect(() => {
-    void refreshRates()
-    // Only when this page is open and visible; existing Node RPC metrics.
-    const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshRates()
-    }, 15000)
-    return () => window.clearInterval(id)
-  }, [refreshRates])
+  useEffect(() => { void refreshAutonomous() }, [refreshAutonomous])
 
-  const visibleNodes = catalog.nodes.filter(n => !excludedNodes.includes(n.id))
-    .sort((a, b) => {
-      const aRate = Number(rates[a.id]?.incoming_bandwidth_speed || 0) + Number(rates[a.id]?.outgoing_bandwidth_speed || 0)
-      const bRate = Number(rates[b.id]?.incoming_bandwidth_speed || 0) + Number(rates[b.id]?.outgoing_bandwidth_speed || 0)
-      return bRate - aRate || a.name.localeCompare(b.name)
-    })
-  const totalUp = visibleNodes.reduce((sum, n) => sum + Number(rates[n.id]?.incoming_bandwidth_speed || 0), 0)
-  const totalDown = visibleNodes.reduce((sum, n) => sum + Number(rates[n.id]?.outgoing_bandwidth_speed || 0), 0)
-  const maxSpeed = Math.max(1, ...visibleNodes.map(n => Math.max(
-    Number(rates[n.id]?.incoming_bandwidth_speed || 0),
-    Number(rates[n.id]?.outgoing_bandwidth_speed || 0)
-  )))
-  const totalHistorical = history.rows.reduce((sum, r) => sum + r.total_bytes, 0)
+  const autonomousNodes = autonomous?.nodes ?? []
   const groups = useMemo(() => {
     const grouped = new Map<string, { name: string; total: number; details: { name: string; total: number }[] }>()
     for (const r of matrix.rows) {
@@ -221,7 +242,7 @@ export default function Statistics() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="overview">Общая</TabsTrigger>
-          <TabsTrigger value="nodes">Ноды и скорости</TabsTrigger>
+          <TabsTrigger value="nodes">Ноды и архив</TabsTrigger>
           <TabsTrigger value="subscriptions">Трафик подписок</TabsTrigger>
           <TabsTrigger value="devices">Устройства</TabsTrigger>
           <TabsTrigger value="filters">Фильтры и цвета</TabsTrigger>
@@ -253,37 +274,77 @@ export default function Statistics() {
         <TabsContent value="overview" className="mt-4 space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
-              { label: 'Upload сейчас · все ноды', value: bps(totalUp) },
-              { label: 'Download сейчас · все ноды', value: bps(totalDown) },
-              { label: 'Трафик нод за период', value: fmt(totalHistorical) },
-              { label: 'Ноды с телеметрией', value: String(visibleNodes.filter(n => rates[n.id]).length) + ' / ' + visibleNodes.length },
+              { label: 'Автономные Node', value: String(autonomous?.registered_nodes ?? '—') },
+              { label: 'Node с актуальным WSS', value: String(autonomous?.fresh_wss_nodes ?? '—') },
+              { label: 'Xray upload · накоплено', value: autonomous
+                ? autonomousNodes.reduce((sum, n) => sum + BigInt(n.total_uplink), 0n).toLocaleString('ru-RU') + ' Б' : '—' },
+              { label: 'Xray download · накоплено', value: autonomous
+                ? autonomousNodes.reduce((sum, n) => sum + BigInt(n.total_downlink), 0n).toLocaleString('ru-RU') + ' Б' : '—' },
             ].map(x => <Card key={x.label}><CardContent className="p-5">
               <p className="text-sm text-muted-foreground">{x.label}</p><p className="mt-1 text-xl font-semibold">{x.value}</p>
             </CardContent></Card>)}
           </div>
-          <Card><CardHeader><CardTitle>Текущая нагрузка всех нод</CardTitle></CardHeader><CardContent className="space-y-2">
-            {visibleNodes.map(node => {
-              const up = Number(rates[node.id]?.incoming_bandwidth_speed || 0)
-              const down = Number(rates[node.id]?.outgoing_bandwidth_speed || 0)
-              return <div className="grid gap-2 rounded border p-3 text-sm md:grid-cols-[minmax(120px,220px)_1fr_1fr]" key={node.id}>
-                <span className="truncate font-medium">{node.name} <span className="text-xs text-muted-foreground">· {node.status}</span></span>
-                {[['↑ Upload', up, '#0284c7'], ['↓ Download', down, '#059669']].map(([label, raw, color]) => {
-                  const value = Number(raw)
-                  return <div key={String(label)}><div className="mb-1 flex justify-between text-xs">
-                    <span>{String(label)}</span><span>{rates[node.id] ? bps(value) : '—'}</span>
-                  </div><div className="h-2 rounded bg-muted"><div className="h-2 rounded" style={{ width: 100 * value / maxSpeed + '%', backgroundColor: String(color) }} /></div></div>
-                })}
-              </div>
-            })}
-            <p className="text-xs text-muted-foreground">Обновление только при открытой вкладке раз в 15 секунд, через существующий Node API.</p>
-          </CardContent></Card>
-          <Card><CardHeader><CardTitle>Историческая нагрузка нод</CardTitle></CardHeader><CardContent>
+          <Card><CardHeader><CardTitle>Автономные Node — телеметрия WSS</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Счётчики являются накопленными наблюдениями Xray, не текущей скоростью и не расчётом оплаты.
+                Точное количество открытых VPN-сессий этот источник не измеряет.
+              </p>
+              <Button size="sm" variant="outline" onClick={() => void refreshAutonomous()}>
+                Обновить телеметрию
+              </Button>
+              {autonomousNodes.map(node => <div key={node.node_uuid} className="rounded border p-3 text-sm">
+                <p className="font-medium">{node.display_name} · {node.wss_fresh ? 'WSS активен' : 'WSS не подтверждён'}</p>
+                <p className="text-muted-foreground text-xs">
+                  {node.cpu_logical_count ?? '—'} CPU ·
+                  RAM {node.memory_available_bytes != null ? fmt(node.memory_available_bytes) : '—'}
+                  / {node.memory_total_bytes != null ? fmt(node.memory_total_bytes) : '—'} ·
+                  последний heartbeat {node.last_seen_at ? new Date(node.last_seen_at).toLocaleString('ru-RU') : 'нет'}
+                </p>
+                <p className="break-all font-mono text-xs">{node.node_uuid}</p>
+              </div>)}
+              {autonomousNodes.length === 0 && <p className="text-sm text-muted-foreground">
+                Нет доступных записей Node Registry.
+              </p>}
+            </CardContent></Card>
+          <Card><CardHeader><CardTitle>Исторический трафик PasarGuard (архив)</CardTitle></CardHeader><CardContent>
             <HistoryChart rows={history.rows} nodes={catalog.nodes} direction="total" colorOf={colorOf} />
-            <p className="text-xs text-muted-foreground">CPU, RAM и диск остаются в Grafana.</p>
+            <p className="text-xs text-muted-foreground">
+              Это ранее накопленные данные числовых Node. Они не считаются статистикой новых UUID Node.
+            </p>
           </CardContent></Card>
         </TabsContent>
         <TabsContent value="nodes" className="mt-4 space-y-4">
-          <Card><CardHeader><CardTitle>Сравнение серверов по трафику</CardTitle></CardHeader><CardContent className="space-y-3">
+          <Card>
+            <CardHeader><CardTitle>Трафик автономных Node по UTC-часам</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-muted-foreground text-xs">
+                Источник: приватный Xray StatsService через WSS. Часы обозначают время
+                получения показаний, а не точное время передачи каждого байта.
+                Данные не являются измерением текущей скорости соединения.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void refreshAutonomous()}>
+                Обновить историю Xray
+              </Button>
+              {!autonomousHours?.rows.length && <p className="text-sm text-muted-foreground">
+                Данных по автономным Node пока нет.
+              </p>}
+              {autonomousHours?.rows.slice(0, 30).map(row => (
+                <div key={row.node_uuid + row.subscription_uuid + row.bucket_start}
+                  className="space-y-1 border-b pb-2 text-xs">
+                  <p>{autonomousNodes.find(n => n.node_uuid === row.node_uuid)?.display_name ?? row.node_uuid}
+                    {' · '}{new Date(row.bucket_start).toLocaleString('ru-RU')}</p>
+                  <p className="break-all font-mono text-muted-foreground">{row.subscription_uuid}</p>
+                  <p>↑ {BigInt(row.uplink).toLocaleString('ru-RU')} Б ·
+                    {' '}↓ {BigInt(row.downlink).toLocaleString('ru-RU')} Б</p>
+                </div>
+              ))}
+              {(autonomousHours?.rows.length ?? 0) > 30 && (
+                <p className="text-muted-foreground text-xs">Показаны 30 последних записей.</p>
+              )}
+            </CardContent>
+          </Card>
+          <Card><CardHeader><CardTitle>Исторические записи PasarGuard (архив)</CardTitle></CardHeader><CardContent className="space-y-3">
             <label className="text-sm">Показатель
               <select className="ml-2 rounded border bg-background p-2" value={metric} onChange={e => setMetric(e.target.value as Direction)}>
                 <option value="total">Всего</option>
