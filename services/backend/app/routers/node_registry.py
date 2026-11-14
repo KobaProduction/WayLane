@@ -32,7 +32,8 @@ from app.db.models import (
 from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
 from app.node_operations import NodeOperationInput
-from app.node_image_repositories import approved_node_image, trusted_node_repositories
+from app.node_image_repositories import valid_pinned_image
+from app.node_registry_settings import RegistryDefault, RegistryDelete, RegistryUpdate
 from app.node_subscription_desired import (
     MAX_MANAGED_INBOUNDS,
     SUPPORTED_PROTOCOLS,
@@ -154,7 +155,7 @@ class Heartbeat(BaseModel):
     @field_validator("node_image")
     @classmethod
     def known_node_image(cls, value: str | None) -> str | None:
-        if value not in (None, "", "waylane-node-seed:bootstrap") and not approved_node_image(value):
+        if value not in (None, "", "waylane-node-seed:bootstrap") and not valid_pinned_image(value):
             raise ValueError("Node image must be an approved immutable digest")
         return value or None
 
@@ -269,12 +270,40 @@ async def list_registrations(
     return {"nodes": result}
 
 
-@node_registry_router.get("/release-repositories")
-async def list_node_release_repositories(
+@node_registry_router.get("/nodes/{node_uuid}/registries")
+async def list_node_registries(
+    node_uuid: UUID, db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("nodes", "read")),
 ):
-    """Trusted repositories used by the Panel's Node release picker."""
-    return {"repositories": trusted_node_repositories()}
+    from app.node_registry_settings import public_registry_list
+    return await public_registry_list(db, node_uuid)
+
+
+@node_registry_router.put("/nodes/{node_uuid}/registries")
+async def update_node_registry(
+    node_uuid: UUID, body: RegistryUpdate, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    from app.node_registry_settings import save_node_registry
+    return await save_node_registry(db, node_uuid, body)
+
+
+@node_registry_router.put("/nodes/{node_uuid}/registries/default")
+async def set_default_node_registry(
+    node_uuid: UUID, body: RegistryDefault, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    from app.node_registry_settings import select_default_registry
+    return await select_default_registry(db, node_uuid, body)
+
+
+@node_registry_router.delete("/nodes/{node_uuid}/registries")
+async def remove_node_registry(
+    node_uuid: UUID, body: RegistryDelete, db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    from app.node_registry_settings import delete_node_registry
+    return await delete_node_registry(db, node_uuid, body)
 
 
 @node_registry_router.get("/nodes/{node_uuid}/operation")

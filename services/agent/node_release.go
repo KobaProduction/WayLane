@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -53,7 +54,7 @@ func (m *manager) loadOperation() error {
 	}
 	var op nodeReleaseOperation
 	if json.Unmarshal(raw, &op) != nil || op.APIVersion != 1 || !releaseOpID.MatchString(op.OperationID) ||
-		!approvedNodeImage(op.Image) || (op.PreviousImage != nodeSeed && !approvedNodeImage(op.PreviousImage)) ||
+		!m.approvedImage(op.Image) || (op.PreviousImage != nodeSeed && !m.approvedImage(op.PreviousImage)) ||
 		op.Progress < 0 || op.Progress > 100 || op.StartedAt.IsZero() || op.UpdatedAt.IsZero() {
 		return errors.New("invalid persisted Node release operation")
 	}
@@ -116,9 +117,22 @@ func (m *manager) releaseSnapshot() (nodeReleaseOperation, bool) {
 	}
 	return *m.operation, true
 }
-func (m *manager) startRelease(parent context.Context, id, image string) (nodeReleaseOperation, error) {
-	if !releaseOpID.MatchString(id) || !approvedNodeImage(image) {
-		return nodeReleaseOperation{}, errors.New("invalid immutable release request")
+func (m *manager) startRelease(parent context.Context, id, image string, options ...registryPullCredential) (nodeReleaseOperation, error) {
+	credential := registryPullCredential{Repository: ghcrNodeRepository}
+	if len(options) > 1 {
+		return nodeReleaseOperation{}, errors.New("Too many registry options")
+	}
+	if len(options) == 1 {
+		credential = options[0]
+	}
+	if credential.Repository == "" && imageRepository(image) == ghcrNodeRepository {
+		credential.Repository = ghcrNodeRepository
+	}
+	if !releaseOpID.MatchString(id) || imageRepository(image) == "" ||
+		imageRepository(image) != credential.Repository || (credential.Username == "") != (credential.Password == "") ||
+		len(credential.Username) > 128 || len(credential.Password) > 1024 ||
+		strings.ContainsAny(credential.Username, "\r\n\x00") || strings.ContainsAny(credential.Password, "\r\n\x00") {
+		return nodeReleaseOperation{}, errors.New("Invalid immutable release or registry credentials")
 	}
 	m.mu.Lock()
 	if m.operation != nil {
@@ -135,6 +149,10 @@ func (m *manager) startRelease(parent context.Context, id, image string) (nodeRe
 			return nodeReleaseOperation{}, errors.New("another Node update is in progress")
 		}
 	}
+	if err := m.trustRegistry(credential.Repository); err != nil {
+		m.mu.Unlock()
+		return nodeReleaseOperation{}, err
+	}
 	now := time.Now().UTC()
 	op := nodeReleaseOperation{APIVersion: 1, OperationID: id, Image: image, PreviousImage: m.image,
 		Status: "queued", Phase: "queued", Progress: 0, StartedAt: now, UpdatedAt: now}
@@ -148,17 +166,27 @@ func (m *manager) startRelease(parent context.Context, id, image string) (nodeRe
 		return nodeReleaseOperation{}, err
 	}
 	m.mu.Unlock()
-	go m.executeRelease(parent, op)
+	go m.executeRelease(parent, op, credential)
 	return op, nil
 }
-func (m *manager) executeRelease(parent context.Context, job nodeReleaseOperation) {
+func (m *manager) executeRelease(parent context.Context, job nodeReleaseOperation, credential registryPullCredential) {
 	ctx, cancel := context.WithTimeout(parent, releaseTimeout)
 	defer cancel()
 	if err := m.setOperation("running", "pulling", 10, ""); err != nil {
 		return
 	}
 	// No interruption to the existing Node until the immutable image is pulled.
-	if err := m.stageImage(ctx, job.Image); err != nil {
+	var pullErr error
+	if credential.Username != "" {
+		pull := m.authenticatedPull
+		if pull == nil {
+			pull = pullNodeWithPrivateCredentials
+		}
+		pullErr = pull(ctx, job.Image, credential)
+	} else {
+		pullErr = m.stageImage(ctx, job.Image)
+	}
+	if pullErr != nil {
 		_ = m.setOperation("failed", "pulling", 100, "image_unavailable")
 		return
 	}
@@ -315,14 +343,19 @@ func (m *manager) registerReleaseRoutes(mux *http.ServeMux, ctx context.Context)
 			APIVersion  int    `json:"api_version"`
 			OperationID string `json:"operation_id"`
 			Image       string `json:"image"`
+			Repository  string `json:"repository"`
+			Username    string `json:"username"`
+			Password    string `json:"password"`
 		}
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&cmd); err != nil || cmd.APIVersion != 1 || !releaseOpID.MatchString(cmd.OperationID) || !approvedNodeImage(cmd.Image) {
+		if err := dec.Decode(&cmd); err != nil || cmd.APIVersion != 1 || !releaseOpID.MatchString(cmd.OperationID) || imageRepository(cmd.Image) == "" {
 			http.Error(w, "invalid pinned release", 400)
 			return
 		}
-		op, err := m.startRelease(ctx, cmd.OperationID, cmd.Image)
+		op, err := m.startRelease(ctx, cmd.OperationID, cmd.Image, registryPullCredential{
+			Repository: cmd.Repository, Username: cmd.Username, Password: cmd.Password,
+		})
 		if err != nil {
 			http.Error(w, "release conflict or private state unavailable", 409)
 			return

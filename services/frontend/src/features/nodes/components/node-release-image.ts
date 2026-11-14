@@ -1,9 +1,9 @@
 /** A trusted, operator-configured OCI repository and an immutable digest. */
 export const OFFICIAL_NODE_REPOSITORY = 'ghcr.io/kobaproduction/waylane-node'
 
-export function withNodeReleaseRepository(repository: string, previousImage: string): string {
-  const digest = previousImage.split('@sha256:')[1] ?? ''
-  return `${repository}@sha256:${digest}`
+export function withNodeReleaseRepository(repository: string): string {
+  // Each registry has its OWN immutable digest; do not transplant a GHCR digest.
+  return `${repository}@sha256:`
 }
 
 export function approvedNodeReleaseImage(image: string, repositories: string[]): boolean {

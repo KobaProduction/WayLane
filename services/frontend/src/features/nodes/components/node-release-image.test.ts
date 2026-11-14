@@ -4,10 +4,10 @@ import { OFFICIAL_NODE_REPOSITORY, approvedNodeReleaseImage, withNodeReleaseRepo
 const second = 'registry.example.com:5000/waylane/node'
 const digest = 'a'.repeat(64)
 
-test('selects the original GHCR or a configured OCI registry using the same digest', () => {
+test('clears digest when switching from GHCR to a separately configured OCI registry', () => {
   const ghcr = `${OFFICIAL_NODE_REPOSITORY}@sha256:${digest}`
-  const custom = withNodeReleaseRepository(second, ghcr)
-  expect(custom).toBe(`${second}@sha256:${digest}`)
+  const custom = `${second}@sha256:${digest}`
+  expect(withNodeReleaseRepository(second)).toBe(`${second}@sha256:`)
   expect(approvedNodeReleaseImage(ghcr, [OFFICIAL_NODE_REPOSITORY, second])).toBe(true)
   expect(approvedNodeReleaseImage(custom, [OFFICIAL_NODE_REPOSITORY, second])).toBe(true)
   expect(approvedNodeReleaseImage(custom, [OFFICIAL_NODE_REPOSITORY])).toBe(false)

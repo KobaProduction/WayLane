@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -87,12 +88,24 @@ func readAgentRelease(ctx context.Context) (agentReleaseStatus, error) {
 	result, _, err := agentReleaseRequest(ctx, http.MethodGet, "/v1/node/release", nil)
 	return result, err
 }
-func submitAgentRelease(ctx context.Context, id, image string) (agentReleaseStatus, error) {
-	if !releaseOperationUUID.MatchString(id) || !approvedNodeImage(image) {
-		return agentReleaseStatus{}, errors.New("invalid pinned Agent release request")
+func submitAgentRelease(ctx context.Context, id, image string, options ...registryPullCredential) (agentReleaseStatus, error) {
+	credential := registryPullCredential{Repository: ghcrNodeRepository}
+	if len(options) > 1 {
+		return agentReleaseStatus{}, errors.New("Too many registry options")
+	}
+	if len(options) == 1 {
+		credential = options[0]
+	}
+	if !releaseOperationUUID.MatchString(id) || imageRepository(image) == "" ||
+		imageRepository(image) != credential.Repository ||
+		(credential.Username == "") != (credential.Password == "") ||
+		len(credential.Username) > 128 || len(credential.Password) > 1024 ||
+		strings.ContainsAny(credential.Username, "\r\n\x00") || strings.ContainsAny(credential.Password, "\r\n\x00") {
+		return agentReleaseStatus{}, errors.New("Invalid pinned Agent release request")
 	}
 	response, _, err := agentReleaseRequest(ctx, http.MethodPut, "/v1/node/release", map[string]any{
 		"api_version": 1, "operation_id": id, "image": image,
+		"repository": credential.Repository, "username": credential.Username, "password": credential.Password,
 	})
 	return response, err
 }
@@ -113,7 +126,7 @@ func agentReleaseTelemetry(ctx context.Context) (map[string]any, error) {
 	if !releaseOperationUUID.MatchString(status.OperationID) {
 		return nil, nil
 	}
-	if status.Progress < 0 || status.Progress > 100 || !approvedNodeImage(status.Image) {
+	if status.Progress < 0 || status.Progress > 100 || imageRepository(status.Image) == "" {
 		return nil, errors.New("invalid Agent release status")
 	}
 	return map[string]any{
@@ -150,7 +163,7 @@ func readCurrentAgentNodeImage(ctx context.Context) string {
 	if json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&doc) != nil || doc.APIVersion != 1 {
 		return ""
 	}
-	if doc.Image == "waylane-node-seed:bootstrap" || approvedNodeImage(doc.Image) {
+	if doc.Image == "waylane-node-seed:bootstrap" || imageRepository(doc.Image) != "" {
 		return doc.Image
 	}
 	return ""

@@ -1,51 +1,65 @@
 package main
 
-// Restrict updates to operator-approved OCI image repositories and immutable
-// digests. A custom repository never disables the pinned official GHCR source.
-// The Backend mirrors these rules before issuing an authenticated WSS action.
+// Node only forwards immutable image selections from authenticated Backend WSS.
 import (
-	"errors"
-	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 const ghcrNodeRepository = "ghcr.io/kobaproduction/waylane-node"
-const extraNodeRepositoryEnv = "WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY"
 
 var nodeImageSuffix = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var nodeRepositoryHost = regexp.MustCompile(`^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[1-9][0-9]{1,4})?$`)
 var nodeRepositoryComponent = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
 
-func extraNodeRepository() (string, error) {
-	repo := strings.TrimSpace(os.Getenv(extraNodeRepositoryEnv))
-	if repo == "" {
-		return "", nil
-	}
-	if len(repo) > 55 || strings.Contains(repo, "@") || strings.Contains(repo, "://") {
-		return "", errors.New("invalid extra Node OCI repository (max 55 bytes)")
+func validNodeRepository(repo string) bool {
+	if repo == "" || len(repo) > 55 || strings.Contains(repo, "@") || strings.Contains(repo, "://") {
+		return false
 	}
 	parts := strings.Split(repo, "/")
-	if len(parts) < 2 || !nodeRepositoryHost.MatchString(parts[0]) ||
-		(!strings.ContainsAny(parts[0], ".:")) {
-		return "", errors.New("invalid extra Node OCI repository host")
+	if len(parts) < 2 || !nodeRepositoryHost.MatchString(parts[0]) || !strings.ContainsAny(parts[0], ".:") {
+		return false
+	}
+	if strings.Contains(parts[0], ":") {
+		port := strings.Split(parts[0], ":")[1]
+		if n, err := strconv.Atoi(port); err != nil || n > 65535 {
+			return false
+		}
 	}
 	for _, part := range parts[1:] {
 		if !nodeRepositoryComponent.MatchString(part) {
-			return "", errors.New("invalid extra Node OCI repository path")
+			return false
 		}
 	}
-	return repo, nil
+	return true
 }
-
-func approvedNodeImage(image string) bool {
-	repo, digest, found := strings.Cut(image, "@")
-	if !found || len(image) > 128 || !nodeImageSuffix.MatchString(digest) {
-		return false
+func imageRepository(image string) string {
+	if len(image) > 128 {
+		return ""
 	}
+	repo, digest, found := strings.Cut(image, "@")
+	if found && validNodeRepository(repo) && nodeImageSuffix.MatchString(digest) {
+		return repo
+	}
+	return ""
+}
+func approvedNodeImage(image string) bool { return imageRepository(image) == ghcrNodeRepository }
+func approvedNodeImageWithSources(image string, additional []string) bool {
+	repo := imageRepository(image)
 	if repo == ghcrNodeRepository {
 		return true
 	}
-	extra, err := extraNodeRepository()
-	return err == nil && extra != "" && repo == extra
+	for _, allowed := range additional {
+		if allowed == repo && repo != "" {
+			return true
+		}
+	}
+	return false
+}
+
+type registryPullCredential struct {
+	Repository string `json:"repository"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
 }

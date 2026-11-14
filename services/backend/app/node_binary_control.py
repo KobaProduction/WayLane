@@ -333,14 +333,25 @@ class AgentBinarySession:
                     and ("node.release.v1" if operation["action"] == "update"
                          else "node.reconnect.v1") in self._session_capabilities
                     and not (operation["action"] == "reconnect" and operation["status"] == "running")):
-                await self.outgoing.put(new_message(
-                    "node_action", self.node_uuid, core_id="node/runtime",
-                    generation=operation["generation"], operation=operation["action"],
-                    payload={"operation_id": operation["operation_id"],
-                             "action": operation["action"], "image": operation["image"] or ""},
-                ))
-                self._last_sent_operation_generation = operation["generation"]
-                self._last_sent_operation_at = time.monotonic()
+                credential = {}
+                if operation["action"] == "update":
+                    from app.node_registry_settings import transport_registry
+                    try:
+                        credential = await transport_registry(db, self.node_uuid, operation["image"])
+                    except ValueError:
+                        # This saved per-Node repository is no longer approved;
+                        # never send a partially authorized pull target.
+                        credential = None
+                if credential is not None:
+                    await self.outgoing.put(new_message(
+                        "node_action", self.node_uuid, core_id="node/runtime",
+                        generation=operation["generation"], operation=operation["action"],
+                        payload={"operation_id": operation["operation_id"],
+                                 "action": operation["action"], "image": operation["image"] or "",
+                                 **credential},
+                    ))
+                    self._last_sent_operation_generation = operation["generation"]
+                    self._last_sent_operation_at = time.monotonic()
 
             # AWG is independent from Xray and sent only to an approved Node
             # that has explicitly advertised an accepted AWG capability.

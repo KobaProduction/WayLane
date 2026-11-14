@@ -751,6 +751,7 @@ node_agent_registrations = Table(
     Column("status", String(16), nullable=False),
     Column("agent_version", String(32), nullable=False),
     Column("node_image", String(128), nullable=True),
+    Column("preferred_registry_repository", String(55), nullable=True),
     Column("observed_ip", String(45)),
     Column("reported_ipv4", String(45)),
     Column("reported_ipv6", String(45)),
@@ -780,6 +781,19 @@ node_agent_xray_desired = Table(
     Column("last_error", String(300), nullable=True),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("reported_at", DateTime(timezone=True), nullable=True),
+)
+
+
+# Per-Node registry configuration, managed in the Panel and encrypted at rest.
+# Only sanitized metadata is returned to the browser.
+node_agent_registry_settings = Table(
+    "node_agent_registry_settings",
+    Base.metadata,
+    Column("node_uuid", String(36), ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    Column("repository", String(55), primary_key=True),
+    Column("username", String(128), nullable=True),
+    Column("encrypted_password", Text(), nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 

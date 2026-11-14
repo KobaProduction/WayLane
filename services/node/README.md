@@ -93,8 +93,9 @@ acceptance. Never expose the private StatsService port to the public network.
 
 ### Explicit Node image releases and reconnect (independent of Agent and Cores)
 
-Only the operator selects an approved immutable Node digest from GHCR or the
-operator-configured additional OCI registry through Node Registry. Backend queues an independent `node_action` generation on the
+The operator selects an immutable Node digest from official GHCR or a registry
+saved **on this Node's Panel record**. Each Node may have different custom
+repositories and credentials; these do not come from deployment ENV. Backend queues an independent `node_action` generation on the
 single authenticated Protobuf WSS. The running Node sends an idempotent
 private Unix request to the stable Agent and reports sanitized progress over
 that same WSS. When the old Node is replaced its WSS will disconnect; the new

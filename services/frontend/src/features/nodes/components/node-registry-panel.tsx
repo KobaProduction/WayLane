@@ -101,6 +101,16 @@ type NodeReleaseOperation = {
   updated_at?: string | null
 }
 
+type NodeRegistryProfile = {
+  repository: string
+  username: string
+  has_credentials: boolean
+  official: boolean
+  is_default: boolean
+}
+
+type RegistryDraft = { repository: string; username: string; password: string }
+
 type Registration = {
   node_uuid: string
   connection_mode: 'classic' | 'discovery'
@@ -133,7 +143,9 @@ export default function NodeDiscoveryPanel() {
   const [nameEditors, setNameEditors] = useState<Record<string, string>>({})
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null)
   const [releaseTargets, setReleaseTargets] = useState<Record<string, string>>({})
-  const [releaseRepositories, setReleaseRepositories] = useState<string[]>([OFFICIAL_NODE_REPOSITORY])
+  const [registryProfiles, setRegistryProfiles] = useState<Record<string, NodeRegistryProfile[]>>({})
+  const [registryDraft, setRegistryDraft] = useState<RegistryDraft>({ repository: '', username: '', password: '' })
+  const [registryBusy, setRegistryBusy] = useState(false)
   const [releaseStates, setReleaseStates] = useState<Record<string, NodeReleaseOperation>>({})
   const [releaseBusy, setReleaseBusy] = useState(false)
   const [renameBusy, setRenameBusy] = useState<string | null>(null)
@@ -189,7 +201,8 @@ export default function NodeDiscoveryPanel() {
   const requestNodeLifecycle = async (uuid: string, action: 'update' | 'reconnect') => {
     if (!canApprove || releaseBusy) return
     const image = releaseTargets[uuid]?.trim() ?? ''
-    if (action === 'update' && !approvedNodeReleaseImage(image, releaseRepositories)) {
+    if (action === 'update' && !approvedNodeReleaseImage(image,
+      (registryProfiles[uuid] ?? [{ repository: OFFICIAL_NODE_REPOSITORY }]).map(profile => profile.repository))) {
       toast.error('Укажите точный digest образа из разрешённого GHCR или собственного Registry')
       return
     }
@@ -213,6 +226,68 @@ export default function NodeDiscoveryPanel() {
       toast.error(error instanceof Error ? error.message : 'Не удалось запустить жизненный цикл Node')
       await loadNodeLifecycle(uuid)
     } finally { setReleaseBusy(false) }
+  }
+
+  const loadNodeRegistries = async (uuid: string) => {
+    try {
+      const result = await $fetch<{ registries: NodeRegistryProfile[]; default_repository: string }>(
+        '/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/registries')
+      setRegistryProfiles(previous => ({ ...previous, [uuid]: result.registries }))
+      setReleaseTargets(previous => previous[uuid] ? previous : {
+        ...previous, [uuid]: withNodeReleaseRepository(result.default_repository),
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить Registry этой Node')
+    }
+  }
+
+  const saveNodeRegistry = async (uuid: string, draft: RegistryDraft) => {
+    if (!canApprove || registryBusy || !draft.repository.trim()) return
+    setRegistryBusy(true)
+    try {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/registries', {
+        method: 'PUT', body: {
+          repository: draft.repository.trim(), username: draft.username.trim(),
+          ...(draft.password ? { password: draft.password } : {}),
+        },
+      })
+      setRegistryDraft({ repository: '', username: '', password: '' })
+      await loadNodeRegistries(uuid)
+      toast.success('Registry сохранён для выбранной Node')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось сохранить Registry')
+    } finally { setRegistryBusy(false) }
+  }
+
+  const setDefaultNodeRegistry = async (uuid: string, repository: string) => {
+    if (!canApprove || registryBusy) return
+    setRegistryBusy(true)
+    try {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/registries/default', {
+        method: 'PUT', body: { repository },
+      })
+      setReleaseTargets(previous => ({ ...previous, [uuid]: withNodeReleaseRepository(repository) }))
+      await loadNodeRegistries(uuid)
+      toast.success('Registry выбран по умолчанию для этой Node')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось выбрать основной Registry')
+    } finally { setRegistryBusy(false) }
+  }
+
+  const deleteNodeRegistry = async (uuid: string, repository: string) => {
+    if (!canApprove || registryBusy || !window.confirm('Удалить настройки этого Registry для выбранной Node?')) return
+    setRegistryBusy(true)
+    try {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/registries', {
+        method: 'DELETE', body: { repository },
+      })
+      await loadNodeRegistries(uuid)
+      setReleaseTargets(previous => (previous[uuid] ?? '').startsWith(repository + '@sha256:')
+        ? { ...previous, [uuid]: withNodeReleaseRepository(OFFICIAL_NODE_REPOSITORY) } : previous)
+      toast.success('Настройки Registry удалены для этой Node')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось удалить Registry')
+    } finally { setRegistryBusy(false) }
   }
 
   const activeReleaseStatus = releaseTarget ? releaseStates[releaseTarget]?.status : undefined
@@ -243,9 +318,6 @@ export default function NodeDiscoveryPanel() {
 
   useEffect(() => {
     if (!canRead) return
-    void $fetch<{ repositories: string[] }>('/api/node-registry/release-repositories')
-      .then(result => setReleaseRepositories(result.repositories))
-      .catch(() => toast.error('Не удалось загрузить разрешённые Registry для Node'))
     void refresh()
     // Discovery is a live node registry. Keep it fresh while this view exists.
     const timer = window.setInterval(() => {
@@ -699,13 +771,17 @@ export default function NodeDiscoveryPanel() {
                 <p className="text-muted-foreground break-all font-mono text-xs">
                   Вложенная Node: {node.node_image ?? 'образ ещё не подтверждён'} · стабильный Agent API v1
                 </p>
-                {canApprove && node.status === 'approved' && (
+                {canApprove && node.status !== 'revoked' && (
                   <div className="mt-2 space-y-2 rounded-md border p-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button type="button" size="sm" variant="outline"
                         onClick={() => {
                           setReleaseTarget(releaseTarget === node.node_uuid ? null : node.node_uuid)
                           void loadNodeLifecycle(node.node_uuid)
+                          if (releaseTarget !== node.node_uuid) {
+                            setRegistryDraft({ repository: '', username: '', password: '' })
+                            void loadNodeRegistries(node.node_uuid)
+                          }
                         }}>
                         {releaseTarget === node.node_uuid ? 'Скрыть обновления Node' : 'Версия / обновление / WSS'}
                       </Button>
@@ -720,16 +796,65 @@ export default function NodeDiscoveryPanel() {
                           из разрешённого реестра. Новый контейнер должен подтвердить WSS; если этого не
                           произойдёт, Agent попытается восстановить предыдущую версию. Обновление Xray отдельно.
                         </p>
+                        <div className="space-y-2 rounded-md border p-3">
+                          <p className="text-sm font-medium">Registry этой Node</p>
+                          <p className="text-muted-foreground text-xs">
+                            Настройки сохраняются отдельно для каждой Node. Пароль шифруется на сервере и никогда не возвращается в панель.
+                            Для приватного GHCR также можно указать учётные данные.
+                          </p>
+                          {(registryProfiles[node.node_uuid] ?? [{ repository: OFFICIAL_NODE_REPOSITORY,
+                            username: '', has_credentials: false, official: true, is_default: true }]).map(profile => (
+                            <div key={profile.repository} className="flex flex-wrap items-center gap-2 rounded border p-2 text-xs">
+                              <span className="min-w-0 flex-1 break-all font-mono">{profile.repository}</span>
+                              <span>{profile.has_credentials ? 'Авторизация настроена' : 'Без авторизации'}</span>
+                              {profile.is_default && <Badge variant="secondary">Основной</Badge>}
+                              {canApprove && !profile.is_default && <Button size="sm" type="button" variant="outline"
+                                disabled={registryBusy} onClick={() => void setDefaultNodeRegistry(node.node_uuid, profile.repository)}>
+                                Сделать основным
+                              </Button>}
+                              {canApprove && <Button size="sm" type="button" variant="outline"
+                                onClick={() => setRegistryDraft({ repository: profile.repository,
+                                  username: profile.username, password: '' })}>Изменить</Button>}
+                              {canApprove && (!profile.official || profile.has_credentials) && <Button size="sm" type="button"
+                                variant="ghost" disabled={registryBusy}
+                                onClick={() => void deleteNodeRegistry(node.node_uuid, profile.repository)}>
+                                {profile.official ? 'Сбросить доступ' : 'Удалить'}
+                              </Button>}
+                            </div>
+                          ))}
+                          {canApprove && <div className="space-y-2">
+                            <Input aria-label="Репозиторий Registry этой Node" placeholder="registry.example.com/waylane/node"
+                              value={registryDraft.repository} maxLength={55}
+                              onChange={event => setRegistryDraft(previous => ({ ...previous, repository: event.target.value }))} />
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <Input aria-label="Логин Registry этой Node" placeholder="Логин (необязательно)"
+                                value={registryDraft.username} maxLength={128} autoComplete="off"
+                                onChange={event => setRegistryDraft(previous => ({ ...previous, username: event.target.value }))} />
+                              <Input aria-label="Пароль Registry этой Node" placeholder="Пароль (пусто — оставить текущий)"
+                                type="password" autoComplete="new-password" value={registryDraft.password} maxLength={1024}
+                                onChange={event => setRegistryDraft(previous => ({ ...previous, password: event.target.value }))} />
+                            </div>
+                            <Button type="button" size="sm" disabled={registryBusy || !registryDraft.repository.trim()}
+                              onClick={() => void saveNodeRegistry(node.node_uuid, registryDraft)}>
+                              Сохранить Registry для этой Node
+                            </Button>
+                          </div>}
+                        </div>
                         <select aria-label="Registry для обновления Node"
                           className="border-input bg-background min-h-9 w-full rounded-md border px-3 py-1 text-sm"
-                          value={releaseRepositories.find(repo => (releaseTargets[node.node_uuid] ?? '').startsWith(repo + '@sha256:')) ?? OFFICIAL_NODE_REPOSITORY}
+                          value={(registryProfiles[node.node_uuid] ?? [{ repository: OFFICIAL_NODE_REPOSITORY, is_default: true }])
+                            .find(profile => (releaseTargets[node.node_uuid] ?? '').startsWith(profile.repository + '@sha256:'))?.repository
+                            ?? (registryProfiles[node.node_uuid]?.find(profile => profile.is_default)?.repository ?? OFFICIAL_NODE_REPOSITORY)}
                           onChange={event => setReleaseTargets(previous => ({ ...previous,
-                            [node.node_uuid]: withNodeReleaseRepository(event.target.value, previous[node.node_uuid] ?? ''),
+                            [node.node_uuid]: withNodeReleaseRepository(event.target.value),
                           }))}>
-                          {releaseRepositories.map(repository => <option key={repository} value={repository}>
-                            {repository === OFFICIAL_NODE_REPOSITORY ? 'GitHub Container Registry (GHCR)' : 'Собственный Registry'} — {repository}
-                          </option>)}
+                          {(registryProfiles[node.node_uuid] ?? [{ repository: OFFICIAL_NODE_REPOSITORY }]).map(profile => (
+                            <option key={profile.repository} value={profile.repository}>
+                              {profile.repository === OFFICIAL_NODE_REPOSITORY ? 'GitHub Container Registry (GHCR)' : 'Собственный Registry'} — {profile.repository}
+                            </option>
+                          ))}
                         </select>
+                        <p className="text-muted-foreground text-xs">У каждого Registry может быть свой SHA-256 digest. Вставьте digest выбранного образа.</p>
                         <Input aria-label="Новый digest Node" className="font-mono text-xs"
                           placeholder={OFFICIAL_NODE_REPOSITORY + '@sha256:...'}
                           value={releaseTargets[node.node_uuid] ?? ''}

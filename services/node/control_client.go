@@ -220,7 +220,7 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 				status, _ = readAgentRelease(check)
 			}
 		}
-		if status.OperationID == "" || !approvedNodeImage(status.Image) {
+		if status.OperationID == "" || imageRepository(status.Image) == "" {
 			return nil
 		}
 		payload := map[string]any{
@@ -326,6 +326,9 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 				OperationID string `json:"operation_id"`
 				Action      string `json:"action"`
 				Image       string `json:"image"`
+				Repository  string `json:"repository"`
+				Username    string `json:"username"`
+				Password    string `json:"password"`
 			}
 			raw, marshalErr := json.Marshal(reply.Payload.AsMap())
 			if marshalErr != nil || json.Unmarshal(raw, &input) != nil || !releaseOperationUUID.MatchString(input.OperationID) {
@@ -339,11 +342,13 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 				}
 				return errors.New("operator-requested WSS reconnect")
 			}
-			if input.Action != "update" || !approvedNodeImage(input.Image) {
+			if input.Action != "update" || imageRepository(input.Image) == "" {
 				return errors.New("invalid immutable Node update target")
 			}
 			jobCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
-			job, updateErr := submitAgentRelease(jobCtx, input.OperationID, input.Image)
+			job, updateErr := submitAgentRelease(jobCtx, input.OperationID, input.Image, registryPullCredential{
+				Repository: input.Repository, Username: input.Username, Password: input.Password,
+			})
 			if updateErr != nil {
 				// The requester may die after Agent accepted the operation.
 				// Probe the durable Agent journal before classifying a lost HTTP

@@ -32,8 +32,8 @@ networking is separately subject to platform settings.
 
 Builds and releases are independent: Agent release tags use agent-v* and Node
 release tags use node-v*. The first install bundles a seed Node binary from
-the monorepo; later a Node digest from the approved GHCR repository or
-one additional operator-configured OCI repository may be applied without
+the monorepo; later a Node digest from the built-in GHCR or any OCI repository
+approved **for that individual Node in the Panel** may be applied without
 changing the Agent. The authenticated operator Node Registry queues
 updates through the existing binary WSS; Agent's private Unix API remains
 the only Docker lifecycle owner.
@@ -109,3 +109,15 @@ remains a separate rare operator-controlled operation.
 Unexpected Node/Core process crashes now have a bounded three-retry restart
 policy instead of indefinitely looping on a broken release; the existing
 healthcheck and user-visible operation state distinguish runtime failures.
+
+### Per-Node Registry credentials
+
+Registry configuration is edited under the Node's record in the Panel, not
+with global Compose/Coolify variables. Backend stores encrypted credentials
+for each Node UUID and sends them only over authenticated binary WSS when
+an operator queues a matching immutable release. Agent validates the exact
+repository, persists only a private 0600 non-secret list of previously used
+image repositories and runs one authenticated Docker pull using a temporary
+`/tmp` (tmpfs) CLI configuration with `--password-stdin`. Pull credentials
+never enter Agent's persistent image/release journal, Node env or Docker argv.
+No new public management listener or rootful Docker socket is introduced.

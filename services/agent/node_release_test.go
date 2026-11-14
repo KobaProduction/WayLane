@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,17 +212,82 @@ func TestAgentFailedJournalWritePreservesPreviousTerminalOperation(t *testing.T)
 
 func TestCustomNodeReleaseRetainsTrustedSelectionAndRejectsRevocation(t *testing.T) {
 	custom := "registry.example.com:5000/waylane/node@sha256:" + strings.Repeat("a", 64)
-	t.Setenv(extraNodeRepositoryEnv, "registry.example.com:5000/waylane/node")
 	m := &manager{stateDir: t.TempDir()}
+	if err := m.trustRegistry("registry.example.com:5000/waylane/node"); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.saveRelease(custom); err != nil {
 		t.Fatal(err)
 	}
 	restored := &manager{stateDir: m.stateDir}
+	if err := restored.loadRegistryRepositories(); err != nil {
+		t.Fatal(err)
+	}
 	if err := restored.loadRelease(); err != nil || restored.image != custom {
 		t.Fatalf("trusted persisted OCI image was not restored: %v", err)
 	}
-	t.Setenv(extraNodeRepositoryEnv, "")
 	if err := (&manager{stateDir: m.stateDir}).loadRelease(); err == nil {
 		t.Fatal("removed custom OCI repository left previously pinned image trusted")
+	}
+}
+
+func TestAgentOneTimeAuthenticatedCustomPullNeverPersistsPassword(t *testing.T) {
+	custom := "registry.example.com:5000/waylane/node@sha256:" + strings.Repeat("a", 64)
+	credential := registryPullCredential{Repository: "registry.example.com:5000/waylane/node", Username: "reader", Password: "synthetic-secret-never-persist"}
+	fake := &fakeDocker{exists: true, owned: true, running: true, image: nodeSeed}
+	pullCount := 0
+	m := &manager{run: fake.Run, stateDir: t.TempDir(), image: nodeSeed, panelURL: "https://panel.invalid"}
+	m.authenticatedPull = func(_ context.Context, image string, input registryPullCredential) error {
+		pullCount++
+		if image != custom || input != credential {
+			return errors.New("wrong private pull payload")
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	job, err := m.startRelease(ctx, "0192b532-184f-41bc-9952-78e15b14cc57", custom, credential)
+	if err != nil || job.Status != "queued" {
+		t.Fatalf("custom release: %+v %v", job, err)
+	}
+	_ = awaitRelease(t, m, "awaiting_wss")
+	if err := m.completeReleaseReady(ctx, job.OperationID); err != nil {
+		t.Fatal(err)
+	}
+	_ = awaitRelease(t, m, "succeeded")
+	if pullCount != 1 || !m.approvedImage(custom) {
+		t.Fatal("one-time custom pull missing")
+	}
+	for _, path := range []string{m.operationPath(), m.releasePath(), m.registryPath()} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), credential.Password) || strings.Contains(string(content), credential.Username) {
+			t.Fatal("credential leaked to persistent Agent journal")
+		}
+	}
+	next := &manager{stateDir: m.stateDir}
+	if err := next.loadRegistryRepositories(); err != nil {
+		t.Fatal(err)
+	}
+	if err := next.loadRelease(); err != nil || next.image != custom {
+		t.Fatalf("custom release not recoverable: %v", err)
+	}
+}
+
+func TestAgentRejectsIncompleteRegistryAuthenticationBeforeCutover(t *testing.T) {
+	custom := "registry.example.com:5000/waylane/node@sha256:" + strings.Repeat("a", 64)
+	fake := &fakeDocker{exists: true, owned: true, running: true, image: nodeSeed}
+	m := &manager{run: fake.Run, stateDir: t.TempDir(), image: nodeSeed}
+	bad := registryPullCredential{Repository: "registry.example.com:5000/waylane/node", Username: "reader"}
+	if _, err := m.startRelease(context.Background(), "0192b532-184f-41bc-9952-78e15b14cc57", custom, bad); err == nil {
+		t.Fatal("incomplete registry credentials accepted")
+	}
+	if fake.has("stop") || fake.has("pull") {
+		t.Fatal("failed validation touched private daemon")
+	}
+	if _, err := os.Stat(m.registryPath()); !os.IsNotExist(err) {
+		t.Fatal("invalid registry persisted")
 	}
 }

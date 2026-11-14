@@ -11,12 +11,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import node_binary_control as control
 from app.db.base import Base
-from app.db.models import node_agent_operations, node_agent_registrations
-from app.node_image_repositories import (
-    GHCR_NODE_REPOSITORY,
-    approved_node_image,
-    trusted_node_repositories,
-    valid_repository,
+from app.db.models import node_agent_operations, node_agent_registrations, node_agent_registry_settings
+from app.node_image_repositories import GHCR_NODE_REPOSITORY, valid_repository, valid_pinned_image
+from app.node_registry_settings import (
+    RegistryUpdate, RegistryDelete, save_node_registry, delete_node_registry,
+    public_registry_list, transport_registry,
 )
 from app.node_operations import (
     NodeOperationInput,
@@ -26,7 +25,6 @@ from app.node_operations import (
 from app.routers.node_registry import (
     Heartbeat,
     create_classic_node,
-    list_node_release_repositories,
     get_node_lifecycle_operation,
     trigger_node_lifecycle_operation,
 )
@@ -39,7 +37,8 @@ def test_node_operator_release_and_rollback_status_over_binary_wss(tmp_path, mon
     image = IMAGE
     if use_custom_registry:
         image = "registry.example.com:5000/waylane/node@sha256:" + "b" * 64
-        monkeypatch.setenv("WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY", "registry.example.com:5000/waylane/node")
+        from cryptography.fernet import Fernet
+        monkeypatch.setenv("WAYLANE_TLS_SECRET_KEY", Fernet.generate_key().decode())
     async def run():
         engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/operation.db")
         async with engine.begin() as conn:
@@ -50,6 +49,10 @@ def test_node_operator_release_and_rollback_status_over_binary_wss(tmp_path, mon
             async with factory() as db:
                 node = await create_classic_node(db=db, _=object())
                 uid = UUID(node["node_uuid"])
+                if use_custom_registry:
+                    await save_node_registry(db, uid, RegistryUpdate(
+                        repository="registry.example.com:5000/waylane/node",
+                        username="qa-reader", password="synthetic-password"))
                 await db.execute(update(node_agent_registrations).where(
                     node_agent_registrations.c.node_uuid == str(uid)
                 ).values(last_seen_at=datetime.now(UTC),
@@ -79,6 +82,10 @@ def test_node_operator_release_and_rollback_status_over_binary_wss(tmp_path, mon
                 assert frame.kind == "node_action"
                 assert frame.operation == "update" and frame.core_id == "node/runtime"
                 assert frame.payload.fields["image"].string_value == image
+                if use_custom_registry:
+                    assert frame.payload.fields["repository"].string_value == "registry.example.com:5000/waylane/node"
+                    assert frame.payload.fields["username"].string_value == "qa-reader"
+                    assert frame.payload.fields["password"].string_value == "synthetic-password"
                 operation = queued["operation_id"]
                 await session.receive(control.new_message("node_action_report", str(uid), core_id="node/runtime",
                     generation=1, payload={"operation_id":operation,"image":image,"previous_image":"waylane-node-seed:bootstrap",
@@ -191,47 +198,95 @@ def test_stale_release_expiration_unblocks_explicit_operator_retry(tmp_path):
     asyncio.run(run())
 
 
+
 CUSTOM_REPO = "registry.example.com:5000/waylane/node"
 CUSTOM_IMAGE = CUSTOM_REPO + "@sha256:" + "b" * 64
 
 
-def test_two_trusted_node_repositories_and_immutable_control_images(monkeypatch):
-    monkeypatch.delenv("WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY", raising=False)
-    assert trusted_node_repositories() == [GHCR_NODE_REPOSITORY]
-    assert approved_node_image(IMAGE)
-    assert not approved_node_image(CUSTOM_IMAGE)
-    with pytest.raises(ValidationError):
-        NodeOperationInput(action="update", image=CUSTOM_IMAGE, expected_generation=0)
+def test_node_scoped_registry_crud_and_encrypted_credentials(tmp_path, monkeypatch):
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("WAYLANE_TLS_SECRET_KEY", Fernet.generate_key().decode())
 
-    monkeypatch.setenv("WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY", CUSTOM_REPO)
-    assert trusted_node_repositories() == [GHCR_NODE_REPOSITORY, CUSTOM_REPO]
-    assert asyncio.run(list_node_release_repositories(_=object())) == {
-        "repositories": [GHCR_NODE_REPOSITORY, CUSTOM_REPO],
-    }
-    assert NodeOperationInput(action="update", image=CUSTOM_IMAGE, expected_generation=0).image == CUSTOM_IMAGE
-    assert NodeOperationReport(operation_id=uuid4(), image=CUSTOM_IMAGE,
-                               previous_image=IMAGE, status="running",
-                               phase="awaiting_wss", progress=85).image == CUSTOM_IMAGE
-    assert Heartbeat(node_uuid=uuid4(), node_version="0.1.0", node_image=CUSTOM_IMAGE).node_image == CUSTOM_IMAGE
-    assert approved_node_image(IMAGE)  # Custom registry does not disable GHCR.
+    async def run():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/node-registry-settings.db")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with factory() as db:
+                first = UUID((await create_classic_node(db=db, _=object()))["node_uuid"])
+                second = UUID((await create_classic_node(db=db, _=object()))["node_uuid"])
+                assert [r["repository"] for r in (await public_registry_list(db, first))["registries"]] == [GHCR_NODE_REPOSITORY]
+                result = await save_node_registry(db, first, RegistryUpdate(
+                    repository=CUSTOM_REPO, username="reader", password="synthetic-secret"))
+                custom = next(r for r in result["registries"] if r["repository"] == CUSTOM_REPO)
+                assert custom["has_credentials"] and custom["username"] == "reader"
+                assert "synthetic-secret" not in str(result)
+                record = await db.scalar(select(node_agent_registry_settings.c.encrypted_password).where(
+                    node_agent_registry_settings.c.node_uuid == str(first)))
+                assert record and "synthetic-secret" not in record
+                assert (await public_registry_list(db, second))["registries"] == [
+                    {"repository": GHCR_NODE_REPOSITORY, "username": "", "has_credentials": False, "official": True, "is_default": True}]
+                credentials = await transport_registry(db, str(first), CUSTOM_IMAGE)
+                assert credentials == {"repository": CUSTOM_REPO, "username": "reader", "password": "synthetic-secret"}
+                with pytest.raises(ValueError):
+                    await transport_registry(db, str(second), CUSTOM_IMAGE)
+                updated = await save_node_registry(db, first, RegistryUpdate(repository=CUSTOM_REPO, username="reader"))
+                assert next(r for r in updated["registries"] if r["repository"] == CUSTOM_REPO)["has_credentials"]
+                from app.node_registry_settings import RegistryDefault, select_default_registry
+                set_result = await select_default_registry(db, first, RegistryDefault(repository=CUSTOM_REPO))
+                assert set_result["default_repository"] == CUSTOM_REPO
+                assert (await public_registry_list(db, second))["default_repository"] == GHCR_NODE_REPOSITORY
+                for node_uuid in (first, second):
+                    await db.execute(update(node_agent_registrations).where(
+                        node_agent_registrations.c.node_uuid == str(node_uuid)
+                    ).values(last_seen_at=datetime.now(UTC), capabilities=["node.release.v1"]))
+                await db.commit()
+                with pytest.raises(HTTPException) as cross_node:
+                    await queue_node_operation(db, second, NodeOperationInput(
+                        action="update", image=CUSTOM_IMAGE, expected_generation=0))
+                assert cross_node.value.status_code == 422
+                await db.rollback()
+                queued = await queue_node_operation(db, first, NodeOperationInput(
+                    action="update", image=CUSTOM_IMAGE, expected_generation=0))
+                assert queued["image"] == CUSTOM_IMAGE
+                with pytest.raises(HTTPException) as active_edit:
+                    await save_node_registry(db, first, RegistryUpdate(repository=CUSTOM_REPO,
+                        username="reader", password="rotated"))
+                assert active_edit.value.status_code == 409
+                await db.rollback()
+                with pytest.raises(HTTPException) as active_delete:
+                    await delete_node_registry(db, first, RegistryDelete(repository=CUSTOM_REPO))
+                assert active_delete.value.status_code == 409
+                await db.rollback()
+                await db.execute(update(node_agent_operations).where(
+                    node_agent_operations.c.node_uuid == str(first)).values(status="failed"))
+                await db.commit()
+                deleted = await delete_node_registry(db, first, RegistryDelete(repository=CUSTOM_REPO))
+                assert deleted["default_repository"] == GHCR_NODE_REPOSITORY
+                with pytest.raises(ValueError):
+                    await transport_registry(db, str(first), CUSTOM_IMAGE)
+        finally:
+            await engine.dispose()
+    asyncio.run(run())
+
+
+def test_registry_format_rejects_external_urls_mutable_tags_and_unsafe_names():
+    assert valid_pinned_image(IMAGE) and valid_pinned_image(CUSTOM_IMAGE)
+    for candidate in ("https://example.com/waylane/node", "unqualified/node",
+                      "registry.example.com/../node", "registry.example.com//node",
+                      "registry.example.com/node:latest", "registry.example.com/" + "x" * 60):
+        assert not valid_repository(candidate)
+        with pytest.raises(ValidationError):
+            RegistryUpdate(repository=candidate)
+    for invalid_username in ("reader\nuser", "reader\ruser", "reader\x00user"):
+        with pytest.raises(ValidationError):
+            RegistryUpdate(repository=CUSTOM_REPO, username=invalid_username)
+    for invalid_password in ("secret\nsecret", "secret\x00secret"):
+        with pytest.raises(ValidationError):
+            RegistryUpdate(repository=CUSTOM_REPO, username="reader", password=invalid_password)
     for invalid in (CUSTOM_REPO + ":latest", CUSTOM_REPO + "@sha256:" + "A" * 64,
-                    "evil.example.com/waylane/node@sha256:" + "b" * 64,
-                    "https://" + CUSTOM_IMAGE, CUSTOM_IMAGE + "/extra"):
-        assert not approved_node_image(invalid)
+                    "https://" + CUSTOM_IMAGE):
+        assert not valid_pinned_image(invalid)
         with pytest.raises(ValidationError):
             NodeOperationInput(action="update", image=invalid, expected_generation=0)
-
-    monkeypatch.setenv("WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY", "other.example.org/waylane/node")
-    assert not approved_node_image(CUSTOM_IMAGE)
-    assert approved_node_image(IMAGE)
-
-
-def test_invalid_registry_configuration_fails_closed(monkeypatch):
-    for invalid in ("https://registry.example.com/waylane/node", "unqualified/node",
-                    "registry.example.com/../node", "registry.example.com//node",
-                    "registry.example.com/waylane/node:latest",
-                    "registry.example.com/" + "x" * 55):
-        assert not valid_repository(invalid)
-        monkeypatch.setenv("WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY", invalid)
-        with pytest.raises(ValueError):
-            trusted_node_repositories()

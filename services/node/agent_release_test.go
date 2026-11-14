@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -156,5 +157,55 @@ func TestNoReleaseCapabilityWhenStableAgentLacksVersionedEndpoint(t *testing.T) 
 		if value == "node.release.v1" || value == "node.reconnect.v1" {
 			t.Fatalf("Old Agent without release API falsely advertised %q", value)
 		}
+	}
+}
+
+func TestNodeForwardsOnlyPerNodeRegistryCredentialsOnPrivateUnix(t *testing.T) {
+	original := agentSocketPath
+	agentSocketPath = filepath.Join(t.TempDir(), "agent.sock")
+	t.Cleanup(func() { agentSocketPath = original })
+	listener, err := net.Listen("unix", agentSocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(agentSocketPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	image := "registry.example.com:5000/waylane/node@sha256:" + strings.Repeat("a", 64)
+	credential := registryPullCredential{Repository: "registry.example.com:5000/waylane/node", Username: "robot-reader", Password: "synthetic-private-password"}
+	payload := make(chan registryPullCredential, 1)
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PUT" || r.URL.Path != "/v1/node/release" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var cmd struct {
+			APIVersion  int    `json:"api_version"`
+			OperationID string `json:"operation_id"`
+			Image       string `json:"image"`
+			Repository  string `json:"repository"`
+			Username    string `json:"username"`
+			Password    string `json:"password"`
+		}
+		if json.NewDecoder(r.Body).Decode(&cmd) != nil || cmd.APIVersion != 1 || cmd.OperationID != fixtureReleaseID || cmd.Image != image {
+			t.Error("wrong private release request")
+		}
+		payload <- registryPullCredential{Repository: cmd.Repository, Username: cmd.Username, Password: cmd.Password}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(agentReleaseStatus{APIVersion: 1, OperationID: cmd.OperationID, Image: image, Status: "queued"})
+	})}
+	go func() { _ = server.Serve(listener) }()
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := submitAgentRelease(ctx, fixtureReleaseID, image, credential); err != nil {
+		t.Fatal(err)
+	}
+	if actual := <-payload; actual != credential {
+		t.Fatalf("private credential forwarding changed: %+v", actual)
+	}
+	if _, err := submitAgentRelease(ctx, fixtureReleaseID, image, registryPullCredential{Repository: ghcrNodeRepository}); err == nil {
+		t.Fatal("mismatched repository accepted")
 	}
 }

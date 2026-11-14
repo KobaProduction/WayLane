@@ -17,8 +17,8 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import begin_immediate_if_sqlite
-from app.db.models import node_agent_operations, node_agent_registrations
-from app.node_image_repositories import approved_node_image
+from app.db.models import node_agent_operations, node_agent_registrations, node_agent_registry_settings
+from app.node_image_repositories import GHCR_NODE_REPOSITORY, image_repository, valid_pinned_image
 
 OP_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 ACTIVE_STATUSES = frozenset({"pending", "queued", "running"})
@@ -39,7 +39,7 @@ class NodeOperationInput(BaseModel):
     @field_validator("image")
     @classmethod
     def official_immutable_image(cls, value: str | None) -> str | None:
-        if value is not None and not approved_node_image(value):
+        if value is not None and not valid_pinned_image(value):
             raise ValueError("Approved immutable WayLane Node digest required")
         return value
 
@@ -57,7 +57,7 @@ class NodeOperationReport(BaseModel):
     @field_validator("image", "previous_image")
     @classmethod
     def known_images(cls, value: str | None) -> str | None:
-        if value not in (None, "", "waylane-node-seed:bootstrap") and not approved_node_image(value):
+        if value not in (None, "", "waylane-node-seed:bootstrap") and not valid_pinned_image(value):
             raise ValueError("Untrusted release image in Agent report")
         return value or None
 
@@ -133,6 +133,15 @@ async def queue_node_operation(db: AsyncSession, node_uuid: UUID, input: NodeOpe
     )).one_or_none()
     if row is None or row.status != "approved":
         raise HTTPException(409, "Node must be approved")
+    if input.action == "update" and input.image is not None:
+        repository = image_repository(input.image)
+        if repository != GHCR_NODE_REPOSITORY:
+            allowed = await db.scalar(select(node_agent_registry_settings.c.repository).where(
+                node_agent_registry_settings.c.node_uuid == str(node_uuid),
+                node_agent_registry_settings.c.repository == repository,
+            ))
+            if not allowed:
+                raise HTTPException(422, "This registry is not configured for the selected Node")
     capability = "node.release.v1" if input.action == "update" else "node.reconnect.v1"
     if capability not in (row.capabilities or []):
         raise HTTPException(409, "Node has not negotiated the private Agent lifecycle capability")
