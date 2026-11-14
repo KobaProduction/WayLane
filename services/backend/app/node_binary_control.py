@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -18,7 +19,12 @@ from sqlalchemy import case, select, update
 
 from app.controlpb import control_pb2 as pb
 from app.db.base import SessionLocal, begin_immediate_if_sqlite
-from app.db.models import node_agent_awg_desired, node_agent_registrations, node_agent_xray_desired
+from app.db.models import (
+    node_agent_awg_desired,
+    node_agent_operations,
+    node_agent_registrations,
+    node_agent_xray_desired,
+)
 from app.node_events import append_node_event
 
 PROTOCOL_VERSION = 1
@@ -96,6 +102,8 @@ class AgentBinarySession:
         self._started = False
         self._last_sent_generation = 0
         self._last_sent_awg_generation = 0
+        self._last_sent_operation_generation = 0
+        self._last_sent_operation_at = 0.0
         self._session_capabilities: set[str] = set()
         self._last_seen_ids: set[str] = set()
         self.outgoing: asyncio.Queue[pb.Envelope | None] = asyncio.Queue(maxsize=8)
@@ -116,6 +124,11 @@ class AgentBinarySession:
                 raise ValueError("hello required before control traffic")
             await check_agent(self.node_uuid, self._secret)
             self._started = True
+            # A new authenticated session after a reconnect command confirms
+            # that the Node itself re-established control without a restart.
+            from app.node_operations import complete_node_reconnect
+            async with SessionLocal() as db:
+                await complete_node_reconnect(db, self.node_uuid)
             await self.outgoing.put(
                 new_message(
                     "hello_ack", self.node_uuid, payload={"transport_protocol": "protobuf-v1", "binary_only": True}
@@ -134,6 +147,7 @@ class AgentBinarySession:
             changes = {
                 "agent_version": body.node_version,
                 "capabilities": body.capabilities,
+                "node_image": body.node_image,
                 "last_seen_at": datetime.now(UTC),
             }
             if body.machine_metrics:
@@ -176,6 +190,22 @@ class AgentBinarySession:
                 raise ValueError("invalid Xray traffic observation") from exc
             async with SessionLocal() as db:
                 await record_xray_traffic(db, self.node_uuid, snapshot)
+        elif message.kind == "node_action_report":
+            if message.core_id != "node/runtime" or not (
+                {"node.release.v1", "node.reconnect.v1"} & self._session_capabilities
+            ):
+                raise ValueError("Node lifecycle report was not negotiated")
+            from pydantic import ValidationError
+
+            from app.node_operations import NodeOperationReport, accept_node_operation_report
+            try:
+                report = NodeOperationReport.model_validate(
+                    MessageToDict(message.payload, preserving_proto_field_name=True)
+                )
+            except ValidationError as exc:
+                raise ValueError("Invalid private Node release report") from exc
+            async with SessionLocal() as db:
+                await accept_node_operation_report(db, self.node_uuid, message.generation, report)
         elif message.kind == "result":
             if message.core_id not in (CORE_ID, "awg/default") or message.generation <= 0:
                 raise ValueError("unknown core result")
@@ -287,6 +317,30 @@ class AgentBinarySession:
                         generation=int(xray["generation"]), operation=xray["action"], payload=prepared,
                     ))
                 self._last_sent_generation = int(xray["generation"])
+
+            # Replaceable Node lifecycle is an independent operator-owned lane.
+            # Never re-install the outer stable Agent or restart Xray siblings.
+            from app.node_operations import expire_stale_node_operation
+            await expire_stale_node_operation(db, self.node_uuid)
+            operation = (await db.execute(select(node_agent_operations).where(
+                node_agent_operations.c.node_uuid == self.node_uuid
+            ))).mappings().one_or_none()
+            should_retry = (operation is not None
+                            and operation["phase"] in {"queued", "request"}
+                            and time.monotonic() - self._last_sent_operation_at >= 30)
+            if (operation and operation["status"] in {"pending", "queued", "running"}
+                    and (operation["generation"] > self._last_sent_operation_generation or should_retry)
+                    and ("node.release.v1" if operation["action"] == "update"
+                         else "node.reconnect.v1") in self._session_capabilities
+                    and not (operation["action"] == "reconnect" and operation["status"] == "running")):
+                await self.outgoing.put(new_message(
+                    "node_action", self.node_uuid, core_id="node/runtime",
+                    generation=operation["generation"], operation=operation["action"],
+                    payload={"operation_id": operation["operation_id"],
+                             "action": operation["action"], "image": operation["image"] or ""},
+                ))
+                self._last_sent_operation_generation = operation["generation"]
+                self._last_sent_operation_at = time.monotonic()
 
             # AWG is independent from Xray and sent only to an approved Node
             # that has explicitly advertised an accepted AWG capability.

@@ -68,3 +68,43 @@ identity, pinned release and Xray config are **not** removed. A successful
 recovery is logged without disclosing credentials or filesystem secrets.
 The Agent's only private Unix management API remains unchanged; no second
 Docker daemon or host Docker socket is introduced.
+
+### Operator-controlled inner Node releases (stable outer Agent)
+
+The Agent is **not** a self-updater and must not be recreated by ordinary
+Node/Xray/Core releases. Updates are explicit operator commands from Node
+Registry via the **existing** authenticated Node→Backend binary WSS. The
+replaceable Node forwards the approved immutable
+`ghcr.io/kobaproduction/waylane-node@sha256:<digest>` to the stable Agent
+using its private, mode-0600 Unix socket. There is no public update port,
+host Docker socket, or direct Backend→Docker connection.
+
+`PUT /v1/node/release` acknowledges a UUID-scoped operation immediately
+(HTTP 202). `GET /v1/node/release` returns a sanitized state with phases
+`queued → pulling → replacing → awaiting_wss → completed`, progress percentage,
+previous image and controlled error codes. Percentages reflect defined
+lifecycle milestones rather than Docker download-byte measurements. The Agent persistently journals the
+operation in its existing private `agent-state` volume. It **pulls the new
+image before stopping the previous Node**, then requires the replacement to
+authenticate to Backend WSS and acknowledge that control session through
+`POST /v1/node/release/ready`. On timeout it restores the prior pinned Node;
+on interruption during Agent restart it reconciles the previous version,
+then requires an authenticated WSS confirmation from that previous image
+before reporting a completed rollback. Unconfirmed recovery is explicitly
+`rollback_unverified`, never silently accepted. Successful local Docker `run` is never
+reported as successful WSS deployment. Operator status can be inspected via
+Node Registry without waiting for a synchronous HTTP connection from a
+container that is about to be replaced.
+
+An operator can also explicitly request a WSS reconnect through Node Registry;
+that **does not** restart Agent, Node, Xray or any other VPN Core. No automatic
+release polling or unattended updates run between operator requests.
+
+Agent auto-bootstrap from its bundled seed occurs only when the Node child is
+missing or stopped. A healthy seed child **is not replaced** merely because
+the outer Agent image was manually updated. The installed Agent/Compose upgrade
+remains a separate rare operator-controlled operation.
+
+Unexpected Node/Core process crashes now have a bounded three-retry restart
+policy instead of indefinitely looping on a broken release; the existing
+healthcheck and user-visible operation state distinguish runtime failures.

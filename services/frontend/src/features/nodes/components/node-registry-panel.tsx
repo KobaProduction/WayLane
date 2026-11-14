@@ -87,12 +87,26 @@ type NodeRuntimeMetrics = {
   uptime_seconds: number
 }
 
+type NodeReleaseOperation = {
+  operation_id: string | null
+  generation: number
+  action: 'update' | 'reconnect' | null
+  image: string | null
+  previous_image: string | null
+  status: 'idle' | 'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+  phase: string
+  progress: number
+  error_code: string | null
+  updated_at?: string | null
+}
+
 type Registration = {
   node_uuid: string
   connection_mode: 'classic' | 'discovery'
   display_name: string
   status: 'pending' | 'approved' | 'revoked'
   node_version: string
+  node_image: string | null
   observed_ip: string | null
   reported_ipv4: string | null
   reported_ipv6: string | null
@@ -116,6 +130,10 @@ export default function NodeDiscoveryPanel() {
   const [autoApprove, setAutoApprove] = useState(false)
   const [token, setToken] = useState('')
   const [nameEditors, setNameEditors] = useState<Record<string, string>>({})
+  const [releaseTarget, setReleaseTarget] = useState<string | null>(null)
+  const [releaseTargets, setReleaseTargets] = useState<Record<string, string>>({})
+  const [releaseStates, setReleaseStates] = useState<Record<string, NodeReleaseOperation>>({})
+  const [releaseBusy, setReleaseBusy] = useState(false)
   const [renameBusy, setRenameBusy] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -155,6 +173,57 @@ export default function NodeDiscoveryPanel() {
     window.addEventListener('openNodeDialog', openRegistration)
     return () => window.removeEventListener('openNodeDialog', openRegistration)
   }, [canCreate, canRead])
+
+  const loadNodeLifecycle = async (uuid: string) => {
+    try {
+      const state = await $fetch<NodeReleaseOperation>(
+        '/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/operation')
+      setReleaseStates(previous => ({ ...previous, [uuid]: state }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось получить операцию Node')
+    }
+  }
+
+  const requestNodeLifecycle = async (uuid: string, action: 'update' | 'reconnect') => {
+    if (!canApprove || releaseBusy) return
+    const image = releaseTargets[uuid]?.trim() ?? ''
+    if (action === 'update' && !/^ghcr\.io\/kobaproduction\/waylane-node@sha256:[0-9a-f]{64}$/.test(image)) {
+      toast.error('Укажите точный digest официального образа WayLane Node из GHCR')
+      return
+    }
+    const message = action === 'update'
+      ? 'Обновить только внутреннюю Node? Управляющий Agent останется установленным, Node кратковременно прервёт WSS; при неудаче Agent выполнит откат.'
+      : 'Переподключить WSS без перезапуска Node, Agent и Xray?'
+    if (!window.confirm(message)) return
+    setReleaseBusy(true)
+    try {
+      await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/operation', {
+        method: 'POST',
+        body: {
+          action,
+          expected_generation: releaseStates[uuid]?.generation ?? 0,
+          ...(action === 'update' ? { image } : {}),
+        },
+      })
+      toast.success(action === 'update' ? 'Обновление Node поставлено в очередь Agent' : 'Переподключение WSS запрошено')
+      await loadNodeLifecycle(uuid)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось запустить жизненный цикл Node')
+      await loadNodeLifecycle(uuid)
+    } finally { setReleaseBusy(false) }
+  }
+
+  const activeReleaseStatus = releaseTarget ? releaseStates[releaseTarget]?.status : undefined
+  useEffect(() => {
+    if (!releaseTarget || !activeReleaseStatus ||
+        !['pending', 'queued', 'running'].includes(activeReleaseStatus)) return
+    const updateStatus = () => {
+      if (document.visibilityState === 'visible') void loadNodeLifecycle(releaseTarget)
+    }
+    // Poll only the operator's active operation, then stop at terminal state.
+    const interval = window.setInterval(updateStatus, 5000)
+    return () => window.clearInterval(interval)
+  }, [releaseTarget, activeReleaseStatus])
 
   const refresh = async () => {
     try {
@@ -622,6 +691,72 @@ export default function NodeDiscoveryPanel() {
                   </Button>
                 )}
                 <p className="text-muted-foreground break-all font-mono text-xs">{node.node_uuid}</p>
+                <p className="text-muted-foreground break-all font-mono text-xs">
+                  Вложенная Node: {node.node_image ?? 'образ ещё не подтверждён'} · стабильный Agent API v1
+                </p>
+                {canApprove && node.status === 'approved' && (
+                  <div className="mt-2 space-y-2 rounded-md border p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" size="sm" variant="outline"
+                        onClick={() => {
+                          setReleaseTarget(releaseTarget === node.node_uuid ? null : node.node_uuid)
+                          void loadNodeLifecycle(node.node_uuid)
+                        }}>
+                        {releaseTarget === node.node_uuid ? 'Скрыть обновления Node' : 'Версия / обновление / WSS'}
+                      </Button>
+                      {!node.capabilities?.includes('node.release.v1') && (
+                        <span className="text-muted-foreground text-xs">Node ожидает подтверждения приватного Agent API</span>
+                      )}
+                    </div>
+                    {releaseTarget === node.node_uuid && (
+                      <div className="space-y-3">
+                        <p className="text-muted-foreground text-xs">
+                          Agent остаётся установленным. Изменяется только контейнер Node по точному GHCR digest.
+                          Новый контейнер должен подтвердить WSS; если этого не произойдёт, Agent попытается
+                          восстановить предыдущую версию. Обновление Xray выполняется отдельно ниже.
+                        </p>
+                        <Input aria-label="Новый digest Node" className="font-mono text-xs"
+                          placeholder="ghcr.io/kobaproduction/waylane-node@sha256:..."
+                          value={releaseTargets[node.node_uuid] ?? ''}
+                          onChange={e => setReleaseTargets(prev => ({ ...prev, [node.node_uuid]: e.target.value }))} />
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" disabled={releaseBusy || !node.capabilities?.includes('node.release.v1') ||
+                            ['pending', 'queued', 'running'].includes(releaseStates[node.node_uuid]?.status ?? '')}
+                            onClick={() => void requestNodeLifecycle(node.node_uuid, 'update')}>
+                            Обновить вложенную Node
+                          </Button>
+                          <Button size="sm" variant="outline"
+                            disabled={releaseBusy || !node.capabilities?.includes('node.reconnect.v1') ||
+                              ['pending', 'queued', 'running'].includes(releaseStates[node.node_uuid]?.status ?? '')}
+                            onClick={() => void requestNodeLifecycle(node.node_uuid, 'reconnect')}>
+                            Переподключить WSS
+                          </Button>
+                          <Button size="sm" variant="ghost"
+                            onClick={() => void loadNodeLifecycle(node.node_uuid)}>Обновить состояние</Button>
+                        </div>
+                        {releaseStates[node.node_uuid] && (
+                          <div className="space-y-1 text-xs">
+                            <p role="status">{releaseStates[node.node_uuid].action ?? 'Операций не было'} ·
+                              {' '}{releaseStates[node.node_uuid].status} · {releaseStates[node.node_uuid].phase} ·
+                              {' '}{releaseStates[node.node_uuid].progress}%</p>
+                            <progress aria-label="Этапный прогресс обновления Node" className="w-full" max={100}
+                              value={releaseStates[node.node_uuid].progress} />
+                            <p className="text-muted-foreground">Процент обозначает этап операции, не объём скачанных данных.</p>
+                            {releaseStates[node.node_uuid].image && (
+                              <p className="break-all font-mono text-muted-foreground">Цель: {releaseStates[node.node_uuid].image}</p>
+                            )}
+                            {releaseStates[node.node_uuid].previous_image && (
+                              <p className="break-all font-mono text-muted-foreground">Откат: {releaseStates[node.node_uuid].previous_image}</p>
+                            )}
+                            {releaseStates[node.node_uuid].error_code && (
+                              <p role="alert" className="text-destructive">Ошибка: {releaseStates[node.node_uuid].error_code}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <p className="text-muted-foreground break-words text-xs">
                   Управляющий процесс {node.node_version} · {node.last_seen_at ? `Последнее взаимодействие: ${new Date(node.last_seen_at).toLocaleString()}` : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
                 </p>

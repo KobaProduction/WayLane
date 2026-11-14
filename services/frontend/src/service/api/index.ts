@@ -1884,6 +1884,7 @@ export interface Heartbeat {
   /** @maxItems 32 */
   capabilities?: string[];
   machine_metrics?: NodeMachineMetrics | null;
+  node_image?: string | null;
   node_uuid: string;
   /**
      * @minLength 1
@@ -1959,6 +1960,21 @@ export interface NodeNotificationEnable {
   modify?: boolean;
   recovered?: boolean;
   reset_usage?: boolean;
+}
+
+export type NodeOperationInputAction = typeof NodeOperationInputAction[keyof typeof NodeOperationInputAction];
+
+
+export const NodeOperationInputAction = {
+  update: 'update',
+  reconnect: 'reconnect',
+} as const;
+
+export interface NodeOperationInput {
+  action: NodeOperationInputAction;
+  /** @minimum 0 */
+  expected_generation: number;
+  image?: string | null;
 }
 
 export interface NotFound {
@@ -13370,6 +13386,181 @@ export function useListNodeControlEvents<TData = Awaited<ReturnType<typeof listN
 
 
 
+
+export const getGetNodeLifecycleOperationUrl = (nodeUuid: string,) => {
+
+
+
+
+  return `/api/node-registry/nodes/${nodeUuid}/operation`
+}
+
+/**
+ * Sanitized progress for an operator-requested Node release/reconnect.
+ * @summary Get Node Lifecycle Operation
+ */
+export const getNodeLifecycleOperation = async (nodeUuid: string, options?: RequestInit): Promise<unknown> => {
+
+  return orvalFetcher<unknown>(getGetNodeLifecycleOperationUrl(nodeUuid),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNodeLifecycleOperationQueryKey = (nodeUuid: string,) => {
+    return [
+    `/api/node-registry/nodes/${nodeUuid}/operation`
+    ] as const;
+    }
+
+
+export const getGetNodeLifecycleOperationQueryOptions = <TData = Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError = ErrorType<HTTPValidationError>>(nodeUuid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetcher>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNodeLifecycleOperationQueryKey(nodeUuid);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNodeLifecycleOperation>>> = ({ signal }) => getNodeLifecycleOperation(nodeUuid, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: nodeUuid !== null && nodeUuid !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNodeLifecycleOperationQueryResult = NonNullable<Awaited<ReturnType<typeof getNodeLifecycleOperation>>>
+export type GetNodeLifecycleOperationQueryError = ErrorType<HTTPValidationError>
+
+
+export function useGetNodeLifecycleOperation<TData = Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError = ErrorType<HTTPValidationError>>(
+ nodeUuid: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNodeLifecycleOperation>>,
+          TError,
+          Awaited<ReturnType<typeof getNodeLifecycleOperation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetcher>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNodeLifecycleOperation<TData = Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError = ErrorType<HTTPValidationError>>(
+ nodeUuid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNodeLifecycleOperation>>,
+          TError,
+          Awaited<ReturnType<typeof getNodeLifecycleOperation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetcher>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNodeLifecycleOperation<TData = Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError = ErrorType<HTTPValidationError>>(
+ nodeUuid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetcher>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Node Lifecycle Operation
+ */
+
+export function useGetNodeLifecycleOperation<TData = Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError = ErrorType<HTTPValidationError>>(
+ nodeUuid: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNodeLifecycleOperation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetcher>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetNodeLifecycleOperationQueryOptions(nodeUuid,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getTriggerNodeLifecycleOperationUrl = (nodeUuid: string,) => {
+
+
+
+
+  return `/api/node-registry/nodes/${nodeUuid}/operation`
+}
+
+/**
+ * Explicit operation generation; no host Docker or Agent reinstall.
+ * @summary Trigger Node Lifecycle Operation
+ */
+export const triggerNodeLifecycleOperation = async (nodeUuid: string,
+    nodeOperationInput: NodeOperationInput, options?: RequestInit): Promise<unknown> => {
+
+  return orvalFetcher<unknown>(getTriggerNodeLifecycleOperationUrl(nodeUuid),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(nodeOperationInput)
+  }
+);}
+
+
+
+
+
+export const getTriggerNodeLifecycleOperationMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof triggerNodeLifecycleOperation>>, TError,{nodeUuid: string;data: BodyType<NodeOperationInput>}, TContext>, request?: SecondParameter<typeof orvalFetcher>}
+): UseMutationOptions<Awaited<ReturnType<typeof triggerNodeLifecycleOperation>>, TError,{nodeUuid: string;data: BodyType<NodeOperationInput>}, TContext> => {
+
+const mutationKey = ['triggerNodeLifecycleOperation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof triggerNodeLifecycleOperation>>, {nodeUuid: string;data: BodyType<NodeOperationInput>}> = (props) => {
+          const {nodeUuid,data} = props ?? {};
+
+          return  triggerNodeLifecycleOperation(nodeUuid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TriggerNodeLifecycleOperationMutationResult = NonNullable<Awaited<ReturnType<typeof triggerNodeLifecycleOperation>>>
+    export type TriggerNodeLifecycleOperationMutationBody = BodyType<NodeOperationInput>
+    export type TriggerNodeLifecycleOperationMutationError = ErrorType<HTTPValidationError>
+
+    /**
+ * @summary Trigger Node Lifecycle Operation
+ */
+export const useTriggerNodeLifecycleOperation = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof triggerNodeLifecycleOperation>>, TError,{nodeUuid: string;data: BodyType<NodeOperationInput>}, TContext>, request?: SecondParameter<typeof orvalFetcher>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof triggerNodeLifecycleOperation>>,
+        TError,
+        {nodeUuid: string;data: BodyType<NodeOperationInput>},
+        TContext
+      > => {
+      return useMutation(getTriggerNodeLifecycleOperationMutationOptions(options), queryClient);
+    }
 
 export const getRevokeUrl = (nodeUuid: string,) => {
 

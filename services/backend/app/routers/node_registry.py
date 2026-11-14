@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import hmac
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
@@ -21,6 +22,7 @@ from app.db.models import (
     ProxyInbound,
     node_agent_awg_desired,
     node_agent_events,
+    node_agent_operations,
     node_agent_registrations,
     node_agent_xray_desired,
     node_agent_xray_managed_inbounds,
@@ -29,6 +31,7 @@ from app.db.models import (
 )
 from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
+from app.node_operations import NodeOperationInput
 from app.node_subscription_desired import (
     MAX_MANAGED_INBOUNDS,
     SUPPORTED_PROTOCOLS,
@@ -141,10 +144,20 @@ class Heartbeat(BaseModel):
     model_config = ConfigDict(extra="forbid")
     node_uuid: UUID
     node_version: str = Field(min_length=1, max_length=32)
+    node_image: str | None = None
     reported_ipv4: str | None = None
     reported_ipv6: str | None = None
     capabilities: list[str] = Field(default_factory=list, max_length=32)
     machine_metrics: NodeMachineMetrics | None = None
+
+    @field_validator("node_image")
+    @classmethod
+    def known_node_image(cls, value: str | None) -> str | None:
+        if value not in (None, "", "waylane-node-seed:bootstrap") and not re.fullmatch(
+            r"ghcr\.io/kobaproduction/waylane-node@sha256:[0-9a-f]{64}", value
+        ):
+            raise ValueError("Node image must be an approved immutable digest")
+        return value or None
 
     @field_validator("reported_ipv4", "reported_ipv6")
     @classmethod
@@ -238,6 +251,7 @@ async def list_registrations(
         node_agent_registrations.c.display_name,
         node_agent_registrations.c.status,
         node_agent_registrations.c.agent_version,
+        node_agent_registrations.c.node_image,
         node_agent_registrations.c.last_seen_at,
         node_agent_registrations.c.observed_ip,
         node_agent_registrations.c.reported_ipv4,
@@ -254,6 +268,35 @@ async def list_registrations(
         entry["node_version"] = entry.pop("agent_version")
         result.append(entry)
     return {"nodes": result}
+
+
+@node_registry_router.get("/nodes/{node_uuid}/operation")
+async def get_node_lifecycle_operation(
+    node_uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    """Sanitized progress for an operator-requested Node release/reconnect."""
+    from app.node_operations import as_dict, expire_stale_node_operation
+    if await db.scalar(select(node_agent_registrations.c.node_uuid).where(
+        node_agent_registrations.c.node_uuid == str(node_uuid))) is None:
+        raise HTTPException(404, "Node not registered")
+    await expire_stale_node_operation(db, str(node_uuid))
+    row = (await db.execute(select(node_agent_operations).where(
+        node_agent_operations.c.node_uuid == str(node_uuid)))).mappings().one_or_none()
+    return {"node_uuid": str(node_uuid), **as_dict(row)}
+
+
+@node_registry_router.post("/nodes/{node_uuid}/operation", status_code=202)
+async def trigger_node_lifecycle_operation(
+    node_uuid: UUID,
+    body: NodeOperationInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    """Explicit operation generation; no host Docker or Agent reinstall."""
+    from app.node_operations import queue_node_operation
+    return await queue_node_operation(db, node_uuid, body)
 
 
 @node_registry_router.get("/cores/{core_id}/assignments")

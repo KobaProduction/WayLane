@@ -312,6 +312,9 @@ func TestAgentRollsBackWhenNewNodeCannotStart(t *testing.T) {
 	if !restored {
 		t.Fatal("no rollback to pinned previous Node image was attempted")
 	}
+	if fake.has("build") {
+		t.Fatal("rollback must use the cached previous seed offline, not rebuild or pull")
+	}
 }
 
 func TestDockerCLIUsesWritablePrivateConfigEvenWithReadOnlyHome(t *testing.T) {
@@ -420,7 +423,7 @@ func TestIdempotentReleaseRepairsDriftWithoutRestartingAgent(t *testing.T) {
 	}
 }
 
-func TestAgentRebuildsOutdatedSeedAndReplacesChild(t *testing.T) {
+func TestStableAgentDoesNotImplicitlyReplaceSeedOnRestart(t *testing.T) {
 	fake := &fakeDocker{exists: true, owned: true, running: true,
 		image: nodeSeed, imageID: "sha256:old-seed", seedImageID: "sha256:current-seed"}
 	m := &manager{run: fake.Run, stateDir: t.TempDir(),
@@ -428,8 +431,8 @@ func TestAgentRebuildsOutdatedSeedAndReplacesChild(t *testing.T) {
 	if err := m.ensureNode(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if fake.imageID != "sha256:current-seed" || !fake.has("build") || !fake.has("stop") {
-		t.Fatal("cached seed image was incorrectly considered current")
+	if fake.imageID != "sha256:old-seed" || fake.has("build") || fake.has("stop") {
+		t.Fatal("stable Agent must not implicitly replace a running Node after its own upgrade")
 	}
 	before := len(fake.calls)
 	if err := m.ensureNode(context.Background()); err != nil {

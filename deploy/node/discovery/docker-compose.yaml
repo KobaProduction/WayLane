@@ -23,7 +23,9 @@ services:
     depends_on:
       bootstrap:
         condition: service_completed_successfully
-    restart: unless-stopped
+    # Fail in a visible, bounded state rather than an endless container restart
+    # loop on an unrecoverable private rootless daemon/socket startup error.
+    restart: "on-failure:3"
     init: true
     # The stable Agent shares the Linux host network namespace.
     # Node and VPN Cores use host networking in the rootless engine.

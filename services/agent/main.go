@@ -4,7 +4,6 @@ package main
 // Node container, and exposes a fixed local Unix-socket management API.
 // The Node (not Agent) owns the existing binary WSS and child VPN Cores.
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -117,6 +116,9 @@ type manager struct {
 	stateDir                                     string
 	panelURL, discoveryToken, nodeToken, devHTTP string
 	image                                        string
+	operation                                    *nodeReleaseOperation
+	ready                                        chan struct{}
+	readyDone                                    bool
 }
 
 func (m *manager) releasePath() string { return filepath.Join(m.stateDir, "node-release.json") }
@@ -208,6 +210,15 @@ func (m *manager) startNode(ctx context.Context, image string) error {
 	if err := m.stageImage(ctx, image); err != nil {
 		return err
 	}
+	return m.startNodeStaged(ctx, image)
+}
+
+// The target must already exist in the private daemon. Used for verified
+// cutover and offline rollback: never re-pull old images during an outage.
+func (m *manager) startNodeStaged(ctx context.Context, image string) error {
+	if image != nodeSeed && !nodeDigest.MatchString(image) {
+		return errors.New("unapproved staged Node image")
+	}
 	// Private ephemeral file prevents secrets appearing in process arguments.
 	envFile, err := os.CreateTemp(m.stateDir, ".node-env-")
 	if err != nil {
@@ -241,7 +252,7 @@ func (m *manager) startNode(ctx context.Context, image string) error {
 		// In the private rootless Docker daemon, container UID 0 maps to the
 		// Agent's non-root outer UID 1000 and can access its 0700 state/socket.
 		// Container UID 1000 instead maps to a subordinate UID and is denied.
-		"--restart", "unless-stopped", "--network", "host", "--read-only", "--user", "0:0",
+		"--restart", "on-failure:3", "--network", "host", "--read-only", "--user", "0:0",
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
 		"--tmpfs", "/tmp:rw,nosuid,nodev,size=32m",
 		"--env", "HOME=/tmp",
@@ -286,7 +297,7 @@ func (m *manager) restoreNode(ctx context.Context, previous string) error {
 			return err
 		}
 	}
-	if err := m.startNode(ctx, previous); err != nil {
+	if err := m.startNodeStaged(ctx, previous); err != nil {
 		return err
 	}
 	running, err := m.runningNode(ctx)
@@ -311,8 +322,11 @@ func (m *manager) ensureNode(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if image == m.image && image != nodeSeed {
-				return nil // Immutable digest already matches.
+			if image == m.image {
+				// A running Node is never implicitly replaced when an outer
+				// Agent image changes. This includes the bundled bootstrap seed.
+				// Only an explicit operator release changes the Node runtime.
+				return nil
 			}
 			// Stage the selected image before interrupting the running child.
 			if err := m.stageImage(ctx, m.image); err != nil {
@@ -346,14 +360,26 @@ func (m *manager) ensureNode(ctx context.Context) error {
 }
 
 func (m *manager) updateNode(ctx context.Context, next string) error {
+	return m.updateNodePrepared(ctx, next, false)
+}
+
+// Called only after executeRelease has staged the immutable image exactly
+// once. Public local tests and other update callers still stage by default.
+func (m *manager) updateNodeStaged(ctx context.Context, next string) error {
+	return m.updateNodePrepared(ctx, next, true)
+}
+
+func (m *manager) updateNodePrepared(ctx context.Context, next string, alreadyStaged bool) error {
 	if !nodeDigest.MatchString(next) {
 		return errors.New("Node image digest must be immutable and from approved registry")
 	}
 	if next == m.image {
 		return m.ensureNode(ctx)
 	}
-	if err := m.stageImage(ctx, next); err != nil {
-		return err
+	if !alreadyStaged {
+		if err := m.stageImage(ctx, next); err != nil {
+			return err
+		}
 	}
 	exists, err := m.ownedNode(ctx)
 	if err != nil {
@@ -368,7 +394,7 @@ func (m *manager) updateNode(ctx context.Context, next string) error {
 			return err
 		}
 	}
-	if err = m.startNode(ctx, next); err != nil {
+	if err = m.startNodeStaged(ctx, next); err != nil {
 		if m.restoreNode(ctx, old) != nil {
 			return errors.New("new Node failed and previous release could not be restored")
 		}
@@ -387,7 +413,9 @@ func (m *manager) updateNode(ctx context.Context, next string) error {
 		}
 		return errors.New("Node release persistence failed; previous release restored")
 	}
+	m.mu.Lock()
 	m.image = next
+	m.mu.Unlock()
 	return nil
 }
 func (m *manager) serve(ctx context.Context) error {
@@ -418,34 +446,7 @@ func (m *manager) serve(ctx context.Context) error {
 		defer m.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"api_version": 1, "image": m.image})
 	})
-	mux.HandleFunc("PUT /v1/node/release", func(w http.ResponseWriter, r *http.Request) {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		raw, err := io.ReadAll(io.LimitReader(r.Body, 4096))
-		if err != nil {
-			http.Error(w, "invalid request", 400)
-			return
-		}
-		var doc struct {
-			APIVersion int    `json:"api_version"`
-			Image      string `json:"image"`
-		}
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.DisallowUnknownFields()
-		if err = dec.Decode(&doc); err != nil || doc.APIVersion != 1 || !nodeDigest.MatchString(doc.Image) {
-			http.Error(w, "invalid pinned Node release", 400)
-			return
-		}
-		// The requester may be the Node being replaced. Its HTTP disconnect
-		// must not cancel the Agent-owned replacement transaction.
-		updateCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		defer cancel()
-		if err = m.updateNode(updateCtx, doc.Image); err != nil {
-			http.Error(w, "Node update failed", 409)
-			return
-		}
-		w.WriteHeader(204)
-	})
+	m.registerReleaseRoutes(mux, ctx)
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(l) }()
@@ -480,8 +481,20 @@ func run(ctx context.Context) error {
 	if err = m.loadRelease(); err != nil {
 		return err
 	}
+	if err = m.loadOperation(); err != nil {
+		return err
+	}
+	interrupted := m.operation != nil && (m.operation.Status == "queued" || m.operation.Status == "running")
+	if err = m.reconcileInterruptedRelease(); err != nil {
+		return err
+	}
 	if err = m.ensureNode(ctx); err != nil {
 		return err
+	}
+	if interrupted {
+		// Let the restored Node prove a NEW authenticated WSS connection.
+		// A running child alone must not be called a successful rollback.
+		go m.awaitRollbackReady(ctx, "agent_restarted_during_update")
 	}
 	return m.serve(ctx)
 }

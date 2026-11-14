@@ -250,7 +250,7 @@ func startXrayContainer(ctx context.Context, socket, image, configFile string) e
 	// never the host root; required to read mode-0600 mounted Xray config.
 	return dockerXray(ctx, socket, 45*time.Second,
 		"run", "-d", "--name", xrayChildName,
-		"--restart", "unless-stopped", "--network", "host",
+		"--restart", "on-failure:3", "--network", "host",
 		"--read-only", "--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
 		"--user", "0:0",

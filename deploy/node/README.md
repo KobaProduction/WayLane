@@ -304,3 +304,44 @@ volume collections or unrelated Docker sockets while diagnosing this.
 First check Docker `restartCount`, the actual error in Agent logs and the
 private Rootless Docker health. Running status is not equivalent to a healthy
 Node/Xray; validate the existing private SOCKS5 traffic separately.
+
+### Independent Node versions and long-lived Agent
+
+The outer Compose Agent is deliberately stable; upgrade it only with a
+separately approved manual Coolify deployment. A healthy Node seed image is
+**not** implicitly replaced by an Agent rebuild. Node releases are immutable
+GHCR images emitted on explicit `node-v*` Git tags and approved by digest in
+Node Registry. Updates flow Panel → authenticated binary WSS → current Node →
+private Agent Unix API → bounded replacement/rollback of the inner Node only.
+This preserves all installation-scoped volumes and unaffected Core containers.
+Do not configure automatic Coolify Node/Agent deployment or turn a Node image
+release into an outer Agent rollout. Startup and error states are distinguished
+from verified WSS control and actual SOCKS5 consumer behavior.
+
+
+### Bounded Agent restart and diagnosed failure
+
+Both Classic and Discovery profiles now use `restart: on-failure:3` for the
+stable outer Agent. A persistent failure of private Rootless Docker no longer
+creates hundreds of automatic Agent/container restarts; Coolify should show a
+failed/unhealthy resource for explicit operator recovery. Embedded Node and
+Core sibling containers also use bounded `on-failure:3` policies. This does
+not change the single Agent + one-shot Bootstrap Compose topology or remove
+the required healthcheck. Recovered Agent/Node releases are **not** accepted
+solely because a container is running: verify WSS and a real existing client
+traffic path after any repair.
+
+Operator-managed Node release operations have bounded 10-minute Backend
+resolution, even if an Agent cannot be contacted. An update's first 85% is
+Docker image pulling and replacement only; both success and rollback demand
+a **new authenticated Node WSS**. A stopped Node cannot receive a fresh WSS
+reconnect command; use the existing authorized Coolify Agent recovery workflow
+instead of introducing a public Agent management listener.
+
+The Node digest published by the `node-v*` workflow must be pullable from
+inside Agent's private Rootless Docker registry context. The current Agent
+does **not** store GHCR credentials; an inaccessible/private package fails in
+`pulling` with `image_unavailable` **before** the existing Node is stopped.
+Publishing a tag or building an image does not automatically deploy that image
+or change the Agent's Compose resource. Check package accessibility and select
+the immutable digest explicitly before starting an update.

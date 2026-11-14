@@ -90,3 +90,17 @@ WSS. Failing to query stats does not interrupt heartbeats or restart Xray.
 The Backend stores read-only, epoch-aware cursors; these observations are **not
 commercially billable** until separate real-traffic and exactly-once usage
 acceptance. Never expose the private StatsService port to the public network.
+
+### Explicit Node image releases and reconnect (independent of Agent and Cores)
+
+Only the operator selects an approved immutable Node GHCR digest through the
+Node Registry. Backend queues an independent `node_action` generation on the
+single authenticated Protobuf WSS. The running Node sends an idempotent
+private Unix request to the stable Agent and reports sanitized progress over
+that same WSS. When the old Node is replaced its WSS will disconnect; the new
+Node reauthenticates, reports Agent progress and confirms readiness locally.
+Agent persists the job and rolls back on a missing new WSS confirmation. The
+outer Agent, Xray and other child Cores are not recreated as part of the Node
+image upgrade. A separate explicit `reconnect` action closes/reopens the WSS
+without restarting the Node container. No timer automatically upgrades any
+component, and Core image updates remain independent.

@@ -151,10 +151,21 @@ func controlTelemetryPayload(state string) (map[string]any, error) {
 	if xrayReadOnlyTrafficEnabled() {
 		capabilities = append(capabilities, "xray.stats.readonly")
 	}
+	if client, err := agentReleaseClient(); err == nil {
+		client.CloseIdleConnections()
+		check, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if _, err := readAgentRelease(check); err == nil {
+			capabilities = append(capabilities, "node.release.v1", "node.reconnect.v1")
+		}
+		cancel()
+	}
 	if experimentalAWGEnabled() {
 		capabilities = append(capabilities, "awg.protobuf.binary")
 	}
+	check, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
 	raw, err := json.Marshal(map[string]any{"node_version": version,
+		"node_image":      readCurrentAgentNodeImage(check),
 		"capabilities":    capabilities,
 		"machine_metrics": collectNodeRuntimeMetrics(state)})
 	if err != nil {
@@ -193,6 +204,51 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 		defer sender.Unlock()
 		return stream.Send(msg)
 	}
+	var releaseReportMu sync.Mutex
+	var lastReleaseReport string
+	sendReleaseReport := func() error {
+		check, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		status, err := readAgentRelease(check)
+		if err != nil || !releaseOperationUUID.MatchString(status.OperationID) {
+			return nil // Existing manual Core traffic must survive a stale Agent status endpoint.
+		}
+		if status.Status == "running" && (status.Phase == "awaiting_wss" || status.Phase == "rollback_verify") {
+			if confirmAgentReleaseWSS(check, status) == nil {
+				// Read the terminal status on the next telemetry tick if Agent
+				// has not yet persisted it. Never claim completion in Node.
+				status, _ = readAgentRelease(check)
+			}
+		}
+		if status.OperationID == "" || !approvedNodeDigest.MatchString(status.Image) {
+			return nil
+		}
+		payload := map[string]any{
+			"operation_id": status.OperationID, "image": status.Image,
+			"previous_image": status.PreviousImage, "status": status.Status,
+			"phase": status.Phase, "progress": status.Progress,
+			"error_code": status.ErrorCode,
+		}
+		// Repeated ticks do not resend unchanged terminal/progress reports.
+		// A fresh WSS session starts with an empty dedupe key, so it can
+		// recover a report lost during the previous connection.
+		key := fmt.Sprintf("%s/%s/%s/%d/%s", status.OperationID, status.Status,
+			status.Phase, status.Progress, status.ErrorCode)
+		releaseReportMu.Lock()
+		defer releaseReportMu.Unlock()
+		if key == lastReleaseReport {
+			return nil
+		}
+		message, err := newControlMessage(ident.UUID, "node_action_report", "node/runtime", 0, payload)
+		if err != nil {
+			return err
+		}
+		if err = send(message); err != nil {
+			return err
+		}
+		lastReleaseReport = key
+		return nil
+	}
 	sendTelemetry := func() error {
 		payload, err := controlTelemetryPayload(state)
 		if err != nil {
@@ -217,6 +273,9 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 				return
 			case <-ticker.C:
 				if err := sendTelemetry(); err != nil {
+					return
+				}
+				if err := sendReleaseReport(); err != nil {
 					return
 				}
 				// Keep statistics on the existing authenticated binary WSS.
@@ -255,7 +314,62 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 			if err := sendTelemetry(); err != nil {
 				return err
 			}
+			if err := sendReleaseReport(); err != nil {
+				return err
+			}
 		case "ack", "pong":
+		case "node_action":
+			if reply.CoreID != "node/runtime" || reply.Generation < 1 || reply.Payload == nil {
+				return errors.New("unsupported Node operation")
+			}
+			var input struct {
+				OperationID string `json:"operation_id"`
+				Action      string `json:"action"`
+				Image       string `json:"image"`
+			}
+			raw, marshalErr := json.Marshal(reply.Payload.AsMap())
+			if marshalErr != nil || json.Unmarshal(raw, &input) != nil || !releaseOperationUUID.MatchString(input.OperationID) {
+				return errors.New("invalid pinned Node operation")
+			}
+			if input.Action == "reconnect" {
+				report, reportErr := newControlMessage(ident.UUID, "node_action_report", "node/runtime", reply.Generation,
+					map[string]any{"operation_id": input.OperationID, "status": "running", "phase": "reconnecting", "progress": 50})
+				if reportErr != nil || send(report) != nil {
+					return errors.New("Node reconnect acknowledgement unavailable")
+				}
+				return errors.New("operator-requested WSS reconnect")
+			}
+			if input.Action != "update" || !approvedNodeDigest.MatchString(input.Image) {
+				return errors.New("invalid immutable Node update target")
+			}
+			jobCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
+			job, updateErr := submitAgentRelease(jobCtx, input.OperationID, input.Image)
+			if updateErr != nil {
+				// The requester may die after Agent accepted the operation.
+				// Probe the durable Agent journal before classifying a lost HTTP
+				// response; never record a definitive failure on uncertainty.
+				if observed, probeErr := readAgentRelease(jobCtx); probeErr == nil &&
+					observed.OperationID == input.OperationID && observed.Image == input.Image {
+					job, updateErr = observed, nil
+				}
+			}
+			cancel()
+			if updateErr != nil {
+				message, createErr := newControlMessage(ident.UUID, "node_action_report", "node/runtime", reply.Generation,
+					map[string]any{"operation_id": input.OperationID, "image": input.Image,
+						"status": "running", "phase": "request", "progress": 0, "error_code": "request_uncertain"})
+				if createErr == nil {
+					_ = send(message)
+				}
+				continue
+			}
+			message, createErr := newControlMessage(ident.UUID, "node_action_report", "node/runtime", reply.Generation,
+				map[string]any{"operation_id": job.OperationID, "image": job.Image,
+					"previous_image": job.PreviousImage, "status": job.Status,
+					"phase": job.Phase, "progress": job.Progress, "error_code": job.ErrorCode})
+			if createErr == nil {
+				_ = send(message)
+			}
 		case "desired":
 			if reply.Generation == 0 {
 				return errors.New("binary core generation required")

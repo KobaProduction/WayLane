@@ -169,3 +169,43 @@ static Compose port lists: each Core dynamically binds TCP/UDP ports,
 without an Agent restart. Ports below 1024 need a separate unprivileged
 binding policy; cloud firewall, IPv6 and VPN client traffic are not
 accepted by source/config tests.
+
+## Stable Agent / replaceable Node release protocol
+
+Control always travels as **binary Protobuf on the same authenticated Node WSS**:
+
+- Backend `node_agent_operations` stores one operator-selected operation per
+  Node with `operation_id` (UUIDv4), monotonic `generation`, `action` (`update`
+  or `reconnect`), pinned approved `image`, `status`, `phase`, percentage and
+  sanitized error code. Percentage marks lifecycle milestones, not actual
+  downloaded image bytes. Admin endpoints are under `/api/node-registry/nodes/{uuid}/operation`.
+- Only a Node currently advertising `node.release.v1` may receive
+  `Envelope(kind="node_action",core_id="node/runtime", operation="update")`.
+  The payload includes the same UUID operation ID and exact immutable image.
+  The Node uses `/var/lib/waylane-agent/control/agent.sock`, not another
+  network API or host Docker socket, to ask the stable Agent to update the
+  **inner Node container only**.
+- The Agent keeps a private operation journal, pulls before cutover, stages
+  and replaces the Node, then waits for the new process to authenticate WSS.
+  Successful container start is only `awaiting_wss` (85%), not success. On
+  timeout or interruption, previous image selection is restored and the
+  failure/rollback recorded. A restored previous image also must verify WSS
+before the rollback is called successful; otherwise the terminal error is
+`rollback_unverified`. If the entire operation remains unresolved beyond
+10 minutes, Backend marks it `node_report_timeout` and permits a new explicit
+operator action, never infinite retry. `node_action_report` carries sanitized status,
+  percent, phase, previous image and code without Docker command output.
+  Repeated commands with the same UUID are idempotent. The Backend rejects
+  stale generations and terminal-state downgrade reports.
+- `reconnect` is a separate `node_action` that gracefully closes the existing
+  WSS connection; a *new authenticated hello* confirms completion. No Node or
+  VPN Core process is restarted for reconnect.
+- The outer Agent has a **different, manual orchestrator-controlled** update
+  lifecycle. Neither this protocol nor regular Git pushes replace it. The
+  Node GHCR package is built independently from `node-v*` tags; a published
+  package is never automatically activated in a running Node installation.
+
+A real release must verify Node heartbeat, private rootless Docker health,
+Xray traffic on the existing SOCKS5 test and preservation of identity/volumes.
+No automatic periodic update check, background agent self-updater or exposed
+Agent TCP listener is introduced.

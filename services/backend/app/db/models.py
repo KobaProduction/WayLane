@@ -750,6 +750,7 @@ node_agent_registrations = Table(
     Column("display_name", String(128), nullable=False),
     Column("status", String(16), nullable=False),
     Column("agent_version", String(32), nullable=False),
+    Column("node_image", String(128), nullable=True),
     Column("observed_ip", String(45)),
     Column("reported_ipv4", String(45)),
     Column("reported_ipv6", String(45)),
@@ -777,6 +778,28 @@ node_agent_xray_desired = Table(
     Column("applied_generation", Integer, nullable=False, server_default="0"),
     Column("runtime_status", String(16), nullable=False, server_default="pending"),
     Column("last_error", String(300), nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("reported_at", DateTime(timezone=True), nullable=True),
+)
+
+
+# Operator-triggered, per-Node release/reconnect state. Never store Node
+# enrollment secrets or private Agent Unix paths in this durable journal.
+node_agent_operations = Table(
+    "node_agent_operations",
+    Base.metadata,
+    Column("node_uuid", String(36),
+           ForeignKey("node_agent_registrations.node_uuid", ondelete="CASCADE"), primary_key=True),
+    Column("operation_id", String(36), nullable=False, unique=True),
+    Column("generation", Integer, nullable=False),
+    Column("action", String(16), nullable=False),
+    Column("image", String(128), nullable=True),
+    Column("previous_image", String(128), nullable=True),
+    Column("status", String(16), nullable=False),
+    Column("phase", String(32), nullable=False),
+    Column("progress", Integer, nullable=False),
+    Column("error_code", String(64), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("reported_at", DateTime(timezone=True), nullable=True),
 )

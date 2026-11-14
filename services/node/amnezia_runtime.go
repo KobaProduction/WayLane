@@ -143,7 +143,7 @@ func (r awgChildRuntime) Start(ctx context.Context, config awgWireConfig) (err e
 		return err
 	}
 	args := []string{"run", "-d", "--name", awgChildName,
-		"--label", awgCoreLabel, "--restart", "unless-stopped",
+		"--label", awgCoreLabel, "--restart", "on-failure:3",
 		"--network", "host", "--read-only", "--cap-drop", "ALL", "--cap-add", "NET_ADMIN",
 		"--device", "/dev/net/tun:/dev/net/tun", "--security-opt", "no-new-privileges",
 		"--user", "0:0", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m",
