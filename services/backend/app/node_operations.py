@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import begin_immediate_if_sqlite
 from app.db.models import node_agent_operations, node_agent_registrations
+from app.node_image_repositories import approved_node_image
 
-IMAGE_PATTERN = re.compile(r"^ghcr\.io/kobaproduction/waylane-node@sha256:[0-9a-f]{64}$")
 OP_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 ACTIVE_STATUSES = frozenset({"pending", "queued", "running"})
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "rolled_back"})
@@ -39,8 +39,8 @@ class NodeOperationInput(BaseModel):
     @field_validator("image")
     @classmethod
     def official_immutable_image(cls, value: str | None) -> str | None:
-        if value is not None and not IMAGE_PATTERN.fullmatch(value):
-            raise ValueError("Official immutable WayLane Node digest required")
+        if value is not None and not approved_node_image(value):
+            raise ValueError("Approved immutable WayLane Node digest required")
         return value
 
 
@@ -57,7 +57,7 @@ class NodeOperationReport(BaseModel):
     @field_validator("image", "previous_image")
     @classmethod
     def known_images(cls, value: str | None) -> str | None:
-        if value not in (None, "", "waylane-node-seed:bootstrap") and not IMAGE_PATTERN.fullmatch(value):
+        if value not in (None, "", "waylane-node-seed:bootstrap") and not approved_node_image(value):
             raise ValueError("Untrusted release image in Agent report")
         return value or None
 

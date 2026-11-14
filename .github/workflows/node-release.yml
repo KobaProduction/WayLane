@@ -42,3 +42,53 @@ jobs:
           echo "Immutable Node image for operator approval:" >> "$GITHUB_STEP_SUMMARY"
           echo "ghcr.io/kobaproduction/waylane-node@${RELEASE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"
           echo "No Agent redeploy or Node installation was triggered by this image release." >> "$GITHUB_STEP_SUMMARY"
+
+  publish-secondary:
+    # Purely opt-in: keep GHCR-only releases when the operator has not
+    # provisioned a second Registry. The external Registry is not managed here.
+    if: ${{ vars.WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY != '' }}
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY: ${{ vars.WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the operator-approved destination
+        id: destination
+        run: |
+          python3 - <<'PYVALIDATE'
+          import importlib.util
+          import os
+          from pathlib import Path
+          source = Path('services/backend/app/node_image_repositories.py')
+          spec = importlib.util.spec_from_file_location('node_image_repositories', source)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          repository = os.environ['WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY']
+          if not module.valid_repository(repository) or repository == module.GHCR_NODE_REPOSITORY:
+              raise SystemExit('Custom Node repository is invalid or duplicates the official GHCR repository')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('host=' + repository.split('/')[0] + '\n')
+          PYVALIDATE
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.destination.outputs.host }}
+          username: ${{ secrets.WAYLANE_NODE_REGISTRY_USERNAME }}
+          password: ${{ secrets.WAYLANE_NODE_REGISTRY_PASSWORD }}
+      - uses: docker/build-push-action@v6
+        id: image
+        with:
+          context: .
+          file: services/node/node.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ vars.WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY }}:${{ github.ref_name }}
+      - name: Record optional Registry immutable image
+        env:
+          CUSTOM_IMAGE_REPOSITORY: ${{ vars.WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY }}
+          RELEASE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          echo "Immutable custom Node image for operator approval:" >> "$GITHUB_STEP_SUMMARY"
+          echo "${CUSTOM_IMAGE_REPOSITORY}@${RELEASE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+          echo "The private Agent and Node are NOT redeployed by this publish." >> "$GITHUB_STEP_SUMMARY"

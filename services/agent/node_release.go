@@ -53,7 +53,7 @@ func (m *manager) loadOperation() error {
 	}
 	var op nodeReleaseOperation
 	if json.Unmarshal(raw, &op) != nil || op.APIVersion != 1 || !releaseOpID.MatchString(op.OperationID) ||
-		!nodeDigest.MatchString(op.Image) || (op.PreviousImage != nodeSeed && !nodeDigest.MatchString(op.PreviousImage)) ||
+		!approvedNodeImage(op.Image) || (op.PreviousImage != nodeSeed && !approvedNodeImage(op.PreviousImage)) ||
 		op.Progress < 0 || op.Progress > 100 || op.StartedAt.IsZero() || op.UpdatedAt.IsZero() {
 		return errors.New("invalid persisted Node release operation")
 	}
@@ -117,7 +117,7 @@ func (m *manager) releaseSnapshot() (nodeReleaseOperation, bool) {
 	return *m.operation, true
 }
 func (m *manager) startRelease(parent context.Context, id, image string) (nodeReleaseOperation, error) {
-	if !releaseOpID.MatchString(id) || !nodeDigest.MatchString(image) {
+	if !releaseOpID.MatchString(id) || !approvedNodeImage(image) {
 		return nodeReleaseOperation{}, errors.New("invalid immutable release request")
 	}
 	m.mu.Lock()
@@ -318,7 +318,7 @@ func (m *manager) registerReleaseRoutes(mux *http.ServeMux, ctx context.Context)
 		}
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&cmd); err != nil || cmd.APIVersion != 1 || !releaseOpID.MatchString(cmd.OperationID) || !nodeDigest.MatchString(cmd.Image) {
+		if err := dec.Decode(&cmd); err != nil || cmd.APIVersion != 1 || !releaseOpID.MatchString(cmd.OperationID) || !approvedNodeImage(cmd.Image) {
 			http.Error(w, "invalid pinned release", 400)
 			return
 		}

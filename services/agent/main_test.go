@@ -118,11 +118,11 @@ func TestAgentRejectsUnapprovedNodeImage(t *testing.T) {
 	for _, v := range []string{"", nodeSeed, "ubuntu:latest", "ghcr.io/kobaproduction/waylane-node:latest",
 		"ghcr.io/another/repo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"ghcr.io/kobaproduction/waylane-node@sha256:ABCDEF"} {
-		if nodeDigest.MatchString(v) {
+		if approvedNodeImage(v) {
 			t.Fatalf("mutable/unapproved image accepted: %s", v)
 		}
 	}
-	if !nodeDigest.MatchString(testDigest) {
+	if !approvedNodeImage(testDigest) {
 		t.Fatal("approved immutable digest rejected")
 	}
 }

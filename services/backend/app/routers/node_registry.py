@@ -32,6 +32,7 @@ from app.db.models import (
 from app.db.tls import agent_tls_bindings, tls_presets
 from app.models.admin import AdminDetails
 from app.node_operations import NodeOperationInput
+from app.node_image_repositories import approved_node_image, trusted_node_repositories
 from app.node_subscription_desired import (
     MAX_MANAGED_INBOUNDS,
     SUPPORTED_PROTOCOLS,
@@ -153,9 +154,7 @@ class Heartbeat(BaseModel):
     @field_validator("node_image")
     @classmethod
     def known_node_image(cls, value: str | None) -> str | None:
-        if value not in (None, "", "waylane-node-seed:bootstrap") and not re.fullmatch(
-            r"ghcr\.io/kobaproduction/waylane-node@sha256:[0-9a-f]{64}", value
-        ):
+        if value not in (None, "", "waylane-node-seed:bootstrap") and not approved_node_image(value):
             raise ValueError("Node image must be an approved immutable digest")
         return value or None
 
@@ -268,6 +267,14 @@ async def list_registrations(
         entry["node_version"] = entry.pop("agent_version")
         result.append(entry)
     return {"nodes": result}
+
+
+@node_registry_router.get("/release-repositories")
+async def list_node_release_repositories(
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    """Trusted repositories used by the Panel's Node release picker."""
+    return {"repositories": trusted_node_repositories()}
 
 
 @node_registry_router.get("/nodes/{node_uuid}/operation")

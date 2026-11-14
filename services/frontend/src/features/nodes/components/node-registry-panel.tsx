@@ -4,6 +4,7 @@ import { $fetch } from '@/service/http'
 import { useAdmin } from '@/hooks/use-admin'
 import { hasPermission } from '@/utils/rbac'
 import { toast } from 'sonner'
+import { OFFICIAL_NODE_REPOSITORY, approvedNodeReleaseImage, withNodeReleaseRepository } from './node-release-image'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -132,6 +133,7 @@ export default function NodeDiscoveryPanel() {
   const [nameEditors, setNameEditors] = useState<Record<string, string>>({})
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null)
   const [releaseTargets, setReleaseTargets] = useState<Record<string, string>>({})
+  const [releaseRepositories, setReleaseRepositories] = useState<string[]>([OFFICIAL_NODE_REPOSITORY])
   const [releaseStates, setReleaseStates] = useState<Record<string, NodeReleaseOperation>>({})
   const [releaseBusy, setReleaseBusy] = useState(false)
   const [renameBusy, setRenameBusy] = useState<string | null>(null)
@@ -187,8 +189,8 @@ export default function NodeDiscoveryPanel() {
   const requestNodeLifecycle = async (uuid: string, action: 'update' | 'reconnect') => {
     if (!canApprove || releaseBusy) return
     const image = releaseTargets[uuid]?.trim() ?? ''
-    if (action === 'update' && !/^ghcr\.io\/kobaproduction\/waylane-node@sha256:[0-9a-f]{64}$/.test(image)) {
-      toast.error('Укажите точный digest официального образа WayLane Node из GHCR')
+    if (action === 'update' && !approvedNodeReleaseImage(image, releaseRepositories)) {
+      toast.error('Укажите точный digest образа из разрешённого GHCR или собственного Registry')
       return
     }
     const message = action === 'update'
@@ -241,6 +243,9 @@ export default function NodeDiscoveryPanel() {
 
   useEffect(() => {
     if (!canRead) return
+    void $fetch<{ repositories: string[] }>('/api/node-registry/release-repositories')
+      .then(result => setReleaseRepositories(result.repositories))
+      .catch(() => toast.error('Не удалось загрузить разрешённые Registry для Node'))
     void refresh()
     // Discovery is a live node registry. Keep it fresh while this view exists.
     const timer = window.setInterval(() => {
@@ -711,12 +716,22 @@ export default function NodeDiscoveryPanel() {
                     {releaseTarget === node.node_uuid && (
                       <div className="space-y-3">
                         <p className="text-muted-foreground text-xs">
-                          Agent остаётся установленным. Изменяется только контейнер Node по точному GHCR digest.
-                          Новый контейнер должен подтвердить WSS; если этого не произойдёт, Agent попытается
-                          восстановить предыдущую версию. Обновление Xray выполняется отдельно ниже.
+                          Agent остаётся установленным. Изменяется только контейнер Node по SHA-256 digest
+                          из разрешённого реестра. Новый контейнер должен подтвердить WSS; если этого не
+                          произойдёт, Agent попытается восстановить предыдущую версию. Обновление Xray отдельно.
                         </p>
+                        <select aria-label="Registry для обновления Node"
+                          className="border-input bg-background min-h-9 w-full rounded-md border px-3 py-1 text-sm"
+                          value={releaseRepositories.find(repo => (releaseTargets[node.node_uuid] ?? '').startsWith(repo + '@sha256:')) ?? OFFICIAL_NODE_REPOSITORY}
+                          onChange={event => setReleaseTargets(previous => ({ ...previous,
+                            [node.node_uuid]: withNodeReleaseRepository(event.target.value, previous[node.node_uuid] ?? ''),
+                          }))}>
+                          {releaseRepositories.map(repository => <option key={repository} value={repository}>
+                            {repository === OFFICIAL_NODE_REPOSITORY ? 'GitHub Container Registry (GHCR)' : 'Собственный Registry'} — {repository}
+                          </option>)}
+                        </select>
                         <Input aria-label="Новый digest Node" className="font-mono text-xs"
-                          placeholder="ghcr.io/kobaproduction/waylane-node@sha256:..."
+                          placeholder={OFFICIAL_NODE_REPOSITORY + '@sha256:...'}
                           value={releaseTargets[node.node_uuid] ?? ''}
                           onChange={e => setReleaseTargets(prev => ({ ...prev, [node.node_uuid]: e.target.value }))} />
                         <div className="flex flex-wrap gap-2">

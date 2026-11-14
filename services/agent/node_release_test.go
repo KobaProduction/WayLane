@@ -208,3 +208,20 @@ func TestAgentFailedJournalWritePreservesPreviousTerminalOperation(t *testing.T)
 		t.Fatal("failed release journal write discarded previous operation or changed the Node")
 	}
 }
+
+func TestCustomNodeReleaseRetainsTrustedSelectionAndRejectsRevocation(t *testing.T) {
+	custom := "registry.example.com:5000/waylane/node@sha256:" + strings.Repeat("a", 64)
+	t.Setenv(extraNodeRepositoryEnv, "registry.example.com:5000/waylane/node")
+	m := &manager{stateDir: t.TempDir()}
+	if err := m.saveRelease(custom); err != nil {
+		t.Fatal(err)
+	}
+	restored := &manager{stateDir: m.stateDir}
+	if err := restored.loadRelease(); err != nil || restored.image != custom {
+		t.Fatalf("trusted persisted OCI image was not restored: %v", err)
+	}
+	t.Setenv(extraNodeRepositoryEnv, "")
+	if err := (&manager{stateDir: m.stateDir}).loadRelease(); err == nil {
+		t.Fatal("removed custom OCI repository left previously pinned image trusted")
+	}
+}

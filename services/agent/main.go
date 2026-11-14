@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,8 +28,6 @@ const (
 	agentSocket   = "/var/lib/waylane-agent/control/agent.sock"
 	dockerSocket  = "/run/user/1000/docker.sock"
 )
-
-var nodeDigest = regexp.MustCompile(`^ghcr\.io/kobaproduction/waylane-node@sha256:[0-9a-f]{64}$`)
 
 type dockerRun func(context.Context, ...string) (string, error)
 
@@ -142,15 +139,15 @@ func (m *manager) loadRelease() error {
 		Version int    `json:"version"`
 		Image   string `json:"image"`
 	}
-	if err = json.Unmarshal(raw, &doc); err != nil || doc.Version != 1 || !nodeDigest.MatchString(doc.Image) {
+	if err = json.Unmarshal(raw, &doc); err != nil || doc.Version != 1 || !approvedNodeImage(doc.Image) {
 		return errors.New("invalid persisted Node release")
 	}
 	m.image = doc.Image
 	return nil
 }
 func (m *manager) saveRelease(image string) error {
-	if !nodeDigest.MatchString(image) {
-		return errors.New("Node image must be pinned to approved GHCR digest")
+	if !approvedNodeImage(image) {
+		return errors.New("Node image must be pinned to an approved OCI registry digest")
 	}
 	raw, _ := json.Marshal(struct {
 		Version int    `json:"version"`
@@ -198,7 +195,7 @@ func (m *manager) stageImage(ctx context.Context, image string) error {
 		}
 		return nil
 	}
-	if !nodeDigest.MatchString(image) {
+	if !approvedNodeImage(image) {
 		return errors.New("unapproved or mutable Node image reference")
 	}
 	if _, err := m.run(ctx, "pull", image); err != nil {
@@ -216,7 +213,7 @@ func (m *manager) startNode(ctx context.Context, image string) error {
 // The target must already exist in the private daemon. Used for verified
 // cutover and offline rollback: never re-pull old images during an outage.
 func (m *manager) startNodeStaged(ctx context.Context, image string) error {
-	if image != nodeSeed && !nodeDigest.MatchString(image) {
+	if image != nodeSeed && !approvedNodeImage(image) {
 		return errors.New("unapproved staged Node image")
 	}
 	// Private ephemeral file prevents secrets appearing in process arguments.
@@ -235,6 +232,7 @@ func (m *manager) startNodeStaged(ctx context.Context, image string) error {
 		{"NODE_TOKEN", m.nodeToken}, {"DEV_ALLOW_HTTP", m.devHTTP},
 		{"AWG_EXPERIMENTAL_DEV", os.Getenv("AWG_EXPERIMENTAL_DEV")},
 		{"WAYLANE_XRAY_STATS_READONLY", os.Getenv("WAYLANE_XRAY_STATS_READONLY")},
+		{"WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY", os.Getenv(extraNodeRepositoryEnv)},
 	} {
 		if strings.ContainsAny(p[1], "\r\n") {
 			envFile.Close()
@@ -370,7 +368,7 @@ func (m *manager) updateNodeStaged(ctx context.Context, next string) error {
 }
 
 func (m *manager) updateNodePrepared(ctx context.Context, next string, alreadyStaged bool) error {
-	if !nodeDigest.MatchString(next) {
+	if !approvedNodeImage(next) {
 		return errors.New("Node image digest must be immutable and from approved registry")
 	}
 	if next == m.image {
@@ -467,6 +465,9 @@ func run(ctx context.Context) error {
 	m := &manager{run: systemDocker, stateDir: os.Getenv("NODE_STATE_DIR"),
 		panelURL: os.Getenv("CONTROL_PANEL_URL"), discoveryToken: os.Getenv("DISCOVERY_TOKEN"),
 		nodeToken: os.Getenv("NODE_TOKEN"), devHTTP: os.Getenv("DEV_ALLOW_HTTP")}
+	if _, err := extraNodeRepository(); err != nil {
+		return err
+	}
 	if m.stateDir != "/var/lib/waylane-agent" || os.Getenv("ROOTLESS_SOCKET") != dockerSocket ||
 		m.panelURL == "" || ((m.discoveryToken == "") == (m.nodeToken == "")) {
 		return errors.New("invalid Agent state, socket or enrollment configuration")

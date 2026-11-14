@@ -6,12 +6,11 @@ The Node owns the single outbound WSS/Protobuf connection to the Panel,
 and manages its own VPN Core siblings through the private rootless daemon.
 
 On first installation, Agent builds a local seed Node from a binary bundled
-in the installer image. On Agent restart the local seed image is rebuilt from
-its embedded binary (using Docker build cache) and its immutable image ID is
-compared to the running child; a stale child is replaced without touching
-identity volumes. A child stuck in Docker's `restarting` state is not
-considered ready. A subsequently published immutable Node image can be
-installed independently without restarting Agent. The stable Agent API v1
+in the installer image. A healthy existing inner Node is preserved across
+outer Agent restarts, even when the bundled seed source changed; only an
+explicit Node release replaces that child. A child stuck in Docker's
+`restarting` state is not considered ready. A subsequently published immutable
+Node image can be installed independently without restarting Agent. The stable Agent API v1
 uses only a private Unix socket at NODE_STATE_DIR/control/agent.sock:
 - GET /v1/node: current chosen Node image
 - PUT /v1/node/release with JSON api_version=1 and pinned image digest.
@@ -33,9 +32,11 @@ networking is separately subject to platform settings.
 
 Builds and releases are independent: Agent release tags use agent-v* and Node
 release tags use node-v*. The first install bundles a seed Node binary from
-the monorepo; later a Node digest from the approved GHCR repository may be
-applied without changing the Agent. The current Panel does not yet have a
-public Node-release endpoint; Agent local Unix API is the authority.
+the monorepo; later a Node digest from the approved GHCR repository or
+one additional operator-configured OCI repository may be applied without
+changing the Agent. The authenticated operator Node Registry queues
+updates through the existing binary WSS; Agent's private Unix API remains
+the only Docker lifecycle owner.
 
 On restart, the Agent retains its desired Node image, identity volume and
 private daemon state. It verifies that the running Agent-owned Node image
@@ -75,7 +76,7 @@ The Agent is **not** a self-updater and must not be recreated by ordinary
 Node/Xray/Core releases. Updates are explicit operator commands from Node
 Registry via the **existing** authenticated Node→Backend binary WSS. The
 replaceable Node forwards the approved immutable
-`ghcr.io/kobaproduction/waylane-node@sha256:<digest>` to the stable Agent
+image reference of the form `<approved-repository>@sha256:<64 lowercase hex>` to the stable Agent
 using its private, mode-0600 Unix socket. There is no public update port,
 host Docker socket, or direct Backend→Docker connection.
 

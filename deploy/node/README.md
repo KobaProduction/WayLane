@@ -305,13 +305,59 @@ First check Docker `restartCount`, the actual error in Agent logs and the
 private Rootless Docker health. Running status is not equivalent to a healthy
 Node/Xray; validate the existing private SOCKS5 traffic separately.
 
+### Approved Node image registries (GHCR + one optional OCI repository)
+
+By default the Backend and stable Agent accept **only** immutable
+`ghcr.io/kobaproduction/waylane-node@sha256:<64 lowercase hex>` references.
+The same operator key `WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY` can additionally
+allow one exact OCI image repository, for example
+`registry.example.com:5000/waylane/node` (repository path, **not** an image
+tag, URL scheme, digest, or registry host alone). It is **optional**: leave it
+empty to retain GHCR-only behavior. The GHCR source remains available even
+when the additional repository is configured. The repository value must use
+lowercase DNS hostname, optional explicit port and image path, and be at most
+55 bytes due to the persisted Node image field's 128-character bound.
+
+Configure the same value **in both** the WayLane Backend application and the
+outer WayLane Node Agent environment for each applicable Classic/Discovery
+installation, using their existing Coolify runtime environment variable
+mechanism. The Node inherits the approved repository directly from its Agent
+when its container is created; already-running inner Nodes do not hot-reload
+this key. The Backend's authenticated `GET /api/node-registry/release-repositories`
+endpoint advertises the approved repositories, and the Node Registry UI selects
+the source before accepting the full immutable `<repository>@sha256:<digest>`.
+Backend, inner Node and Agent each validate the image independently. A mismatch
+is rejected rather than pulling an arbitrary registry image. Never remove a
+configured repository while a persisted Node release still references it:
+Agent startup intentionally fails closed instead of silently switching sources.
+
+The `node-v*` workflow always publishes to GHCR. An **optional**, independent
+`publish-secondary` job publishes the same checked-out Node source to the
+operator's own Registry if the GitHub Actions repository variable
+`WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY` is configured. Publishing requires
+repository secrets `WAYLANE_NODE_REGISTRY_USERNAME` and
+`WAYLANE_NODE_REGISTRY_PASSWORD` for a dedicated **write-only-for-images**
+CI identity scoped to that registry/repository; no credentials enter the
+GitHub build context or a Node image. These names are opt-in and **must not**
+be populated until the Registry is ready. The official GHCR publish remains
+independent and succeeds when no custom Registry is configured. Each registry
+may return a different immutable digest: use the digest from the matching
+publish job summary, never assume its SHA-256 matches across registries.
+The image must be pullable from **inside Agent's private Rootless Docker daemon** over trusted TLS. Anonymous read access is
+sufficient for an image without secrets; protected registries require a
+separately approved, least-privilege credential provisioning mechanism. This
+change does not introduce registry credentials, mount a Docker config from the
+host, allow insecure HTTP, or authorize an automatic Agent redeploy. Test
+accessibility and pinned pull before an operator attempts a Node cutover.
+
 ### Independent Node versions and long-lived Agent
 
 The outer Compose Agent is deliberately stable; upgrade it only with a
 separately approved manual Coolify deployment. A healthy Node seed image is
 **not** implicitly replaced by an Agent rebuild. Node releases are immutable
-GHCR images emitted on explicit `node-v*` Git tags and approved by digest in
-Node Registry. Updates flow Panel → authenticated binary WSS → current Node →
+OCI images approved by digest in Node Registry; the existing `node-v*` Git tag
+workflow publishes the official GHCR image, and an optional extra repository
+can serve a separately published copy. Updates flow Panel → authenticated binary WSS → current Node →
 private Agent Unix API → bounded replacement/rollback of the inner Node only.
 This preserves all installation-scoped volumes and unaffected Core containers.
 Do not configure automatic Coolify Node/Agent deployment or turn a Node image
@@ -340,8 +386,9 @@ instead of introducing a public Agent management listener.
 
 The Node digest published by the `node-v*` workflow must be pullable from
 inside Agent's private Rootless Docker registry context. The current Agent
-does **not** store GHCR credentials; an inaccessible/private package fails in
-`pulling` with `image_unavailable` **before** the existing Node is stopped.
+does **not** store per-registry credentials; an inaccessible/private package
+in either registry fails in `pulling` with `image_unavailable` **before** the
+existing Node is stopped.
 Publishing a tag or building an image does not automatically deploy that image
 or change the Agent's Compose resource. Check package accessibility and select
 the immutable digest explicitly before starting an update.

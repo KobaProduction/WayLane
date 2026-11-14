@@ -16,6 +16,7 @@ services:
       DEV_ALLOW_HTTP: "false"
       AWG_EXPERIMENTAL_DEV: "false"
       WAYLANE_XRAY_STATS_READONLY: ${WAYLANE_XRAY_STATS_READONLY:-false}
+      WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY: ${WAYLANE_NODE_EXTRA_IMAGE_REPOSITORY:-}
 
 # A Coolify resource owns its own volumes/Compose project identity.
 volumes:

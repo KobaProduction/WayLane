@@ -220,7 +220,7 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 				status, _ = readAgentRelease(check)
 			}
 		}
-		if status.OperationID == "" || !approvedNodeDigest.MatchString(status.Image) {
+		if status.OperationID == "" || !approvedNodeImage(status.Image) {
 			return nil
 		}
 		payload := map[string]any{
@@ -339,7 +339,7 @@ func runControlStreamDrivers(ctx context.Context, stream binaryStream, ident ide
 				}
 				return errors.New("operator-requested WSS reconnect")
 			}
-			if input.Action != "update" || !approvedNodeDigest.MatchString(input.Image) {
+			if input.Action != "update" || !approvedNodeImage(input.Image) {
 				return errors.New("invalid immutable Node update target")
 			}
 			jobCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
