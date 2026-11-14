@@ -75,17 +75,9 @@ jobs:
           docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml config --format json |
             python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert set(s)=={"bootstrap","agent"}, set(s); assert s["bootstrap"]["privileged"] is True; assert not s["agent"].get("privileged",False); assert all("/var/run/docker.sock" not in str(m) and "/run/docker.sock" not in str(m) for c in s.values() for m in c.get("volumes",[]))'
           # Validate both canonical Node installation modes and their Coolify adapters.
-          python3 - <<'PYCOMPOSE'
-          from pathlib import Path
-          for mode in ("classic", "discovery"):
-              path = Path(f"deploy/node/{mode}/docker-compose.coolify.yaml")
-              source = path.read_text()
-              assert source.count("    exclude_from_hc: true\n") == 1
-              Path(f"deploy/node/{mode}/.node.native-check.yaml").write_text(
-                  source.replace("    exclude_from_hc: true\n", "    x-coolify-exclude-from-health: true\n")
-              )
-          PYCOMPOSE
-          trap 'rm -f deploy/node/*/.node.native-check.yaml' EXIT
+          # Coolify adapters no longer carry the old exclude_from_hc metadata.
+          # Parse their actual tracked manifests, without manufacturing a
+          # temporary variant that would not match the deployment source.
           for mode in classic discovery; do
             if [ "$mode" = classic ]; then
               export NODE_TOKEN=wl_node_01234567-89ab-4cde-a012-3456789abcde_0123456789012345678901234567890123456789012
@@ -94,7 +86,7 @@ jobs:
               export NODE_TOKEN=
               export DISCOVERY_TOKEN=wl_disc_ci-only
             fi
-            docker compose -p waylane-node-ci -f "deploy/node/$mode/.node.native-check.yaml" config --format json |
+            docker compose -p waylane-node-ci -f "deploy/node/$mode/docker-compose.coolify.yaml" config --format json |
               python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert s["agent"]["network_mode"]=="host"; assert not s["agent"].get("privileged",False); assert "CONTROL_TRANSPORT" not in s["agent"]["environment"]; assert "GRPC_DEV_INSECURE" not in s["agent"]["environment"]; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
           done
           # Both independent generic entrypoints must keep identical security
