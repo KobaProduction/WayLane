@@ -764,10 +764,20 @@ export default function NodeDiscoveryPanel() {
                         .then(setTlsPresetChoices).catch(() => setTlsPresetChoices([]))
                     }} disabled={!node.capabilities?.includes('xray.protobuf.binary')}>Xray: управление (DEV)</Button>
                     <span className="text-muted-foreground text-xs">
-                      {!node.capabilities?.includes('xray.protobuf.binary') ? 'Нода ещё не объявила поддержку Xray · ' : ''}
-                      {xrayStates[node.node_uuid]?.configured
-                        ? `Версия: ${xrayStates[node.node_uuid].image_version} · ${xrayStates[node.node_uuid].runtime_status} · поколение ${xrayStates[node.node_uuid].applied_generation}/${xrayStates[node.node_uuid].generation}`
-                        : 'Xray не настроен'}
+                      {!node.capabilities?.includes('xray.protobuf.binary')
+                        ? t('nodes.xrayNotSupported')
+                        : !xrayStates[node.node_uuid]
+                          ? t('nodes.xrayNotLoaded')
+                          : xrayStates[node.node_uuid].configured
+                            ? t('nodes.xrayRunningSummary', {
+                                version: xrayStates[node.node_uuid].image_version,
+                                status: t(`nodes.logs.status.${xrayStates[node.node_uuid].runtime_status}`, {
+                                  defaultValue: xrayStates[node.node_uuid].runtime_status,
+                                }),
+                                applied: xrayStates[node.node_uuid].applied_generation,
+                                generation: xrayStates[node.node_uuid].generation,
+                              })
+                            : t('nodes.xrayNotConfigured')}
                     </span>
                   </div>
                   {xrayTarget === node.node_uuid && (

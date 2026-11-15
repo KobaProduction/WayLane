@@ -4084,4 +4084,9 @@
   "nodes.serversNav": "Серверы"
 ,
   "nodes.sectionSwitcher": "Раздел управления узлами"
+,
+  "nodes.xrayNotSupported": "Узел не поддерживает управление Xray",
+  "nodes.xrayNotLoaded": "Статус не загружен — откройте управление Xray",
+  "nodes.xrayNotConfigured": "Конфигурация Xray отсутствует",
+  "nodes.xrayRunningSummary": "Версия {{version}} · {{status}} · поколение {{applied}}/{{generation}}"
 }

@@ -4130,4 +4130,9 @@
   "nodes.serversNav": "Servers"
 ,
   "nodes.sectionSwitcher": "Node management section"
+,
+  "nodes.xrayNotSupported": "Node does not support Xray management",
+  "nodes.xrayNotLoaded": "Status not loaded — open Xray controls",
+  "nodes.xrayNotConfigured": "No Xray configuration",
+  "nodes.xrayRunningSummary": "Version {{version}} · {{status}} · generation {{applied}}/{{generation}}"
 }
