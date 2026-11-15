@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useCommandCreate } from '@/hooks/use-command-create'
+import NodeOnboardingDialog from '@/features/nodes/components/node-onboarding-dialog'
 import { getCoresListUseConfigModal } from '@/utils/dashboardPreferenceStorage'
 
 interface Tab {
@@ -42,11 +43,18 @@ const Settings = () => {
     return false
   })
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const isCoreEditorPage = /^\/nodes\/cores\/[^/]+$/.test(location.pathname)
+
+  // A route change must never keep the onboarding modal above the logs/core
+  // pages. Those views are independent operator tasks.
+  useEffect(() => {
+    if (location.pathname !== '/nodes') setCreateDialogOpen(false)
+  }, [location.pathname])
 
   const handleCreateNode = useCallback(() => {
     if (!canReadNodes || !canCreateNodes) return
-    window.dispatchEvent(new CustomEvent('openNodeDialog'))
+    setCreateDialogOpen(true)
   }, [canCreateNodes, canReadNodes])
 
   const handleCreateCore = useCallback(() => {
@@ -59,6 +67,11 @@ const Settings = () => {
   }, [canCreateCores, location.pathname, navigate])
 
   useCommandCreate('node', handleCreateNode)
+
+  useEffect(() => {
+    window.addEventListener('openNodeDialog', handleCreateNode)
+    return () => window.removeEventListener('openNodeDialog', handleCreateNode)
+  }, [handleCreateNode])
   useCommandCreate('core', handleCreateCore)
 
   useEffect(() => {
@@ -112,7 +125,7 @@ const Settings = () => {
     }
     return {
       title: 'nodes.title',
-      description: 'manageNodes',
+      description: 'nodes.controlDescription',
       buttonIcon: canCreateNodes && canReadNodes ? Plus : undefined,
       buttonText: canCreateNodes && canReadNodes ? 'nodes.addNode' : undefined,
       onButtonClick: canReadNodes && canCreateNodes ? handleCreateNode : undefined,
@@ -128,7 +141,17 @@ const Settings = () => {
       )}
       <div className="flex min-h-0 w-full flex-1 flex-col">
         {!isCoreEditorPage && (
-          <div className="scrollbar-hide flex overflow-x-auto border-b px-4 lg:flex-wrap">
+          <>
+          <div className="border-b px-4 py-2 sm:hidden">
+            <select aria-label={t('nodes.sectionSwitcher')}
+              className="border-input bg-background min-h-10 w-full rounded-md border px-3 text-sm"
+              value={visibleTabs.some(tab => tab.url === location.pathname) ? location.pathname :
+                (location.pathname.startsWith('/nodes/cores') ? '/nodes/cores' : '/nodes')}
+              onChange={event => navigate(event.target.value)}>
+              {visibleTabs.map(tab => <option key={tab.id} value={tab.url}>{t(tab.label)}</option>)}
+            </select>
+          </div>
+          <div className="scrollbar-hide hidden overflow-x-auto border-b px-4 sm:flex lg:flex-wrap">
             {visibleTabs.map(tab => (
               <button
                 key={tab.id}
@@ -151,10 +174,18 @@ const Settings = () => {
               </button>
             ))}
           </div>
+          </>
         )}
         <PageTransition isContentTransition={true} className="flex min-h-0 flex-1 flex-col">
           <Outlet />
         </PageTransition>
+        {canReadNodes && canCreateNodes && (
+          <NodeOnboardingDialog
+            open={createDialogOpen}
+            onOpenChange={setCreateDialogOpen}
+            onCreated={() => window.dispatchEvent(new Event('waylane:nodes-refresh'))}
+          />
+        )}
       </div>
     </div>
   )

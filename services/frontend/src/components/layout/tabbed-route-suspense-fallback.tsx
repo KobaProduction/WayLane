@@ -63,7 +63,7 @@ function nodesHeader(pathname: string): { title: string; description: string } {
   if (pathname.startsWith('/nodes/logs')) {
     return { title: 'nodes.logs.title', description: 'nodes.logs.description' }
   }
-  return { title: 'nodes.title', description: 'manageNodes' }
+  return { title: 'nodes.title', description: 'nodes.controlDescription' }
 }
 
 function settingsActiveTabId(pathname: string, tabs: TabDef[]): string {

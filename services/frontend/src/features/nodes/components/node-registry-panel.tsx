@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { $fetch } from '@/service/http'
 import { useAdmin } from '@/hooks/use-admin'
@@ -10,7 +11,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 
 type AgentTLSBinding = {
@@ -64,15 +64,6 @@ type XrayStatus = {
 }
 
 type EditorCoreOption = { id: number; name: string; type: string | null }
-
-type Invitation = {
-  id: number
-  label: string
-  revoked: '0' | '1'
-  created_at: string
-  expires_at: string | null
-  auto_approve: '0' | '1'
-}
 
 type NodeRuntimeMetrics = {
   scope: 'agent-runtime'
@@ -129,17 +120,11 @@ type Registration = {
 /** Autonomous WayLane Node registration and supported core controls. */
 export default function NodeDiscoveryPanel() {
   const { admin } = useAdmin()
+  const { t } = useTranslation()
   const canRead = hasPermission(admin, 'nodes', 'read')
   const canCreate = hasPermission(admin, 'nodes', 'create')
   const canApprove = hasPermission(admin, 'nodes', 'update')
   const [entries, setEntries] = useState<Registration[]>([])
-  const [invitations, setInvitations] = useState<Invitation[]>([])
-  const [label, setLabel] = useState('')
-  const [directCredentials, setDirectCredentials] = useState<{ node_uuid: string; node_token: string } | null>(null)
-  const [registrationMode, setRegistrationMode] = useState<'classic' | 'discovery'>('discovery')
-  const registrationRef = useRef<HTMLDivElement>(null)
-  const [autoApprove, setAutoApprove] = useState(false)
-  const [token, setToken] = useState('')
   const [nameEditors, setNameEditors] = useState<Record<string, string>>({})
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null)
   const [releaseTargets, setReleaseTargets] = useState<Record<string, string>>({})
@@ -173,20 +158,6 @@ export default function NodeDiscoveryPanel() {
 
 
 
-
-  // The Nodes page header and command palette use this event. The old node
-  // list/dialog no longer mounts here, so bring the actual registration form
-  // into view and keyboard focus instead of silently doing nothing.
-  useEffect(() => {
-    if (!canCreate || !canRead) return
-    const openRegistration = () => {
-      setRegistrationMode('discovery')
-      registrationRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-      registrationRef.current?.focus()
-    }
-    window.addEventListener('openNodeDialog', openRegistration)
-    return () => window.removeEventListener('openNodeDialog', openRegistration)
-  }, [canCreate, canRead])
 
   const loadNodeLifecycle = async (uuid: string) => {
     try {
@@ -304,72 +275,21 @@ export default function NodeDiscoveryPanel() {
 
   const refresh = async () => {
     try {
-      const [result, invites] = await Promise.all([
-        $fetch<{ nodes: Registration[] }>('/api/node-registry/nodes'),
-        $fetch<{ invitations: Invitation[] }>('/api/node-registry/discovery-tokens'),
-      ])
+      const result = await $fetch<{ nodes: Registration[] }>('/api/node-registry/nodes')
       setEntries(result.nodes)
-      setInvitations(invites.invitations)
       setError('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось загрузить ноды')
+      setError(e instanceof Error ? e.message : 'Не удалось загрузить узлы')
     }
   }
 
   useEffect(() => {
     if (!canRead) return
     void refresh()
-    // Discovery is a live node registry. Keep it fresh while this view exists.
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void refresh()
-    }, 30000)
-    return () => window.clearInterval(timer)
+    const refreshOnRegistration = () => { void refresh() }
+    window.addEventListener('waylane:nodes-refresh', refreshOnRegistration)
+    return () => window.removeEventListener('waylane:nodes-refresh', refreshOnRegistration)
   }, [canRead])
-
-  const invite = async () => {
-    if (!label.trim() || !canCreate) return
-    setLoading(true)
-    setToken('')
-    try {
-      const response = await $fetch<{ discovery_token: string }>('/api/node-registry/discovery-tokens', {
-        method: 'POST', body: { label: label.trim(), auto_approve: autoApprove },
-      })
-      setToken(response.discovery_token)
-      setLabel('')
-      await refresh()
-      toast.success('Discovery token created')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Invitation could not be created')
-    } finally { setLoading(false) }
-  }
-
-  const createDirect = async () => {
-    if (!canCreate) return
-    setLoading(true)
-    setDirectCredentials(null)
-    try {
-      const reply = await $fetch<{ node_uuid: string; node_token: string }>('/api/node-registry/classic', {
-        method: 'POST',
-      })
-      setDirectCredentials(reply)
-      await refresh()
-      toast.success('Classic нода создана; сохраните её токен')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось создать Classic-ноду')
-    } finally { setLoading(false) }
-  }
-
-  const revokeInvitation = async (id: number) => {
-    if (!canApprove) return
-    setLoading(true)
-    try {
-      await $fetch('/api/node-registry/discovery-tokens/' + id + '/revoke', { method: 'POST' })
-      await refresh()
-      toast.success('Discovery invitation revoked')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to revoke invitation')
-    } finally { setLoading(false) }
-  }
 
   const decide = async (uuid: string, operation: 'approve' | 'revoke') => {
     if (!canApprove) return
@@ -622,130 +542,42 @@ export default function NodeDiscoveryPanel() {
   if (!canRead) return null
 
   return (
-    <Card className="mb-5">
-      <CardHeader>
-        <CardTitle>Управление нодами</CardTitle>
-        <CardDescription>
-          Нода устанавливается на сервер и включает bootstrap, управляющий процесс и отдельные VPN-ядра.
-          Выберите способ регистрации: управляемая панелью нода или самостоятельное подключение через Discovery.
-          Клиентский трафик и другие ноды не переключаются автоматически.
-        </CardDescription>
+    <Card className="m-4 min-w-0 shadow-sm">
+      <CardHeader className="pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle>{t('nodes.connectedTitle')}</CardTitle>
+            <CardDescription>{t('nodes.connectedDescription')}</CardDescription>
+          </div>
+          <Badge variant="outline" className="shrink-0">{entries.length} {t('nodes.countLabel')}</Badge>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div ref={registrationRef} tabIndex={-1} aria-label="Регистрация новой ноды" className="flex flex-col gap-3 rounded-md border p-3 focus-visible:outline-2 focus-visible:outline-primary">
-          <p className="text-sm font-medium">Способ подключения новой ноды</p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="Способ регистрации ноды">
-            <Button type="button" variant={registrationMode === 'classic' ? 'default' : 'outline'}
-              onClick={() => setRegistrationMode('classic')}>
-              Classic
-            </Button>
-            <Button type="button" variant={registrationMode === 'discovery' ? 'default' : 'outline'}
-              onClick={() => setRegistrationMode('discovery')}>
-              Discovery
-            </Button>
-          </div>
-          {registrationMode === 'classic' ? (
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-xs">
-                Панель создаёт отдельную ноду и выдаёт одноразовый NODE_TOKEN. После подключения нода автоматически передаст hostname сервера — отдельное поле имени не требуется.
-                В Coolify используйте /deploy/node/classic и /docker-compose.coolify.yaml. Внутри ноды работают bootstrap и управляющий процесс.
-              </p>
-              {canCreate && (
-                <Button type="button" disabled={loading} onClick={() => void createDirect()}>
-                  Создать Classic-ноду
-                </Button>
-              )}
-              {directCredentials && (
-                <div className="space-y-2 rounded-md border p-3">
-                  <p className="text-sm">Токен отображается один раз. Сохраните его в защищённой переменной Coolify.</p>
-                  <p className="break-all font-mono text-xs">UUID: {directCredentials.node_uuid}</p>
-                  <Input aria-label="Токен Classic-ноды" type="password" readOnly value={directCredentials.node_token}
-                    className="font-mono text-xs" />
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm"
-                      onClick={() => void navigator.clipboard.writeText('NODE_TOKEN=' + directCredentials.node_token)}>
-                      Копировать NODE_TOKEN
-                    </Button>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setDirectCredentials(null)}>Скрыть</Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-xs">
-                Нода сама регистрируется по Discovery-токену. В Coolify используйте /deploy/node/discovery и /docker-compose.coolify.yaml.
-                По умолчанию новые ноды требуют ручного подтверждения. Автоматическое одобрение повышает риск при утечке приглашения.
-              </p>
-              {canCreate && (
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input className="min-w-0 flex-1" aria-label="Название Discovery-группы"
-                    placeholder="Группа или приглашение" value={label}
-                    onChange={e => setLabel(e.target.value)} maxLength={120} />
-                  <Button type="button" onClick={() => void invite()} disabled={loading || !label.trim()} className="w-full sm:w-auto">
-                    Создать Discovery-токен
-                  </Button>
-                </div>
-              )}
-              {canCreate && (
-                <label className="flex items-start gap-2 text-sm">
-                  <Checkbox checked={autoApprove} onCheckedChange={checked => setAutoApprove(checked === true)} />
-                  <span>Автоматически одобрять ноды по этому приглашению (одобренные ноды могут получать команды управления ядрами)</span>
-                </label>
-              )}
-              {token && (
-                <div className="min-w-0 space-y-2 rounded-md border p-3">
-                  <p className="text-sm">Токен отображается один раз. В панели хранится только его хеш.</p>
-                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                    <Input aria-label="Discovery-токен" className="min-w-0 flex-1 font-mono text-xs"
-                      value={token} readOnly type="password" />
-                    <Button variant="outline" type="button"
-                      onClick={() => void navigator.clipboard.writeText('DISCOVERY_TOKEN=' + token)}>
-                      Копировать DISCOVERY_TOKEN
-                    </Button>
-                    <Button variant="ghost" type="button" onClick={() => setToken('')}>Скрыть</Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          <p className="text-muted-foreground text-xs">
-            Единственный адрес CONTROL_PANEL_URL используется для регистрации по HTTPS
-            и постоянного защищённого WebSocket (WSS) с бинарными сообщениями Protobuf.
-            Панель передаёт команды, нода возвращает состояние и телеметрию по тому же соединению.
-            Открывать входящий порт управления на ноде не требуется.
-          </p>
-        </div>
-        {registrationMode === 'discovery' && invitations.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Discovery-токены ({invitations.length})</p>
-            {invitations.map(item => (
-              <div key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border p-3">
-                <div className="min-w-0 space-y-1">
-                  <span className="break-words text-sm">{item.label}</span>
-                  <p className="text-muted-foreground text-xs">{item.revoked === '1' ? 'Отозван' : item.expires_at ? 'Ограничен по времени' : 'Постоянный'} · {item.auto_approve === '1' ? 'Автоподключение' : 'Ручное подтверждение'}</p>
-                </div>
-                {canApprove && item.revoked !== '1' && (
-                  <Button type="button" size="sm" variant="outline" disabled={loading}
-                    onClick={() => void revokeInvitation(item.id)}>Отозвать токен</Button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium">Подключённые и обнаруженные ноды ({entries.length})</span>
+          <span className="text-sm font-medium">{t('nodes.registeredServers')}</span>
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>Обновить</Button>
         </div>
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
-        {entries.length === 0 && !error && <p className="text-muted-foreground text-sm">Заявок пока нет.</p>}
+        {entries.length === 0 && !error && (
+          <div className="rounded-lg border border-dashed px-4 py-8 text-center">
+            <p className="mb-3 text-sm text-muted-foreground">{t('nodes.emptyHint')}</p>
+            {canCreate && (
+              <Button type="button" variant="outline"
+                onClick={() => window.dispatchEvent(new Event('openNodeDialog'))}>
+                {t('nodes.addNode')}
+              </Button>
+            )}
+          </div>
+        )}
         <div className="space-y-2">
           {entries.map(node => (
-            <div key={node.node_uuid} className="flex min-w-0 flex-col justify-between gap-3 rounded-md border p-3 sm:flex-row sm:items-center">
-              <div className="min-w-0 space-y-1">
+            <div key={node.node_uuid} className="min-w-0 space-y-4 rounded-xl border p-4 shadow-sm">
+              <div className="min-w-0 space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 break-words text-sm font-medium">{node.display_name}</span>
-                  <Badge variant="secondary">{node.status}</Badge>
+                  <span className="min-w-0 break-words text-base font-semibold">{node.display_name}</span>
+                  <Badge variant={node.status === 'approved' ? 'green' : node.status === 'pending' ? 'yellow' : 'red'}>
+                    {t(`nodes.nodeStatus.${node.status}`, { defaultValue: node.status })}
+                  </Badge>
                   <Badge variant="outline">{node.connection_mode === 'classic' ? 'Classic' : 'Discovery'}</Badge>
                 </div>
                 {canApprove && node.node_uuid in nameEditors && (
@@ -767,12 +599,12 @@ export default function NodeDiscoveryPanel() {
                     Переименовать
                   </Button>
                 )}
-                <p className="text-muted-foreground break-all font-mono text-xs">{node.node_uuid}</p>
-                <p className="text-muted-foreground break-all font-mono text-xs">
-                  Вложенная Node: {node.node_image ?? 'образ ещё не подтверждён'} · стабильный Agent API v1
+                <p className="text-muted-foreground text-sm">
+                  {node.last_seen_at ? `${t('nodes.lastSeen')}: ${new Date(node.last_seen_at).toLocaleString()}` : t('nodes.awaitingFirstHeartbeat')}
+                  {' · '}{t('nodes.agentVersion')}: {node.node_version}
                 </p>
                 {canApprove && node.status !== 'revoked' && (
-                  <div className="mt-2 space-y-2 rounded-md border p-3">
+                  <div className="space-y-2 rounded-md bg-muted/30 p-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button type="button" size="sm" variant="outline"
                         onClick={() => {
@@ -783,10 +615,10 @@ export default function NodeDiscoveryPanel() {
                             void loadNodeRegistries(node.node_uuid)
                           }
                         }}>
-                        {releaseTarget === node.node_uuid ? 'Скрыть обновления Node' : 'Версия / обновление / WSS'}
+                        {releaseTarget === node.node_uuid ? t('nodes.releaseHide') : t('nodes.releaseSettings')}
                       </Button>
                       {!node.capabilities?.includes('node.release.v1') && (
-                        <span className="text-muted-foreground text-xs">Node ожидает подтверждения приватного Agent API</span>
+                        <span className="text-muted-foreground text-xs">{t('nodes.releaseUnavailable')}</span>
                       )}
                     </div>
                     {releaseTarget === node.node_uuid && (
@@ -897,25 +729,28 @@ export default function NodeDiscoveryPanel() {
                     )}
                   </div>
                 )}
-                <p className="text-muted-foreground break-words text-xs">
-                  Управляющий процесс {node.node_version} · {node.last_seen_at ? `Последнее взаимодействие: ${new Date(node.last_seen_at).toLocaleString()}` : 'Ожидает первого heartbeat'} · адрес соединения {node.observed_ip ?? 'неизвестен'} · внешний IP {node.reported_ipv4 ?? node.reported_ipv6 ?? 'определяется'}
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  Заявленные возможности: {node.capabilities?.length ? node.capabilities.join(', ') : 'не объявлены'}.
-                  {' '}AmneziaWG 3.1 и обычный WireGuard: запуск на автономной Node пока не реализован.
-                </p>
-                {node.machine_metrics && (
-                  <p className="text-muted-foreground break-words text-xs">
-                    Окружение ноды ({node.machine_metrics.scope}): {node.machine_metrics.os}/{node.machine_metrics.arch}
-                    {' · '}CPU {node.machine_metrics.cpu_logical_count}
-                    {' · '}RAM {Math.round(node.machine_metrics.memory_total_bytes / 1024 / 1024)} MiB
-                    {' · '}load {node.machine_metrics.load_1.toFixed(2)}
-                    {' · '}контейнер {node.machine_metrics.hostname}
-                  </p>
-                )}
+                <details className="border-t pt-3 text-xs text-muted-foreground">
+                  <summary className="w-fit cursor-pointer rounded text-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+                    {t('nodes.technicalDetails')}
+                  </summary>
+                  <div className="mt-3 space-y-2 rounded-md bg-muted/30 p-3">
+                    <p className="break-all font-mono">UUID: {node.node_uuid}</p>
+                    <p className="break-all font-mono">{t('nodes.innerImage')}: {node.node_image ?? t('nodes.imageUnknown')} · Agent API v1</p>
+                    <p>{t('nodes.connectionAddress')}: {node.observed_ip ?? '—'} · {t('nodes.publicAddress')}: {node.reported_ipv4 ?? node.reported_ipv6 ?? '—'}</p>
+                    <p>{t('nodes.capabilities')}: {node.capabilities?.length ? node.capabilities.join(', ') : '—'}</p>
+                    {node.machine_metrics && (
+                      <p>{node.machine_metrics.os}/{node.machine_metrics.arch}
+                        {' · '}CPU {node.machine_metrics.cpu_logical_count}
+                        {' · '}RAM {Math.round(node.machine_metrics.memory_total_bytes / 1024 / 1024)} MiB
+                        {' · '}load {node.machine_metrics.load_1.toFixed(2)}
+                        {' · '}{node.machine_metrics.hostname}
+                      </p>
+                    )}
+                  </div>
+                </details>
               </div>
               {canManageXray && node.status === 'approved' && (
-                <div className="min-w-0 w-full space-y-2 border-t pt-2 sm:basis-full">
+                <div className="min-w-0 w-full space-y-2 border-t pt-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => {
                       setXrayTarget(xrayTarget === node.node_uuid ? null : node.node_uuid)
@@ -1154,7 +989,7 @@ export default function NodeDiscoveryPanel() {
                 </div>
               )}
               {canApprove && node.status !== 'revoked' && (
-                <div className="flex shrink-0 gap-2">
+                <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
                   {node.status === 'pending' && <Button size="sm" disabled={loading} onClick={() => void decide(node.node_uuid, 'approve')}>Подтвердить</Button>}
                   <Button variant="outline" size="sm" disabled={loading} onClick={() => void decide(node.node_uuid, 'revoke')}>Отозвать</Button>
                 </div>

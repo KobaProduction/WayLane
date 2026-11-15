@@ -69,7 +69,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     ...(canReadNodes
       ? [
           {
-            title: 'nodes.title',
+            title: 'nodes.serversNav',
             url: '/nodes',
             icon: Share2Icon,
           },

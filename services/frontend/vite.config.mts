@@ -12,6 +12,11 @@ export default defineConfig({
   clearScreen: false,
   server: {
     host: true,
+    // Explicit isolated UI-review only: proxy browser requests to a LOCAL
+    // backend fixture, never to Coolify, production or another network host.
+    proxy: process.env.WAYLANE_UI_REVIEW_API === 'http://127.0.0.1:8321'
+      ? { '/api': 'http://127.0.0.1:8321', '/sub': 'http://127.0.0.1:8321' }
+      : undefined,
     watch: {
       ignored: ['**/build/**'],
     },
