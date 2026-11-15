@@ -305,6 +305,39 @@ First check Docker `restartCount`, the actual error in Agent logs and the
 private Rootless Docker health. Running status is not equivalent to a healthy
 Node/Xray; validate the existing private SOCKS5 traffic separately.
 
+### Operator Tokens tab: Discovery invitation lifecycle and shared GHCR read access
+
+**WayLane → Nodes → Tokens** is the dedicated operator surface for:
+
+- Discovery invitations: create a new token, set its expiration and
+  auto-approval policy, rename, change expiration, disable/re-enable, or
+  rotate its secret. The database stores SHA-256 token hashes, not plaintext.
+  Only creation and rotation return the new token once. Rotating invalidates
+  the old token for future enrollment without changing already enrolled
+  Node identities, agents, or their Core configuration.
+- GitHub Container Registry: one optional **shared** `ghcr.io` read identity
+  (`username` and GitHub PAT) for the official immutable
+  `ghcr.io/kobaproduction/waylane-node` image. The token is encrypted with
+  the Backend's existing Fernet vault; the API exposes only repository,
+  username, configured status, and update time. Operators may replace or
+  delete the stored token but can never retrieve the original plaintext from
+  a GET endpoint. The UI only accepts a *new* password on replacement.
+
+The new Backend Alembic revision `c4bd1a9fa212` adds
+`node_shared_registry_credentials`; the token value must **not** be copied to
+an Agent/Node ENV, Compose or Coolify resource secret. The backend selects
+per-Node GHCR credentials first when they exist (backwards compatibility),
+then falls back to the shared GHCR identity. Each authenticated WSS Node
+update receives only the credentials for its exact selected immutable
+repository. The Agent uses its temporary private Docker CLI credential file
+for that pull. Custom/private operator Registries continue using per-Node
+credentials; the shared GHCR identity is not forwarded for them.
+
+The official Node release CI remains independent of these credentials: its
+GitHub Actions publisher uses the job-scoped `GITHUB_TOKEN`. A live GHCR
+read/pull is not accepted by a source-level test alone; provision a read-only
+PAT and test an actual immutable release with the target Node when available.
+
 ### Registry settings belong to an individual Node, not deployment ENV
 
 Each Node is configured in **WayLane → Nodes → selected Node →

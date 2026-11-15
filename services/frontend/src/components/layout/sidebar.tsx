@@ -34,6 +34,7 @@ import {
   ListTodo,
   Lock,
   Logs,
+  KeyRound,
   Network,
   Palette,
   PieChart,
@@ -72,6 +73,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             title: 'nodes.serversNav',
             url: '/nodes',
             icon: Share2Icon,
+          },
+          {
+            title: 'nodes.tokens.title',
+            url: '/nodes/tokens',
+            icon: KeyRound,
           },
         ]
       : []),

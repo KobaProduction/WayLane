@@ -226,7 +226,7 @@ def test_node_scoped_registry_crud_and_encrypted_credentials(tmp_path, monkeypat
                     node_agent_registry_settings.c.node_uuid == str(first)))
                 assert record and "synthetic-secret" not in record
                 assert (await public_registry_list(db, second))["registries"] == [
-                    {"repository": GHCR_NODE_REPOSITORY, "username": "", "has_credentials": False, "official": True, "is_default": True}]
+                    {"repository": GHCR_NODE_REPOSITORY, "username": "", "has_credentials": False, "credential_scope": "none", "official": True, "is_default": True}]
                 credentials = await transport_registry(db, str(first), CUSTOM_IMAGE)
                 assert credentials == {"repository": CUSTOM_REPO, "username": "reader", "password": "synthetic-secret"}
                 with pytest.raises(ValueError):

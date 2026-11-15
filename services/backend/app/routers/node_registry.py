@@ -34,6 +34,7 @@ from app.models.admin import AdminDetails
 from app.node_operations import NodeOperationInput
 from app.node_image_repositories import valid_pinned_image
 from app.node_registry_settings import RegistryDefault, RegistryDelete, RegistryUpdate
+from app.node_shared_ghcr import SharedGHCRWrite, clear_shared_ghcr, save_shared_ghcr, shared_ghcr_metadata
 from app.node_subscription_desired import (
     MAX_MANAGED_INBOUNDS,
     SUPPORTED_PROTOCOLS,
@@ -78,6 +79,19 @@ class InvitationInput(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     lifetime_hours: int | None = Field(default=None, ge=1, le=8760)
     auto_approve: bool = False
+
+
+class InvitationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    auto_approve: bool | None = None
+    enabled: bool | None = None
+    lifetime_hours: int | None = Field(default=None, ge=0, le=8760)
+
+
+class InvitationRotate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lifetime_hours: int | None = Field(default=None, ge=0, le=8760)
 
 
 @node_registry_router.post("/classic", status_code=201)
@@ -227,6 +241,57 @@ async def list_invitations(
     return {"invitations": [dict(row) for row in data.mappings()]}
 
 
+@node_registry_router.patch("/discovery-tokens/{invitation_id}")
+async def update_invitation(
+    invitation_id: int, body: InvitationSettings,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    """Manage enrollment policy without ever exposing the invitation secret."""
+    changes = {}
+    if body.label is not None:
+        changes["label"] = body.label
+    if body.auto_approve is not None:
+        changes["auto_approve"] = "1" if body.auto_approve else "0"
+    if body.enabled is not None:
+        changes["revoked"] = "0" if body.enabled else "1"
+    if body.lifetime_hours is not None:
+        changes["expires_at"] = (datetime.now(UTC) + timedelta(hours=body.lifetime_hours)
+                                 if body.lifetime_hours else None)
+    if not changes:
+        raise HTTPException(422, "No invitation settings supplied")
+    await begin_immediate_if_sqlite(db)
+    result = await db.execute(update(node_discovery_invitations).where(
+        node_discovery_invitations.c.id == invitation_id).values(**changes))
+    if not result.rowcount:
+        raise HTTPException(404, "Unknown invitation")
+    await db.commit()
+    return {"updated": True}
+
+
+@node_registry_router.post("/discovery-tokens/{invitation_id}/rotate")
+async def rotate_invitation(
+    invitation_id: int, body: InvitationRotate,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    """Replace a Discovery secret, preserving enrollment identity and policy."""
+    raw = "wl_disc_" + secrets.token_urlsafe(32)
+    now = datetime.now(UTC)
+    await begin_immediate_if_sqlite(db)
+    changes = {"token_hash": digest(raw),
+               "expires_at": (now + timedelta(hours=body.lifetime_hours)
+                              if body.lifetime_hours else None)}
+    result = await db.execute(update(node_discovery_invitations).where(
+        node_discovery_invitations.c.id == invitation_id).values(**changes))
+    if not result.rowcount:
+        raise HTTPException(404, "Unknown invitation")
+    await db.commit()
+    # One-time operator display; no plaintext is stored in the database.
+    return {"id": invitation_id, "discovery_token": raw,
+            "expires_at": changes.get("expires_at")}
+
+
 @node_registry_router.post("/discovery-tokens/{invitation_id}/revoke")
 async def revoke_invitation(
     invitation_id: int,
@@ -240,6 +305,32 @@ async def revoke_invitation(
         raise HTTPException(404, "Unknown invitation")
     await db.commit()
     return {"revoked": True}
+
+
+@node_registry_router.get("/tokens/ghcr")
+async def get_shared_ghcr_token_metadata(
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "read")),
+):
+    """Metadata only; the stored GHCR token is never returned by the API."""
+    return await shared_ghcr_metadata(db)
+
+
+@node_registry_router.put("/tokens/ghcr")
+async def replace_shared_ghcr_token(
+    body: SharedGHCRWrite,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    return await save_shared_ghcr(db, body)
+
+
+@node_registry_router.delete("/tokens/ghcr")
+async def remove_shared_ghcr_token(
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("nodes", "update")),
+):
+    return await clear_shared_ghcr(db)
 
 
 @node_registry_router.get("/nodes")

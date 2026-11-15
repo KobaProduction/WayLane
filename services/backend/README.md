@@ -60,6 +60,25 @@ accounting only when a separate Backend operator flag is enabled after real
 traffic acceptance. The flags default OFF. See `shared/contracts/NODE_CONTROL.md`
 for the transport/usage boundary and explicit deployment acceptance gates.
 
+## Node Registry tokens: Discovery and shared GitHub Container Registry
+
+The authenticated operator API owns Node-scoped OCI repositories and the
+separate **Nodes → Tokens** panel. Discovery invitations support creation,
+renaming, expiry and auto-approval changes, enable/disable, and one-time
+secret rotation. An invitation secret is never returned by listing and is
+stored as a one-way hash. A rotated invitation changes new enrollments only;
+previously registered Node identities remain valid.
+
+One optional shared GHCR credential for the official
+`ghcr.io/kobaproduction/waylane-node` repository is stored in the encrypted
+`node_shared_registry_credentials` table (Alembic `c4bd1a9fa212`). Routes
+`GET/PUT/DELETE /api/node-registry/tokens/ghcr` deliberately have **no
+plaintext read operation**: GET returns non-secret metadata, PUT saves or
+replaces, DELETE removes. At authenticated Node update dispatch, Backend uses
+Node-specific GHCR credentials when present, otherwise the shared identity.
+The token is not stored in the operation journal or rendered in Node API
+responses. Custom registries never inherit the GHCR token.
+
 ## Database migrations — existing PasarGuard databases are supported
 
 The original **160 Alembic revisions** from PasarGuard Panel (pinned in

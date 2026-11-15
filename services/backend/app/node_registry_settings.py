@@ -78,15 +78,25 @@ async def public_registry_list(db: AsyncSession, node_uuid: UUID) -> dict:
     stored = (await db.execute(select(node_agent_registry_settings).where(
         node_agent_registry_settings.c.node_uuid == str(node_uuid)
     ).order_by(node_agent_registry_settings.c.repository))).mappings().all()
+    from app.node_shared_ghcr import shared_ghcr_metadata
+    shared = await shared_ghcr_metadata(db)
     values = {row["repository"]: {
         "repository": row["repository"],
-        "username": row["username"] or "",
-        "has_credentials": bool(row["encrypted_password"]),
+        "username": (row["username"] if row["encrypted_password"] else
+                     shared["username"] if row["repository"] == GHCR_NODE_REPOSITORY and shared["configured"] else
+                     row["username"] or ""),
+        "has_credentials": bool(row["encrypted_password"]) or (
+            row["repository"] == GHCR_NODE_REPOSITORY and shared["configured"]),
+        "credential_scope": ("node" if row["encrypted_password"] else
+                             "shared" if row["repository"] == GHCR_NODE_REPOSITORY and shared["configured"] else "none"),
         "official": row["repository"] == GHCR_NODE_REPOSITORY,
         "is_default": row["repository"] == preferred,
     } for row in stored}
     values.setdefault(GHCR_NODE_REPOSITORY, {"repository": GHCR_NODE_REPOSITORY,
-                    "username": "", "has_credentials": False, "official": True,
+                    "username": shared["username"] if shared["configured"] else "",
+                    "has_credentials": shared["configured"],
+                    "credential_scope": "shared" if shared["configured"] else "none",
+                    "official": True,
                     "is_default": preferred == GHCR_NODE_REPOSITORY})
     return {"registries": sorted(values.values(), key=lambda item: (not item["official"], item["repository"])),
             "default_repository": preferred}
@@ -187,5 +197,10 @@ async def transport_registry(db: AsyncSession, node_uuid: str, image: str) -> di
     ))).mappings().one_or_none()
     if row is None and repository != GHCR_NODE_REPOSITORY:
         raise ValueError("Registry is no longer configured for this Node")
+    if repository == GHCR_NODE_REPOSITORY and not (row and row["encrypted_password"]):
+        from app.node_shared_ghcr import effective_shared_ghcr
+        shared = await effective_shared_ghcr(db)
+        if shared is not None:
+            return {"repository": repository, "username": shared[0], "password": shared[1]}
     return {"repository": repository, "username": (row["username"] or "") if row else "",
             "password": decrypt_private_key(row["encrypted_password"]) if row and row["encrypted_password"] else ""}

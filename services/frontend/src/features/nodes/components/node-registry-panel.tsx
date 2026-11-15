@@ -96,6 +96,7 @@ type NodeRegistryProfile = {
   repository: string
   username: string
   has_credentials: boolean
+  credential_scope?: 'node' | 'shared' | 'none'
   official: boolean
   is_default: boolean
 }
@@ -214,6 +215,10 @@ export default function NodeDiscoveryPanel() {
 
   const saveNodeRegistry = async (uuid: string, draft: RegistryDraft) => {
     if (!canApprove || registryBusy || !draft.repository.trim()) return
+    if (draft.repository.trim() === OFFICIAL_NODE_REPOSITORY) {
+      toast.error('Общий доступ GHCR настраивается во вкладке «Токены»')
+      return
+    }
     setRegistryBusy(true)
     try {
       await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/registries', {
@@ -632,25 +637,30 @@ export default function NodeDiscoveryPanel() {
                           <p className="text-sm font-medium">Registry этой Node</p>
                           <p className="text-muted-foreground text-xs">
                             Настройки сохраняются отдельно для каждой Node. Пароль шифруется на сервере и никогда не возвращается в панель.
-                            Для приватного GHCR также можно указать учётные данные.
+                            Общий GHCR-токен задаётся во вкладке «Токены» и используется всеми нодами с GHCR.
                           </p>
                           {(registryProfiles[node.node_uuid] ?? [{ repository: OFFICIAL_NODE_REPOSITORY,
                             username: '', has_credentials: false, official: true, is_default: true }]).map(profile => (
                             <div key={profile.repository} className="flex flex-wrap items-center gap-2 rounded border p-2 text-xs">
                               <span className="min-w-0 flex-1 break-all font-mono">{profile.repository}</span>
-                              <span>{profile.has_credentials ? 'Авторизация настроена' : 'Без авторизации'}</span>
+                              <span>{profile.has_credentials
+                                ? profile.credential_scope === 'shared' ? 'Общий GHCR доступ' : 'Авторизация настроена'
+                                : 'Без авторизации'}</span>
                               {profile.is_default && <Badge variant="secondary">Основной</Badge>}
                               {canApprove && !profile.is_default && <Button size="sm" type="button" variant="outline"
                                 disabled={registryBusy} onClick={() => void setDefaultNodeRegistry(node.node_uuid, profile.repository)}>
                                 Сделать основным
                               </Button>}
-                              {canApprove && <Button size="sm" type="button" variant="outline"
+                              {profile.official && <Link to="/nodes/tokens" className="text-primary underline underline-offset-2">
+                                Настроить общий GHCR токен
+                              </Link>}
+                              {canApprove && !profile.official && <Button size="sm" type="button" variant="outline"
                                 onClick={() => setRegistryDraft({ repository: profile.repository,
                                   username: profile.username, password: '' })}>Изменить</Button>}
-                              {canApprove && (!profile.official || profile.has_credentials) && <Button size="sm" type="button"
+                              {canApprove && (!profile.official || profile.credential_scope === 'node') && <Button size="sm" type="button"
                                 variant="ghost" disabled={registryBusy}
                                 onClick={() => void deleteNodeRegistry(node.node_uuid, profile.repository)}>
-                                {profile.official ? 'Сбросить доступ' : 'Удалить'}
+                                {profile.official ? 'Сбросить локальный доступ' : 'Удалить'}
                               </Button>}
                             </div>
                           ))}
@@ -666,7 +676,8 @@ export default function NodeDiscoveryPanel() {
                                 type="password" autoComplete="new-password" value={registryDraft.password} maxLength={1024}
                                 onChange={event => setRegistryDraft(previous => ({ ...previous, password: event.target.value }))} />
                             </div>
-                            <Button type="button" size="sm" disabled={registryBusy || !registryDraft.repository.trim()}
+                            <Button type="button" size="sm" disabled={registryBusy || !registryDraft.repository.trim() ||
+                              registryDraft.repository.trim() === OFFICIAL_NODE_REPOSITORY}
                               onClick={() => void saveNodeRegistry(node.node_uuid, registryDraft)}>
                               Сохранить Registry для этой Node
                             </Button>

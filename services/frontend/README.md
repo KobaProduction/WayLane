@@ -22,6 +22,12 @@ Vue has been implemented yet.
   retired in Issue #21.
 - `/nodes` renders Classic/Discovery registration, Core assignment, per-Node
   Xray/AWG desired state and read-only cumulative traffic diagnostics.
+  `/nodes/tokens` is the dedicated operator tab for hashed Discovery
+  invitations (including expiration/auto-approval/rotation) and the shared
+  write-only GHCR PAT. The built-in GHCR token is stored encrypted by the
+  Backend and applies to all Nodes selecting the official image repository,
+  while custom Registry credentials remain Node-specific. No plaintext PAT
+  is ever returned to the frontend after the initial save.
   `/nodes/logs` displays sanitized WSS control events rather than raw old RPC
   streaming logs. The statistics page separates historical numeric Node
   records from autonomous UUID-first counters and heartbeats. Individual

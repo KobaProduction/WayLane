@@ -797,6 +797,18 @@ node_agent_registry_settings = Table(
 )
 
 
+# One encrypted shared GHCR read credential; operator manages it in the
+# dedicated Node Tokens page, not through per-Node ENV/Compose configuration.
+node_shared_registry_credentials = Table(
+    "node_shared_registry_credentials",
+    Base.metadata,
+    Column("registry", String(24), primary_key=True),
+    Column("username", String(128), nullable=False),
+    Column("encrypted_token", Text(), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+
 # Operator-triggered, per-Node release/reconnect state. Never store Node
 # enrollment secrets or private Agent Unix paths in this durable journal.
 node_agent_operations = Table(

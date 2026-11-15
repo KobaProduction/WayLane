@@ -14,7 +14,9 @@ in the same authorised workspace:
 1. From the repository root run `scripts/ui-review/start-backend.sh`.
    It verifies the **exact** private SQLite path inside ignored
    `.runtime/ui-review`, seeds an owner, two synthetic Node states and six
-   example WSS events, then runs FastAPI on `127.0.0.1:8321` with its
+   example WSS events, and maintains a private, synthetic Fernet vault key in
+   `.runtime/ui-review/vault.key` for local write-only credential tests.
+   It then runs FastAPI on `127.0.0.1:8321` with its
    lifespan disabled (so no scheduler, workers or periodic jobs).
 2. From the repository root run `scripts/ui-review/start-frontend.sh`.
    Vite serves the interface on port `5174` with hot reloading. Only when
