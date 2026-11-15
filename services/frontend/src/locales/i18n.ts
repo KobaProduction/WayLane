@@ -25,6 +25,10 @@ i18n
       },
       backend: {
         loadPath: joinURL(import.meta.env.BASE_URL, `statics/locales/{{lng}}.json`),
+        // Locale JSON keeps a stable URL between releases. Ignore any legacy
+        // immutable HTTP cache so newly deployed UI strings are never shown
+        // as untranslated i18next keys after a frontend-only update.
+        requestOptions: { mode: 'cors', credentials: 'same-origin', cache: 'no-store' },
       },
     },
     function (err) {
