@@ -28,7 +28,7 @@ def test_subscription_access_uses_current_provider_state(monkeypatch, status, is
     subscription_uuid = uuid4()
 
     async def verified_token(_db, _token):
-        return SimpleNamespace(uuid=subscription_uuid, entitlement="active")
+        return SimpleNamespace(uuid=subscription_uuid, entitlement="active", entitlement_revision=0, policy_revision=0)
 
     async def lookup_user(_session, _id, **_kwargs):
         return SimpleNamespace(

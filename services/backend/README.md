@@ -531,3 +531,19 @@ network speed. No retention setting, migration, data write, polling job, or
 telemetry collection change is involved. Deleted users/nodes may be missing
 from the historical joins due to existing cascades. The issue's future
 inbound-to-outbound path tracing is not implemented in this read-only scope.
+
+### Intens Core-managed commercial subscriptions
+
+Native `/sub/<UUIDv4>.<access-code>` responses for subscriptions with
+`entitlement_revision > 0` or `policy_revision > 0` require a fresh signed
+`204` authorization from the VPN Core private service receiver. A denied
+subscription returns `403`, and invalid signing, missing config, redirects or
+transport failures return `503` without a configuration. No allow responses
+are cached. All native token surfaces share the same validation boundary,
+including HTML/HEAD/info/raw/apps/usage and explicit client formats.
+
+Set `WAYLANE_CORE_AUTHORIZATION_URL` to the approved private receiver and
+reuse the existing `WAYLANE_DEVICE_WEBHOOK_SECRET` (separate HMAC purpose).
+Only the Intens external DEV Compose adapter supplies the approved internal
+`vpn-core-api:8000` default. Independent WayLane deployments keep their
+standalone zero-revision admission policy without a Core dependency.

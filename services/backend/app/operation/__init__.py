@@ -33,6 +33,7 @@ from app.models.admin import AdminDetails
 from app.models.subscription_models import SubscriptionCreate, SubscriptionModify
 from app.models.subscription_template import SubscriptionTemplateCreate, SubscriptionTemplateModify
 from app.operation.permissions import apply_group_access, get_scope_admin_id
+from app.subscription.core_authorization import authorize_core_subscription
 from app.subscription.entitlements import entitlement_allows_access
 from app.subscription.identity import subscription_from_token
 from app.utils.helpers import ensure_datetime_timezone
@@ -163,6 +164,10 @@ class BaseOperation:
             await self.raise_error(message="Subscription not found", code=404)
         if not entitlement_allows_access(subscription.entitlement):
             await self.raise_error(message="Subscription access denied", code=403)
+
+        # GET/HEAD/info/raw/apps/usage and explicit formats all pass this
+        # validated-token boundary before rendering or registering HWIDs.
+        await authorize_core_subscription(subscription)
 
         db_user = None
         if wireguard_fast:

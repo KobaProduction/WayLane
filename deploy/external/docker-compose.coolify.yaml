@@ -20,6 +20,7 @@ services:
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       POSTGRES_MIGRATION_HOST: ${POSTGRES_MIGRATION_HOST:-postgres}
       WAYLANE_DEVICE_WEBHOOK_SECRET: ${WAYLANE_DEVICE_WEBHOOK_SECRET:-}
+      WAYLANE_CORE_AUTHORIZATION_URL: ${WAYLANE_CORE_AUTHORIZATION_URL:-http://vpn-core-api:8000/v1/integrations/waylane/subscription-authorizations}
       # Exact DNS peer on the isolated dependencies network in DEV and production.
       WAYLANE_WEBHOOK_ALLOWED_INTERNAL_HOSTS: vpn-core-api
       OTLP_ENDPOINT: ${OTEL_ENDPOINT:-}
