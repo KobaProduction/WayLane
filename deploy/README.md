@@ -4,22 +4,59 @@ WayLane's application stack is split into independent Coolify Compose
 resources. **Do not** use the all-in-one root Compose or legacy
 `deploy/backend-postgres/` for this installation.
 
-| Resource | Base directory | Compose location | Deployment updates |
-| --- | --- | --- | --- |
-| **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | **Manual only**; PostgreSQL is not redeployed for app changes |
-| **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Automatic on `main` push through the connected GitHub App |
-| **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Automatic on `main` push through the connected GitHub App |
-| **WayLane / Node** (running server pilot) | `/deploy/node/discovery` | `/docker-compose.yaml` (Raw mode) | **Manual only**; WSS and local Xray SOCKS5 TCP test accepted, public VPN traffic pending |
+| Resource | Base directory | Compose location | Saved Coolify Watch Paths | Deployment policy |
+| --- | --- | --- | --- | --- |
+| **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | `services/backend/**` | GitHub App → automatic on `main` push |
+| **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | `services/frontend/**` | GitHub App → automatic on `main` push |
+| **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | Not applicable while manual; future scope `deploy/dependencies/**` | **Manual only**; PostgreSQL must not redeploy for app changes |
+| **WayLane / Node** (server pilot) | `/deploy/node/discovery` | `/docker-compose.yaml` (Raw mode) | Not applicable while manual | **Manual only**; stable Agent, inner Node and VPN Core have independent lifecycles |
 
 The resource named **WayLane / Dependencies** contains the single PostgreSQL
 service `waylane-postgres`; it is not a second application runtime.
 An isolated PostgreSQL lifecycle must never be tied to frontend/backend
-source pushes. Keep the Dependencies resource manual-only. Backend and
-Frontend now use `koba-coolify-github-deploy` as their Git source with
-push-triggered deployment enabled. Their `Watch Paths` are currently empty,
-so any `main` push may deploy both applications, including docs-only changes.
-Filters may be added after validating all consumed build inputs. Node/Agent
-remains manual-only. `x-watch-path-coolify` is documentation only.
+source pushes. Keep Dependencies and Node/Agent strictly manual-only, even
+when changing their source; a Watch Path is not a replacement for that gate.
+Backend and Frontend use the existing `koba-coolify-github-deploy` GitHub App.
+Their **persisted Coolify Watch Paths** are precisely the two globs above,
+not empty. Both Docker build contexts, Dockerfiles, lockfiles, generic and
+Coolify Compose entrypoints, and the bundled Nginx configuration are inside
+their own service folders. `shared/contracts/**` is documentation, not a
+source dependency in these builds. A change outside these folders must
+not implicitly redeploy either application. `x-watch-path-coolify` in
+Compose is documentation only and does not configure Coolify.
+
+## Watch Paths — required Coolify operator checks
+
+These are **Git-repository-relative globs**, with no leading slash. In Coolify
+open **WayLane → development → the application → General → Build & deploy →
+Watch paths**, enter the exact corresponding patterns in the matrix above
+(one pattern per line), and **Save changes**. Open the resource again and
+verify the persisted Watch paths; a Git comment, Compose `x-*` field, GitHub
+Actions path filter or successful webhook does **not** set this field.
+Also confirm **Advanced → Auto deploy → Deploy on push (webhooks)** for
+Backend/Frontend, **Git Source → `koba-coolify-github-deploy`** on `main`,
+and **Manual deployments only** for Dependencies and Node/Agent.
+
+Before a new or moved Docker build input is committed, review the build
+context, `COPY`/`ADD`, Compose entrypoint, generated source, local service
+locks, and used shared packages. **Update the corresponding persisted Coolify
+Watch Paths and this table first**, then publish the source change. A missing
+input can leave an outdated live service; an empty Watch Paths field instead
+triggers unrelated builds. Do not add a broad repository-wide `**` glob to
+work around missing paths. All currently consumed Frontend and Backend build
+inputs are already under their corresponding `services/<owner>/` folder.
+
+For acceptance, publish separate *validated* commits touching only each
+service folder and confirm that **only the matching application** gets an
+automatic Coolify deployment. Confirm the other application, PostgreSQL and
+Node/Agent receive **no new deployment**. Check the recorded commit SHA,
+health and an actual HTTP/API consumer outcome; a working GitHub Actions
+build alone does not establish the Coolify webhook or filter. Changing
+Coolify's Watch Paths does **not** retroactively deploy earlier commits.
+
+If a dependency-image, database bootstrap or Agent change is required, follow
+its manual upgrade/rollback and backup acceptance process. Never enable
+automatic Dependencies or Agent updates as a shortcut to apply that change.
 
 Use the same approved Git ref for the backend/frontend/dependency resources.
 A new Node requires a **panel-issued** invitation or Classic token, not a

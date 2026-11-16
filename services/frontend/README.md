@@ -13,8 +13,11 @@ Vue has been implemented yet.
 - This directory builds its own `frontend` image inside the same monorepo; the backend image is built independently from `services/backend/`.
 - Coolify DEV deploys **Backend**, **Frontend**, **Dependencies** (PostgreSQL) and
   **Node** as four independently owned Compose resources in the `WayLane`
-  project. Backend/Frontend builds use `main` from the same monorepo; Node
-  deployment remains manual and preserves its own Agent/Node lifecycle.
+  project. Backend/Frontend builds use `main` from the same monorepo.
+  The saved Frontend Watch Path is `services/frontend/**`, and Backend uses
+  `services/backend/**`; a frontend-only commit must not redeploy Backend.
+  Dependencies and Node/Agent are manual-only. Check and preserve the live
+  filters using the [deployment owner matrix](../../deploy/README.md).
 - Saved Xray Core Editor profiles can be explicitly applied to autonomous
   Nodes through UUID-first Node Registry and authenticated WSS. TLS bindings,
   Node lifecycle events and commercial subscription admission use the same

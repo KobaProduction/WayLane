@@ -17,9 +17,11 @@ GitHub source for all services is KobaProduction/WayLane.
 
 Each service keeps a native Dockerfile, dependency lock and tests.
 Root CI validates the affected service owners independently. The active
-Coolify DEV Backend/Frontend resources automatically deploy on `main` pushes
-through the connected GitHub App. Dependencies and the Node/Agent installer
-remain manual-only and must not redeploy on ordinary application pushes.
+Coolify DEV Backend/Frontend resources automatically deploy on `main`
+pushes through the connected GitHub App, with separate repository-relative
+Watch Paths for each service. See the [deployment owner matrix](deploy/README.md)
+for the exact paths and persistence checks. Dependencies and Node/Agent
+remain manual-only; app commits must not redeploy them.
 DEV builds from source in Coolify; PROD releases use pinned image digests.
 
 ## Git validation

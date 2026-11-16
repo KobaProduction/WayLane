@@ -26,10 +26,16 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
 - shared/contracts/: narrowly scoped protocol DTOs, no ORM imports.
 
 Each internal service owns its Dockerfile, dependencies, tests and deployment.
-CI must validate affected owners independently. The active DEV Coolify Backend
-and Frontend resources use GitHub App push-triggered automatic deployment
-from `main`, currently without Watch Paths filters. Stable Dependencies and
-Node/Agent remain manual-only and must not follow ordinary source pushes.
+CI must validate affected owners independently. The active DEV Coolify
+Backend and Frontend resources use GitHub App push-triggered automatic
+deployment from `main`, filtered by **saved, repository-relative** Watch
+Paths `services/backend/**` and `services/frontend/**`, respectively.
+Dependencies (PostgreSQL) and Node/Agent remain manual-only. Never leave
+these application filters empty or turn on automatic dependency/Agent
+deployment. Before moving Docker build inputs or deployment manifests,
+update the saved Coolify Watch Paths and the canonical matrix in
+[deploy/README.md](deploy/README.md); verify both values on the live
+resources before publishing changes that depend on them.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
 

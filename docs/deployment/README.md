@@ -31,10 +31,13 @@ the active resources.
   traffic (`200` from example.com). Public VPN client TCP/UDP traffic
   and subscription provisioning still require acceptance.
 
-Frontend and Backend DEV deployments now use the connected GitHub App
-and automatically deploy on `main` pushes. Neither resource currently
-uses Watch Paths filters. Dependencies (PostgreSQL) and Node/Agent remain
-manual-only; ordinary application changes must not redeploy them.
+Frontend and Backend DEV deployments use the connected GitHub App and
+independently deploy on `main` pushes matching the **persisted** Watch
+Paths `services/frontend/**` and `services/backend/**`. The canonical
+resource map and operator verification steps are in
+[deploy/README.md](../../deploy/README.md). Dependencies (PostgreSQL)
+and Node/Agent remain manual-only; ordinary application changes must
+not redeploy them.
 
 Production releases, migration, node runtime and data recovery retain their
 own acceptance boundaries. See
