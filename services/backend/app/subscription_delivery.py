@@ -43,7 +43,11 @@ async def node_payload_signature(subscription: Subscription) -> tuple[str, bytes
     from app.db.models import SubscriptionStatus
 
     eligible = (
-        entitlement_allows_access(subscription.entitlement)
+        entitlement_allows_access(
+            subscription.entitlement,
+            entitlement_revision=subscription.entitlement_revision,
+            policy_revision=subscription.policy_revision,
+        )
         and subscription.status in (SubscriptionStatus.active, SubscriptionStatus.on_hold)
         and not subscription.is_expired
         and not subscription.is_limited

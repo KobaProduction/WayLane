@@ -162,7 +162,11 @@ class BaseOperation:
         subscription = await subscription_from_token(db, token)
         if subscription is None:
             await self.raise_error(message="Subscription not found", code=404)
-        if not entitlement_allows_access(subscription.entitlement):
+        if not entitlement_allows_access(
+            subscription.entitlement,
+            entitlement_revision=getattr(subscription, "entitlement_revision", 0),
+            policy_revision=getattr(subscription, "policy_revision", 0),
+        ):
             await self.raise_error(message="Subscription access denied", code=403)
 
         # GET/HEAD/info/raw/apps/usage and explicit formats all pass this

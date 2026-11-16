@@ -100,7 +100,11 @@ synthetic VPN pilot and does not call an external billing service.
 The switch defaults **false** and does nothing outside the exact development
 environment. It does **not** turn a suspended/cancelled/expired entitlement
 into an active one and never overrides technical disabled/on-hold policy,
-quota, expiry, group, admin, or device restrictions. The stored commercial
+quota, expiry, group, admin, or device restrictions. Only standalone subscriptions with zero Core-owned entitlement and policy
+revisions are eligible for the synthetic payment exception. A Core-managed
+`payment_required` UUID is excluded from managed Xray WSS client injection,
+node reconciliation and native document delivery, even in this DEV mode.
+The stored commercial
 entitlement remains unchanged so reverting the switch immediately restores
 the external Core payment gate; the UI can still display `payment_required`
 as billing metadata while the DEV access is allowed. Never enable this switch

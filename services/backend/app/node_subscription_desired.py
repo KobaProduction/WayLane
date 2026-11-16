@@ -147,9 +147,18 @@ async def inject_managed_subscriptions(db: AsyncSession, node_uuid: str, config:
                                  ProxyInbound.tag.in_(tags)))
         .outerjoin(Admin, Admin.id == Subscription.admin_id)
         .outerjoin(AdminRole, AdminRole.id == Admin.role_id)
-        .where(Subscription.entitlement.in_(
-            ["active", "payment_required"] if dev_unpaid_access_enabled() else ["active"]
-        ))
+        .where(
+            or_(
+                Subscription.entitlement == "active",
+                and_(
+                    Subscription.entitlement == "payment_required",
+                    Subscription.entitlement_revision == 0,
+                    Subscription.policy_revision == 0,
+                ),
+            )
+            if dev_unpaid_access_enabled()
+            else Subscription.entitlement == "active"
+        )
         .where(Subscription.status.in_([SubscriptionStatus.active, SubscriptionStatus.on_hold]))
         .where(or_(Subscription._expire.is_(None), Subscription._expire > now))
         .where(or_(Subscription.data_limit.is_(None), Subscription.data_limit <= 0,

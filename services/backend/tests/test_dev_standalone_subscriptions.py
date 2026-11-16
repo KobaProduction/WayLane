@@ -94,6 +94,24 @@ def test_unpaid_client_is_injected_only_in_standalone_dev(monkeypatch, tmp_path)
                 assert signature[1] != b"{}"
                 _set_standalone(monkeypatch, enabled=False, environment="development")
                 assert (await node_payload_signature(subscription))[1] == b"{}"
+                # Core has asserted a policy: standalone DEV cannot restore
+                # access by injecting an unpaid UUID directly into Xray.
+                _set_standalone(monkeypatch, enabled=True, environment="development")
+                subscription.entitlement_revision = 1
+                await db.flush()
+                assert await client_uuids() == {str(paid)}
+                assert (await node_payload_signature(subscription))[1] == b"{}"
+                assert not entitlement_allows_access(
+                    "payment_required", entitlement_revision=1
+                )
+                subscription.entitlement_revision = 0
+                subscription.policy_revision = 1
+                await db.flush()
+                assert await client_uuids() == {str(paid)}
+                assert (await node_payload_signature(subscription))[1] == b"{}"
+                assert not entitlement_allows_access(
+                    "payment_required", policy_revision=1
+                )
         finally:
             await engine.dispose()
 

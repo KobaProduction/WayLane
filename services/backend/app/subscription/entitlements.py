@@ -23,10 +23,17 @@ def dev_unpaid_access_enabled() -> bool:
     )
 
 
-def entitlement_allows_access(entitlement: str) -> bool:
-    """Only the absent *payment* decision is optional in standalone DEV.
+def entitlement_allows_access(
+    entitlement: str, *, entitlement_revision: int = 0, policy_revision: int = 0
+) -> bool:
+    """Standalone DEV may bypass payment only before Core owns commercial state.
 
-    Suspended, cancelled and expired entitlements still fail closed, as do the
-    separate technical status, expiry, quota, group and admin checks.
+    Once Core asserts a policy or entitlement revision, its commercial denial
+    cannot be bypassed through native documents or a Node/Xray desired state.
     """
-    return entitlement == "active" or (entitlement == "payment_required" and dev_unpaid_access_enabled())
+    return entitlement == "active" or (
+        entitlement == "payment_required"
+        and entitlement_revision == 0
+        and policy_revision == 0
+        and dev_unpaid_access_enabled()
+    )
