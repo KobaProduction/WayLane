@@ -36,6 +36,9 @@ export const resolvePeriodOverride = (override?: ChartPeriodOverride): Period | 
   return override
 }
 
+export const formatChartPeriodQuantity = (amount: number, unit: 'hour' | 'day' | 'month', t: TFunction): string =>
+  `${amount} ${t(`time.${unit}`, { count: amount })}`
+
 const capitalizeLabel = (label: string) => (label ? label.charAt(0).toLocaleUpperCase() + label.slice(1) : label)
 
 export const getChartPeriodLabel = (period: ChartPeriodOverride, t: TFunction): string => {
@@ -64,7 +67,7 @@ const getLocale = (language: string) => (isPersianLanguage(language) ? 'fa-IR' :
 
 export const buildPeriodOptions = (t: TFunction): PeriodOption[] => [
   ...PERIOD_KEYS.map(option => ({
-    label: `${option.amount} ${t(`time.${option.unit}${option.amount > 1 ? 's' : ''}`)}`,
+    label: formatChartPeriodQuantity(option.amount, option.unit, t),
     value: option.key,
     period: option.period,
     hours: option.unit === 'hour' ? option.amount : undefined,

@@ -10,6 +10,7 @@ import { Period, useGetSubscriptionUsageMetrics, SubscriptionUsageStat } from '@
 import {
   CHART_PERIOD_OVERRIDE_AUTO,
   type ChartPeriodOverride,
+  formatChartPeriodQuantity,
   formatPeriodLabelForPeriod,
   formatTooltipDate,
   getChartQueryRangeFromShortcut,
@@ -33,7 +34,13 @@ type PeriodOption = {
   allTime?: boolean
 }
 
-const PERIOD_KEYS = [
+const PERIOD_KEYS: Array<{
+  key: string
+  period: Period
+  amount?: number
+  unit?: 'hour' | 'day' | 'month'
+  allTime?: boolean
+}> = [
   { key: '1h', period: 'minute' as Period, amount: 1, unit: 'hour' },
   { key: '2h', period: 'hour' as Period, amount: 2, unit: 'hour' },
   { key: '4h', period: 'hour' as Period, amount: 4, unit: 'hour' },
@@ -126,7 +133,7 @@ const DataUsageChart = ({ adminUsername }: { adminUsername?: string }) => {
   const PERIOD_OPTIONS: PeriodOption[] = useMemo(
     () => [
       ...PERIOD_KEYS.filter(opt => !opt.allTime).map(opt => ({
-        label: typeof opt.amount === 'number' ? `${opt.amount} ${t(`time.${opt.unit}${opt.amount > 1 ? 's' : ''}`)}` : '',
+        label: typeof opt.amount === 'number' && opt.unit ? formatChartPeriodQuantity(opt.amount, opt.unit, t) : '',
         value: opt.key,
         period: opt.period,
         hours: opt.unit === 'hour' && typeof opt.amount === 'number' ? opt.amount : undefined,
