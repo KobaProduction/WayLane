@@ -31,6 +31,7 @@ from app.db.models import (
     node_agent_xray_managed_inbounds,
     subscriptions_groups_association,
 )
+from app.subscription.entitlements import dev_unpaid_access_enabled
 
 SUPPORTED_PROTOCOLS = frozenset({"vless", "vmess", "trojan"})
 MAX_MANAGED_INBOUNDS = 16
@@ -146,7 +147,9 @@ async def inject_managed_subscriptions(db: AsyncSession, node_uuid: str, config:
                                  ProxyInbound.tag.in_(tags)))
         .outerjoin(Admin, Admin.id == Subscription.admin_id)
         .outerjoin(AdminRole, AdminRole.id == Admin.role_id)
-        .where(Subscription.entitlement == "active")
+        .where(Subscription.entitlement.in_(
+            ["active", "payment_required"] if dev_unpaid_access_enabled() else ["active"]
+        ))
         .where(Subscription.status.in_([SubscriptionStatus.active, SubscriptionStatus.on_hold]))
         .where(or_(Subscription._expire.is_(None), Subscription._expire > now))
         .where(or_(Subscription.data_limit.is_(None), Subscription.data_limit <= 0,

@@ -112,6 +112,8 @@ class SubscriptionEnvSettings(EnvSettings):
     fallback_path: str = Field(default="sub", validation_alias="SUBSCRIPTION_PATH")
     clients_limit: int = Field(default=10, validation_alias="USER_SUBSCRIPTION_CLIENTS_LIMIT")
     external_config: str = Field(default="", validation_alias="EXTERNAL_CONFIG")
+    # Standalone, noncommercial DEV acceptance: do not require VPN Core payment.
+    dev_allow_unpaid: bool = Field(default=False, validation_alias="WAYLANE_DEV_ALLOW_UNPAID_SUBSCRIPTIONS")
 
     @cached_property
     def path(self) -> str:

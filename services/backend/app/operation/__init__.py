@@ -33,6 +33,7 @@ from app.models.admin import AdminDetails
 from app.models.subscription_models import SubscriptionCreate, SubscriptionModify
 from app.models.subscription_template import SubscriptionTemplateCreate, SubscriptionTemplateModify
 from app.operation.permissions import apply_group_access, get_scope_admin_id
+from app.subscription.entitlements import entitlement_allows_access
 from app.subscription.identity import subscription_from_token
 from app.utils.helpers import ensure_datetime_timezone
 
@@ -160,7 +161,7 @@ class BaseOperation:
         subscription = await subscription_from_token(db, token)
         if subscription is None:
             await self.raise_error(message="Subscription not found", code=404)
-        if subscription.entitlement != "active":
+        if not entitlement_allows_access(subscription.entitlement):
             await self.raise_error(message="Subscription access denied", code=403)
 
         db_user = None

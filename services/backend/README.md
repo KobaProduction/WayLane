@@ -87,6 +87,26 @@ Node-specific GHCR credentials when present, otherwise the shared identity.
 The token is not stored in the operation journal or rendered in Node API
 responses. Custom registries never inherit the GHCR token.
 
+## Optional standalone DEV subscription admission (no VPN Core payment dependency)
+
+The default mode preserves VPN Core commercial authority. In the isolated
+WayLane DEV environment only, set the **runtime-only** Backend variable
+`WAYLANE_DEV_ALLOW_UNPAID_SUBSCRIPTIONS=true` with
+`DEPLOYMENT_ENVIRONMENT=development` to permit subscriptions with persisted
+`entitlement=payment_required` to receive `/sub` output and be included in
+explicitly managed VLESS/VMess/Trojan WSS inbounds. This is for a standalone
+synthetic VPN pilot and does not call an external billing service.
+
+The switch defaults **false** and does nothing outside the exact development
+environment. It does **not** turn a suspended/cancelled/expired entitlement
+into an active one and never overrides technical disabled/on-hold policy,
+quota, expiry, group, admin, or device restrictions. The stored commercial
+entitlement remains unchanged so reverting the switch immediately restores
+the external Core payment gate; the UI can still display `payment_required`
+as billing metadata while the DEV access is allowed. Never enable this switch
+in a production deployment. Core's scoped entitlement API and its RBAC are
+unchanged. See [deployment contract](../../deploy/README.md).
+
 ## Database migrations — existing PasarGuard databases are supported
 
 The original **160 Alembic revisions** from PasarGuard Panel (pinned in

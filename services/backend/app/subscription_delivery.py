@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from app.db import GetDB
 from app.db.models import Subscription
 from app.node_subscription_desired import enqueue_managed_subscription_changes
+from app.subscription.entitlements import entitlement_allows_access
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ async def node_payload_signature(subscription: Subscription) -> tuple[str, bytes
     from app.db.models import SubscriptionStatus
 
     eligible = (
-        subscription.entitlement == "active"
+        entitlement_allows_access(subscription.entitlement)
         and subscription.status in (SubscriptionStatus.active, SubscriptionStatus.on_hold)
         and not subscription.is_expired
         and not subscription.is_limited

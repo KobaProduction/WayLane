@@ -123,6 +123,18 @@ dependencies and Backend but the value must exist only once in the shared
 scope. The Backend creates both runtime and migration DSNs internally using
 `compose_db_entrypoint.py`.
 
+## Standalone subscription testing (Backend DEV only)
+
+Backend's `WAYLANE_DEV_ALLOW_UNPAID_SUBSCRIPTIONS` is optional and defaults
+`false`. To test subscription issuance without the separate VPN Core payment
+integration, explicitly set it to `true` **as a Backend runtime variable** in
+Coolify development. It only works with the exact internal
+`DEPLOYMENT_ENVIRONMENT=development` value, and must never be enabled in
+production. This suppresses the `payment_required` **admission check** for
+`/sub` and explicit Node-managed Xray clients, not the other admission rules.
+It neither changes stored entitlement nor weakens the Core service API-key
+restriction. Turn it off to restore the existing payment gate immediately.
+
 ## Telemetry identity
 
 Backend exports OpenTelemetry logs and traces directly to the configured
