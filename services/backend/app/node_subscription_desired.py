@@ -119,23 +119,18 @@ async def managed_inbound_tags(db: AsyncSession, node_uuid: str) -> list[str]:
     )).scalars())
 
 
-async def inject_managed_subscriptions(db: AsyncSession, node_uuid: str, config: dict) -> dict:
-    """Build an in-memory WSS payload. Never write the result into desired state."""
-    tags = await managed_inbound_tags(db, node_uuid)
-    if not tags:
-        return config
-    if len(tags) > MAX_MANAGED_INBOUNDS:
-        raise ManagedSubscriptionError("Too many managed Xray inbounds")
-    validate_managed_inbound_baseline(config, tags)
-    result = copy.deepcopy(config)
-    inbounds = _inbound_map(result)
+def _managed_subscription_candidates_stmt(tags: list[str], now: datetime):
+    """Deduplicate scalar entitlement identities before loading JSON credentials.
 
+    PostgreSQL JSON has no equality operator; a DISTINCT over proxy_settings
+    fails there even though SQLite accepts the same query. Keep the JSON in
+    the outer projection, and share this query with dialect regression tests.
+    """
     # Filter against current policy on every WSS generation, never stale
     # user objects. LEFT JOIN preserves admin-less subscriptions, while a
     # suspended admin suppresses access when its role requires disconnection.
-    now = datetime.now(UTC)
-    stmt = (
-        select(ProxyInbound.tag, Subscription.uuid, Subscription.proxy_settings)
+    pairs = (
+        select(ProxyInbound.tag.label("inbound_tag"), Subscription.uuid.label("subscription_uuid"))
         .select_from(Subscription)
         .join(subscriptions_groups_association,
               subscriptions_groups_association.c.subscription_uuid == Subscription.uuid)
@@ -171,9 +166,30 @@ async def inject_managed_subscriptions(db: AsyncSession, node_uuid: str, config:
             and_(Admin.status == AdminStatus.disabled,
                  AdminRole.disconnect_users_when_disabled.is_(False)),
         ))
-        .distinct().order_by(ProxyInbound.tag, Subscription.uuid)
+        .distinct()
+        .subquery()
+    )
+    stmt = (
+        select(pairs.c.inbound_tag, pairs.c.subscription_uuid, Subscription.proxy_settings)
+        .join(Subscription, Subscription.uuid == pairs.c.subscription_uuid)
+        .order_by(pairs.c.inbound_tag, pairs.c.subscription_uuid)
         .limit(MAX_MANAGED_INBOUNDS * MAX_USERS_PER_INBOUND + 1)
     )
+    return stmt
+
+
+async def inject_managed_subscriptions(db: AsyncSession, node_uuid: str, config: dict) -> dict:
+    """Build an in-memory WSS payload. Never write the result into desired state."""
+    tags = await managed_inbound_tags(db, node_uuid)
+    if not tags:
+        return config
+    if len(tags) > MAX_MANAGED_INBOUNDS:
+        raise ManagedSubscriptionError("Too many managed Xray inbounds")
+    validate_managed_inbound_baseline(config, tags)
+    result = copy.deepcopy(config)
+    inbounds = _inbound_map(result)
+
+    stmt = _managed_subscription_candidates_stmt(tags, datetime.now(UTC))
     rows = (await db.execute(stmt)).all()
     if len(rows) > MAX_MANAGED_INBOUNDS * MAX_USERS_PER_INBOUND:
         raise ManagedSubscriptionError("Too many eligible subscription bindings")

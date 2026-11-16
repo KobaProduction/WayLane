@@ -299,6 +299,10 @@ class AgentBinarySession:
                         "Cannot prepare Xray desired generation %s for Node %s (%s)",
                         xray["generation"], self.node_uuid, type(exc).__name__,
                     )
+                    # PostgreSQL aborts the transaction after a failed SQL
+                    # statement. A status update without rollback raises a
+                    # second exception and tears down the WSS publisher.
+                    await db.rollback()
                     await db.execute(
                         update(node_agent_xray_desired)
                         .where(
@@ -392,6 +396,11 @@ class AgentBinarySession:
                 except TimeoutError:
                     elapsed += 4
         except (HTTPException, ValueError):
+            self.stopped.set()
+        except Exception as exc:
+            # Never include payloads, credentials or subscription tokens in
+            # transport logs. The exception class is enough to investigate.
+            logger.error("Node WSS publisher stopped unexpectedly (%s)", type(exc).__name__)
             self.stopped.set()
 
     async def outputs(self) -> AsyncIterator[pb.Envelope]:

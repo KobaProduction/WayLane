@@ -368,3 +368,51 @@ def test_pending_operator_image_update_survives_subscription_reconcile(tmp_path)
         finally:
             await engine.dispose()
     asyncio.run(run())
+
+
+def test_managed_candidates_postgresql_distinct_excludes_json_credentials():
+    """PostgreSQL JSON cannot participate in DISTINCT (SQLite accepts it)."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy.dialects import postgresql
+
+    from app.node_subscription_desired import _managed_subscription_candidates_stmt
+
+    sql = str(_managed_subscription_candidates_stmt(["allow-vless"], datetime.now(UTC)).compile(
+        dialect=postgresql.dialect()
+    ))
+    assert "FROM (SELECT DISTINCT inbounds.tag AS inbound_tag, subscriptions.uuid AS subscription_uuid" in sql
+    assert sql.count("subscriptions.proxy_settings") == 1
+    assert "SELECT anon_1.inbound_tag, anon_1.subscription_uuid, subscriptions.proxy_settings" in sql
+    assert "FROM (SELECT DISTINCT inbounds.tag" in sql  # dedup before JSON join
+
+
+def test_subscription_join_deduplicates_multiple_entitled_group_memberships(tmp_path):
+    """One subscription bound through two groups becomes one Xray account."""
+    from app.db.models import inbounds_groups_association
+    from app.routers.node_registry import agent_xray_desired
+
+    async def run():
+        engine, factory, agent, node_uuid, paid, unpaid = await setup_db(tmp_path)
+        try:
+            async with factory() as db:
+                inbound_id = (await db.execute(select(ProxyInbound.id).where(
+                    ProxyInbound.tag == "allow-vless"))).scalar_one()
+                second = Group(name="additional-group", inbounds=[])
+                db.add(second)
+                await db.flush()
+                await db.execute(insert(inbounds_groups_association).values(
+                    group_id=second.id, inbound_id=inbound_id))
+                await db.execute(insert(subscriptions_groups_association).values(
+                    subscription_uuid=paid, groups_id=second.id))
+                await db.commit()
+                await enable_managed_xray_inbound(
+                    node_uuid, "allow-vless", ManagedInboundInput(expected_generation=1), db=db, _=object())
+                payload = await agent_xray_desired(node_uuid, x_node_secret=agent["node_token"], db=db)
+                clients = payload["config"]["inbounds"][0]["settings"]["clients"]
+                assert [client["email"] for client in clients] == [str(paid)]
+                assert str(unpaid) not in [client["email"] for client in clients]
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
