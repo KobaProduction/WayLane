@@ -13,7 +13,9 @@ Vue has been implemented yet.
 - This directory builds its own `frontend` image inside the same monorepo; the backend image is built independently from `services/backend/`.
 - Coolify DEV deploys **Backend**, **Frontend**, **Dependencies** (PostgreSQL) and
   **Node** as four independently owned Compose resources in the `WayLane`
-  project. Backend/Frontend builds use `main` from the same monorepo.
+  project. Backend/Frontend builds use `main` from the same monorepo and
+  the organizational Coolify Git Source `KobaProduction GitHub` (not the
+  personal-account `koba-coolify-github-deploy`).
   The saved Frontend Watch Path is `services/frontend/**`, and Backend uses
   `services/backend/**`; a frontend-only commit must not redeploy Backend.
   Dependencies and Node/Agent are manual-only. Check and preserve the live

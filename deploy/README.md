@@ -16,7 +16,9 @@ service `waylane-postgres`; it is not a second application runtime.
 An isolated PostgreSQL lifecycle must never be tied to frontend/backend
 source pushes. Keep Dependencies and Node/Agent strictly manual-only, even
 when changing their source; a Watch Path is not a replacement for that gate.
-Backend and Frontend use the existing `koba-coolify-github-deploy` GitHub App.
+Backend and Frontend use the organizational **`KobaProduction GitHub`**
+source (`GitHub · KobaProduction`). Do not switch them back to the
+personal-account `koba-coolify-github-deploy` source.
 Their **persisted Coolify Watch Paths** are precisely the two globs above,
 not empty. Both Docker build contexts, Dockerfiles, lockfiles, generic and
 Coolify Compose entrypoints, and the bundled Nginx configuration are inside
