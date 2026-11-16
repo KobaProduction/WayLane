@@ -15,6 +15,14 @@ backend-integrated compatibility artifact is required, use
 existing React build under `dashboard/build/`; do not clone another repo.
 The `dashboard/__init__.py` integration remains a compatibility path.
 The API Dockerfile **must not** attempt to compile the frontend during container startup.
+The active Coolify DEV Backend has its own GitHub App push-triggered
+Watch Path, **`services/backend/**`**. Its Dockerfile, dependency locks and
+both Compose definitions are owned by this folder; a frontend-only change
+must not redeploy the Backend or restart PostgreSQL. The Frontend uses
+`services/frontend/**`; Dependencies and the stable Node/Agent are manual-only.
+For exact Coolify settings, future build-path changes and real deployment
+verification, follow the [deployment owner matrix](../../deploy/README.md).
+
 The new Vue admin dashboard and subscription view will replace the temporary
 React UI and built-in HTML page in separate migration steps.
 
