@@ -26,9 +26,10 @@ Read intens-cloud/infrastructure/AGENTS.md before infrastructure operations.
 - shared/contracts/: narrowly scoped protocol DTOs, no ORM imports.
 
 Each internal service owns its Dockerfile, dependencies, tests and deployment.
-CI must validate affected owners independently. Coolify deployment triggers are
-operator-owned: stable Dependencies stay manual, while independent Frontend
-and Backend may deploy on all relevant commits without mandatory Watch Paths.
+CI must validate affected owners independently. The active DEV Coolify Backend
+and Frontend resources use GitHub App push-triggered automatic deployment
+from `main`, currently without Watch Paths filters. Stable Dependencies and
+Node/Agent remain manual-only and must not follow ordinary source pushes.
 Preserve all original upstream licenses and service history.
 No production DNS, data, token or routing changes before authorized cutover.
 
@@ -45,8 +46,10 @@ base before sending commits.
 This direct workflow applies only while GitHub and the active transport allow
 writing to `main`. If branch protection, mandatory review or tool restrictions
 prevent it, stop and report the restriction; do not bypass it by switching
-credentials or transport. Pushing Git does **not** authorize a Coolify redeploy,
-database migration, Node enrollment or traffic cutover.
+credentials or transport. The operator authorizes GitHub App push-triggered Backend/Frontend DEV
+deployments under this auto-deploy policy. Pushing does **not** authorize
+manual Dependency/Node redeployments, independent production migrations,
+Node enrollment or traffic cutover.
 
 ## Agent -> Node -> Core architecture
 

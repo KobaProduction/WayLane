@@ -7,19 +7,19 @@ resources. **Do not** use the all-in-one root Compose or legacy
 | Resource | Base directory | Compose location | Deployment updates |
 | --- | --- | --- | --- |
 | **WayLane / Dependencies** | `/deploy/dependencies` | `/docker-compose.coolify.yaml` | **Manual only**; PostgreSQL is not redeployed for app changes |
-| **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
-| **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Manual today; when Git push integration is available, deploy on any relevant commit |
+| **WayLane / Backend** | `/services/backend` | `/docker-compose.coolify.yaml` | Automatic on `main` push through the connected GitHub App |
+| **WayLane / Frontend** | `/services/frontend` | `/docker-compose.coolify.yaml` | Automatic on `main` push through the connected GitHub App |
 | **WayLane / Node** (running server pilot) | `/deploy/node/discovery` | `/docker-compose.yaml` (Raw mode) | **Manual only**; WSS and local Xray SOCKS5 TCP test accepted, public VPN traffic pending |
 
 The resource named **WayLane / Dependencies** contains the single PostgreSQL
 service `waylane-postgres`; it is not a second application runtime.
 An isolated PostgreSQL lifecycle must never be tied to frontend/backend
-source pushes. Do not configure a file-path filter just to achieve this:
-keep the dependency resource on manual deployment. For application resources,
-`Watch Paths` are optional; if GitHub push automation is later enabled,
-the intended behavior is a deployment for source changes without requiring
-narrow file globs. A placeholder `x-watch-path-coolify` has no effect on
-Coolify's actual deployment configuration.
+source pushes. Keep the Dependencies resource manual-only. Backend and
+Frontend now use `koba-coolify-github-deploy` as their Git source with
+push-triggered deployment enabled. Their `Watch Paths` are currently empty,
+so any `main` push may deploy both applications, including docs-only changes.
+Filters may be added after validating all consumed build inputs. Node/Agent
+remains manual-only. `x-watch-path-coolify` is documentation only.
 
 Use the same approved Git ref for the backend/frontend/dependency resources.
 A new Node requires a **panel-issued** invitation or Classic token, not a
