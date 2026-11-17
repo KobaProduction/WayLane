@@ -65,7 +65,7 @@
   "today": "Today",
   "nodes": {
     "details": {"title": "Node", "description": "Registration, state and operations for this Node", "back": "Back to nodes", "tabsTitle": "Node sections", "tabs": {"overview": "Overview", "operations": "Lifecycle", "registry": "Registry", "xray": "Xray", "tls": "TLS", "diagnostics": "Diagnostics"}, "open": "Open Node", "loading": "Loading Node…", "notFound": "Node not found in registry.", "registrationNote": "Registration approval does not confirm active WSS or VPN connectivity.", "notApproved": "Operations require an approved Node.", "noRegistryAccess": "Updating the Node Registry requires permission.", "xrayUnavailable": "Xray controls are unavailable or not authorized for this Node."},
-    "registryOverview": {"title": "Node registry", "description": "Registration and last Agent report. Approval does not mean connected.", "refresh": "Refresh list", "stats": "Registration overview", "all": "All", "approved": "Approved", "pending": "Pending", "revoked": "Revoked", "noMatches": "No nodes with this status", "rename": "Rename"},
+    "registryOverview": {"title": "Node registry", "description": "Registration and last Agent report. Approval does not mean connected.", "refresh": "Refresh list", "stats": "Registration overview", "all": "All", "approved": "Approved", "pending": "Pending", "revoked": "Revoked", "noMatches": "No nodes with this status", "rename": "Rename", "wssUnknown": "WSS signal not checked", "wssRecent": "WSS: heartbeat was fresh when checked (within 90 s)", "wssStale": "WSS: no fresh heartbeat when checked"},
     "presets": { "title": "Xray Presets", "description": "Manage Xray keys and configuration presets" },
     "title": "Nodes",
     "description": "Manage your nodes",

@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import { filterByRegistration, registrationCounts, validRegistrationFilter, type RegistrationFilter } from './node-registry-overview'
+import { useEffect, useState } from 'react'
+import { validRegistrationFilter } from './node-registry-overview'
+import type { NodeRegistration, NodeWssObservation, NodeWssSummary } from './node-registry-types'
+import { observedWssPresence } from './node-wss-presence'
+import { NodeReleaseStatus, type NodeReleaseOperation } from './node-release-status'
+import { NodeRegistryCredentials, type NodeRegistryProfile, type RegistryDraft } from './node-registry-credentials'
+import { NodeTLSBindings, type AgentTLSBinding, type TLSPresetSummary } from './node-tls-bindings'
+import { NodeXrayUsage, type XrayUsageState } from './node-xray-usage'
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { NODE_DETAIL_TABS, validNodeDetailTab } from './node-detail-tabs'
@@ -15,42 +21,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 
-type AgentTLSBinding = {
-  inbound_tag: string
-  preset_id: string
-  preset_name: string
-  revision: number
-  fingerprint_sha256: string
-  not_after: string
-}
-
-type TLSPresetSummary = {
-  id: string
-  name: string
-  revision: number
-  fingerprint_sha256: string
-}
-
 type XrayInboundInfo = {
   tag: string
   protocol: string
   port: number
   user_count: number
   identities: string[]
-}
-
-type XrayUsageRow = {
-  subscription_uuid: string
-  total_uplink: string
-  total_downlink: string
-  epoch_started_at: string
-  observed_at: string
-}
-type XrayUsageState = {
-  billing_authoritative: false
-  billing_enabled: boolean
-  source: string
-  samples: XrayUsageRow[]
 }
 
 type XrayStatus = {
@@ -67,78 +43,18 @@ type XrayStatus = {
 
 type EditorCoreOption = { id: number; name: string; type: string | null }
 
-type NodeRuntimeMetrics = {
-  scope: 'agent-runtime'
-  hostname: string
-  os: string
-  arch: string
-  cpu_logical_count: number
-  memory_total_bytes: number
-  memory_available_bytes: number
-  disk_total_bytes: number
-  disk_free_bytes: number
-  load_1: number
-  uptime_seconds: number
-}
-
-type NodeReleaseOperation = {
-  operation_id: string | null
-  generation: number
-  action: 'update' | 'reconnect' | null
-  image: string | null
-  previous_image: string | null
-  status: 'idle' | 'pending' | 'queued' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
-  phase: string
-  progress: number
-  error_code: string | null
-  updated_at?: string | null
-}
-
-type NodeRegistryProfile = {
-  repository: string
-  username: string
-  has_credentials: boolean
-  credential_scope?: 'node' | 'shared' | 'none'
-  official: boolean
-  is_default: boolean
-}
-
-type RegistryDraft = { repository: string; username: string; password: string }
-
-type Registration = {
-  node_uuid: string
-  connection_mode: 'classic' | 'discovery'
-  display_name: string
-  status: 'pending' | 'approved' | 'revoked'
-  node_version: string
-  node_image: string | null
-  observed_ip: string | null
-  reported_ipv4: string | null
-  reported_ipv6: string | null
-  capabilities: string[]
-  last_seen_at: string | null
-  machine_metrics: NodeRuntimeMetrics | null
-}
-
 /** Autonomous WayLane Node registration and supported core controls. */
-export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?: string }) {
+export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid: string }) {
   const { admin } = useAdmin()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
   const detailTab = validNodeDetailTab(searchParams.get('tab'))
-  const isDetail = Boolean(detailNodeUuid)
   const returnStatus = validRegistrationFilter(searchParams.get('returnStatus'))
   const { t } = useTranslation()
   const canRead = hasPermission(admin, 'nodes', 'read')
-  const canCreate = hasPermission(admin, 'nodes', 'create')
+  const canReadWss = hasPermission(admin, 'nodes', 'stats')
   const canApprove = hasPermission(admin, 'nodes', 'update')
-  const [entries, setEntries] = useState<Registration[]>([])
-  const [registrationFilter, setRegistrationFilter] = useState<RegistrationFilter>(() => validRegistrationFilter(searchParams.get('status')))
-  useEffect(() => {
-    if (!isDetail) setRegistrationFilter(validRegistrationFilter(searchParams.get('status')))
-  }, [isDetail, searchParams])
-  const counts = useMemo(() => registrationCounts(entries), [entries])
-  const visibleNodes = useMemo(() => detailNodeUuid ? entries.filter(node => node.node_uuid === detailNodeUuid) : filterByRegistration(entries, registrationFilter), [entries, registrationFilter, detailNodeUuid])
-  const currentNode = detailNodeUuid ? entries.find(node => node.node_uuid === detailNodeUuid) : undefined
+  const [entries, setEntries] = useState<NodeRegistration[]>([])
+  const currentNode = entries.find(node => node.node_uuid === detailNodeUuid)
   const returnUrl = returnStatus === 'all' ? '/nodes' : `/nodes?status=${returnStatus}`
   const [nameEditors, setNameEditors] = useState<Record<string, string>>({})
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null)
@@ -152,6 +68,8 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
   const [loading, setLoading] = useState(false)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const [error, setError] = useState('')
+  const [observations, setObservations] = useState<NodeWssObservation[] | null>(null)
+  const [wssCheckedAt, setWssCheckedAt] = useState<number | null>(null)
   const canManageXray = hasPermission(admin, 'nodes', 'update_core')
   const canBindTLS = hasPermission(admin, 'cores', 'update')
   const [xrayTarget, setXrayTarget] = useState<string | null>(null)
@@ -281,23 +199,20 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
     } finally { setRegistryBusy(false) }
   }
 
-  const activeReleaseStatus = releaseTarget ? releaseStates[releaseTarget]?.status : undefined
-  useEffect(() => {
-    if (!releaseTarget || !activeReleaseStatus ||
-        !['pending', 'queued', 'running'].includes(activeReleaseStatus)) return
-    const updateStatus = () => {
-      if (document.visibilityState === 'visible') void loadNodeLifecycle(releaseTarget)
-    }
-    // Poll only the operator's active operation, then stop at terminal state.
-    const interval = window.setInterval(updateStatus, 5000)
-    return () => window.clearInterval(interval)
-  }, [releaseTarget, activeReleaseStatus])
-
   const refresh = async () => {
     try {
-      const result = await $fetch<{ nodes: Registration[] }>('/api/node-registry/nodes')
+      const result = await $fetch<{ nodes: NodeRegistration[] }>('/api/node-registry/nodes')
       setEntries(result.nodes)
       setError('')
+      setObservations(null)
+      setWssCheckedAt(null)
+      if (canReadWss) {
+        try {
+          const latest = await $fetch<NodeWssSummary>('/api/node-registry/analytics/summary')
+          setObservations(latest.nodes)
+          setWssCheckedAt(Date.now())
+        } catch { /* Read-only WSS analytics is optional; unknown is not disconnected. */ }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось загрузить узлы')
     } finally {
@@ -601,74 +516,37 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
       <CardHeader className="space-y-4 px-0 pb-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            {isDetail && <Link to={returnUrl} className="text-sm text-primary underline underline-offset-4">{t('nodes.details.back', { defaultValue: 'К списку узлов' })}</Link>}
-            <CardTitle>{isDetail ? (currentNode?.display_name ?? t('nodes.details.title', { defaultValue: 'Узел' })) : t('nodes.registryOverview.title', { defaultValue: 'Реестр узлов' })}</CardTitle>
-            <CardDescription>{isDetail
-              ? t('nodes.details.description', { defaultValue: 'Регистрация, настройки и результаты управления конкретной Node.' })
-              : t('nodes.registryOverview.description', { defaultValue: 'Статус регистрации и последний отчёт Agent; подтверждение не означает активное соединение.' })}</CardDescription>
+            <Link to={returnUrl} className="text-sm text-primary underline underline-offset-4">{t('nodes.details.back', { defaultValue: 'К списку узлов' })}</Link>
+            <CardTitle>{currentNode?.display_name ?? t('nodes.details.title', { defaultValue: 'Узел' })}</CardTitle>
+            <CardDescription>{t('nodes.details.description', { defaultValue: 'Регистрация, настройки и результаты управления конкретной Node.' })}</CardDescription>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
             {t('nodes.registryOverview.refresh', { defaultValue: 'Обновить список' })}
           </Button>
         </div>
-        {isDetail && <nav aria-label={t('nodes.details.tabsTitle', { defaultValue: 'Разделы узла' })} className="flex flex-wrap gap-1 border-b pb-2">
+        <nav aria-label={t('nodes.details.tabsTitle', { defaultValue: 'Разделы узла' })} className="flex flex-wrap gap-1 border-b pb-2">
           {NODE_DETAIL_TABS.map(tab => <Link key={tab}
             to={`?tab=${tab}${returnStatus === 'all' ? '' : `&returnStatus=${returnStatus}`}`} aria-current={detailTab === tab ? 'page' : undefined}
             className={`rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring ${detailTab === tab ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
             {t(`nodes.details.tabs.${tab}`, { defaultValue: tab })}
           </Link>)}
-        </nav>}
+        </nav>
       </CardHeader>
       <CardContent className="space-y-4 px-0">
-        {!isDetail && <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={t('nodes.registryOverview.stats', { defaultValue: 'Статистика регистрации' })}>
-          {(['all', 'approved', 'pending', 'revoked'] as const).map(status => (
-            <button key={status} type="button" aria-pressed={registrationFilter === status}
-              className={`rounded-lg border px-3 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring ${registrationFilter === status ? 'border-primary bg-primary/5' : 'hover:bg-muted/40'}`}
-              onClick={() => {
-                setRegistrationFilter(status)
-                const next = new URLSearchParams(searchParams)
-                if (status === 'all') next.delete('status')
-                else next.set('status', status)
-                setSearchParams(next, { replace: true })
-              }}>
-              <span className="block text-xl font-semibold tabular-nums">{counts[status]}</span>
-              <span className="text-xs text-muted-foreground">{t(`nodes.registryOverview.${status}`, { defaultValue: status === 'all' ? 'Всего' : status === 'approved' ? 'Подтверждены' : status === 'pending' ? 'Ожидают' : 'Отозваны' })}</span>
-            </button>
-          ))}
-        </div>}
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
-        {isDetail && !initialLoaded && !error && <p role="status" className="text-sm text-muted-foreground">{t('nodes.details.loading', { defaultValue: 'Загрузка данных Node…' })}</p>}
-        {isDetail && initialLoaded && !currentNode && !error && <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+        {!initialLoaded && !error && <p role="status" className="text-sm text-muted-foreground">{t('nodes.details.loading', { defaultValue: 'Загрузка данных Node…' })}</p>}
+        {initialLoaded && !currentNode && !error && <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
           {t('nodes.details.notFound', { defaultValue: 'Node не найдена в реестре.' })}
           <Link to={returnUrl} className="ml-2 text-primary underline">{t('nodes.details.back', { defaultValue: 'К списку узлов' })}</Link>
         </div>}
-        {!isDetail && entries.length === 0 && !error && (
-          <div className="rounded-lg border border-dashed px-4 py-8 text-center">
-            <p className="mb-3 text-sm text-muted-foreground">{t('nodes.emptyHint')}</p>
-            {canCreate && (
-              <Button type="button" variant="outline"
-                onClick={() => window.dispatchEvent(new Event('openNodeDialog'))}>
-                {t('nodes.addNode')}
-              </Button>
-            )}
-          </div>
-        )}
-        {!isDetail && entries.length > 0 && visibleNodes.length === 0 && (
-          <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground" role="status">
-            {t('nodes.registryOverview.noMatches', { defaultValue: 'Узлов с таким статусом нет.' })}
-          </p>
-        )}
         <div className="space-y-3">
-          {visibleNodes.map(node => (
+          {entries.filter(node => node.node_uuid === detailNodeUuid).map(node => (
             <div key={node.node_uuid} className="min-w-0 space-y-4 rounded-xl border bg-card p-4">
               <div className="min-w-0 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      {isDetail ? null
-                        : <Link className="min-w-0 break-words text-base font-semibold text-primary hover:underline" to={`/nodes/registry/${encodeURIComponent(node.node_uuid)}${registrationFilter === 'all' ? '' : `?returnStatus=${registrationFilter}`}`}>
-                          {node.display_name}
-                        </Link>}
+                      <span className="min-w-0 break-words text-base font-semibold">{node.display_name}</span>
                       <Badge variant={node.status === 'approved' ? 'outline' : node.status === 'pending' ? 'yellow' : 'red'}>
                         {t(`nodes.nodeStatus.${node.status}`, { defaultValue: node.status })}
                       </Badge>
@@ -678,15 +556,23 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                       {node.last_seen_at ? `${t('nodes.lastSeen')}: ${new Date(node.last_seen_at).toLocaleString()}` : t('nodes.awaitingFirstHeartbeat')}
                       {' · '}{t('nodes.agentVersion')}: {node.node_version}
                     </p>
+                    <p className="text-xs text-muted-foreground" aria-label="WSS: последний подтверждённый сигнал">
+                      {observedWssPresence(node.node_uuid, wssCheckedAt, observations) === 'recent'
+                        ? t('nodes.registryOverview.wssRecent', { defaultValue: 'WSS: heartbeat был свежим при проверке (до 90 с)' })
+                        : observedWssPresence(node.node_uuid, wssCheckedAt, observations) === 'stale'
+                          ? t('nodes.registryOverview.wssStale', { defaultValue: 'WSS: свежий heartbeat не получен при проверке' })
+                          : t('nodes.registryOverview.wssUnknown', { defaultValue: 'WSS-сигнал не проверен' })}
+                      {wssCheckedAt !== null && ` · ${new Date(wssCheckedAt).toLocaleTimeString()}`}
+                    </p>
                   </div>
-                  {isDetail && detailTab === 'overview' && canApprove && !(node.node_uuid in nameEditors) && (
+                  {detailTab === 'overview' && canApprove && !(node.node_uuid in nameEditors) && (
                     <Button size="sm" variant="outline" className="shrink-0"
                       onClick={() => setNameEditors(prev => ({ ...prev, [node.node_uuid]: node.display_name }))}>
                       {t('nodes.registryOverview.rename', { defaultValue: 'Переименовать' })}
                     </Button>
                   )}
                 </div>
-                {isDetail && detailTab === 'overview' && canApprove && node.node_uuid in nameEditors && (
+                {detailTab === 'overview' && canApprove && node.node_uuid in nameEditors && (
                   <div className="flex flex-wrap gap-2">
                     <Input aria-label="Новое название ноды" value={nameEditors[node.node_uuid]}
                       maxLength={128} className="max-w-xs"
@@ -700,12 +586,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                   </div>
                 )}
 
-                {!isDetail && <div className="flex justify-end border-t pt-3">
-                  <Link to={`/nodes/registry/${encodeURIComponent(node.node_uuid)}${registrationFilter === 'all' ? '' : `?returnStatus=${registrationFilter}`}`} className="text-sm font-medium text-primary underline underline-offset-4">
-                    {t('nodes.details.open', { defaultValue: 'Открыть узел' })}
-                  </Link>
-                </div>}
-                {isDetail && detailTab === 'overview' && (
+                {detailTab === 'overview' && (
                   <div className="space-y-3 border-t pt-3">
                     <p className="text-sm text-muted-foreground">
                       {t('nodes.details.registrationNote', { defaultValue: 'Статус регистрации не гарантирует активного соединения WSS или работы VPN.' })}
@@ -717,18 +598,18 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                     </div>
                   </div>
                 )}
-                {isDetail && detailTab !== 'overview' && node.status !== 'approved' && <p role="status" className="text-sm text-muted-foreground">
+                {detailTab !== 'overview' && node.status !== 'approved' && <p role="status" className="text-sm text-muted-foreground">
                   {t('nodes.details.notApproved', { defaultValue: 'Операции доступны после подтверждения Node.' })}
                 </p>}
-                {isDetail && (detailTab === 'operations' || detailTab === 'registry') && node.status === 'approved' && !canApprove && <p role="status" className="text-sm text-muted-foreground">
+                {(detailTab === 'operations' || detailTab === 'registry') && node.status === 'approved' && !canApprove && <p role="status" className="text-sm text-muted-foreground">
                   {t('nodes.details.noRegistryAccess', { defaultValue: 'Для управления Registry необходимы права изменения Node.' })}
                 </p>}
-                {isDetail && (detailTab === 'xray' || detailTab === 'tls' || detailTab === 'diagnostics') && node.status === 'approved' &&
+                {(detailTab === 'xray' || detailTab === 'tls' || detailTab === 'diagnostics') && node.status === 'approved' &&
                   (!canManageXray || !node.capabilities?.includes('xray.protobuf.binary')) && <p role="status" className="text-sm text-muted-foreground">
                     {t('nodes.details.xrayUnavailable', { defaultValue: 'Управление Xray на этой Node недоступно или не разрешено.' })}
                   </p>}
 
-                {isDetail && (detailTab === 'operations' || detailTab === 'registry') && canApprove && node.status === 'approved' && (
+                {(detailTab === 'operations' || detailTab === 'registry') && canApprove && node.status === 'approved' && (
                   <div className="space-y-2 border-t pt-3">
                     {detailTab === 'operations' && <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-medium">Жизненный цикл Node</p>
@@ -745,56 +626,16 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                           Обновляется только внутренний контейнер Node по SHA-256 digest; Agent остаётся установленным.
                           В случае неуспешного WSS Agent может откатить образ. Изменение Xray выполняется отдельно.
                         </p>}
-                        {detailTab === 'registry' && <div className="space-y-2 rounded-md border p-3">
-                          <p className="text-sm font-medium">Registry этой Node</p>
-                          <p className="text-muted-foreground text-xs">
-                            Настройки сохраняются отдельно для каждой Node. Пароль шифруется на сервере и никогда не возвращается в панель.
-                            Общий GHCR-токен задаётся во вкладке «Токены» и используется всеми нодами с GHCR.
-                          </p>
-                          {(registryProfiles[node.node_uuid] ?? [{ repository: OFFICIAL_NODE_REPOSITORY,
-                            username: '', has_credentials: false, official: true, is_default: true }]).map(profile => (
-                            <div key={profile.repository} className="flex flex-wrap items-center gap-2 rounded border p-2 text-xs">
-                              <span className="min-w-0 flex-1 break-all font-mono">{profile.repository}</span>
-                              <span>{profile.has_credentials
-                                ? profile.credential_scope === 'shared' ? 'Общий GHCR доступ' : 'Авторизация настроена'
-                                : 'Без авторизации'}</span>
-                              {profile.is_default && <Badge variant="secondary">Основной</Badge>}
-                              {canApprove && !profile.is_default && <Button size="sm" type="button" variant="outline"
-                                disabled={registryBusy} onClick={() => void setDefaultNodeRegistry(node.node_uuid, profile.repository)}>
-                                Сделать основным
-                              </Button>}
-                              {profile.official && <Link to="/nodes/tokens" className="text-primary underline underline-offset-2">
-                                Настроить общий GHCR токен
-                              </Link>}
-                              {canApprove && !profile.official && <Button size="sm" type="button" variant="outline"
-                                onClick={() => setRegistryDraft({ repository: profile.repository,
-                                  username: profile.username, password: '' })}>Изменить</Button>}
-                              {canApprove && (!profile.official || profile.credential_scope === 'node') && <Button size="sm" type="button"
-                                variant="ghost" disabled={registryBusy}
-                                onClick={() => void deleteNodeRegistry(node.node_uuid, profile.repository)}>
-                                {profile.official ? 'Сбросить локальный доступ' : 'Удалить'}
-                              </Button>}
-                            </div>
-                          ))}
-                          {canApprove && <div className="space-y-2">
-                            <Input aria-label="Репозиторий Registry этой Node" placeholder="registry.example.com/waylane/node"
-                              value={registryDraft.repository} maxLength={55}
-                              onChange={event => setRegistryDraft(previous => ({ ...previous, repository: event.target.value }))} />
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <Input aria-label="Логин Registry этой Node" placeholder="Логин (необязательно)"
-                                value={registryDraft.username} maxLength={128} autoComplete="off"
-                                onChange={event => setRegistryDraft(previous => ({ ...previous, username: event.target.value }))} />
-                              <Input aria-label="Пароль Registry этой Node" placeholder="Пароль (пусто — оставить текущий)"
-                                type="password" autoComplete="new-password" value={registryDraft.password} maxLength={1024}
-                                onChange={event => setRegistryDraft(previous => ({ ...previous, password: event.target.value }))} />
-                            </div>
-                            <Button type="button" size="sm" disabled={registryBusy || !registryDraft.repository.trim() ||
-                              registryDraft.repository.trim() === OFFICIAL_NODE_REPOSITORY}
-                              onClick={() => void saveNodeRegistry(node.node_uuid, registryDraft)}>
-                              Сохранить Registry для этой Node
-                            </Button>
-                          </div>}
-                        </div>}
+                        {detailTab === 'registry' && <NodeRegistryCredentials
+                          profiles={registryProfiles[node.node_uuid]}
+                          draft={registryDraft}
+                          setDraft={setRegistryDraft}
+                          busy={registryBusy}
+                          canUpdate={canApprove}
+                          onSave={draft => void saveNodeRegistry(node.node_uuid, draft)}
+                          onSetDefault={repository => void setDefaultNodeRegistry(node.node_uuid, repository)}
+                          onDelete={repository => void deleteNodeRegistry(node.node_uuid, repository)}
+                        />}
                         {detailTab === 'operations' && <>
                         <select aria-label="Registry для обновления Node"
                           className="border-input bg-background min-h-9 w-full rounded-md border px-3 py-1 text-sm"
@@ -830,31 +671,13 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                           <Button size="sm" variant="ghost"
                             onClick={() => void loadNodeLifecycle(node.node_uuid)}>Обновить состояние</Button>
                         </div>
-                        {releaseStates[node.node_uuid] && (
-                          <div className="space-y-1 text-xs">
-                            <p role="status">{releaseStates[node.node_uuid].action ?? 'Операций не было'} ·
-                              {' '}{releaseStates[node.node_uuid].status} · {releaseStates[node.node_uuid].phase} ·
-                              {' '}{releaseStates[node.node_uuid].progress}%</p>
-                            <progress aria-label="Этапный прогресс обновления Node" className="w-full" max={100}
-                              value={releaseStates[node.node_uuid].progress} />
-                            <p className="text-muted-foreground">Процент обозначает этап операции, не объём скачанных данных.</p>
-                            {releaseStates[node.node_uuid].image && (
-                              <p className="break-all font-mono text-muted-foreground">Цель: {releaseStates[node.node_uuid].image}</p>
-                            )}
-                            {releaseStates[node.node_uuid].previous_image && (
-                              <p className="break-all font-mono text-muted-foreground">Откат: {releaseStates[node.node_uuid].previous_image}</p>
-                            )}
-                            {releaseStates[node.node_uuid].error_code && (
-                              <p role="alert" className="text-destructive">Ошибка: {releaseStates[node.node_uuid].error_code}</p>
-                            )}
-                          </div>
-                        )}
+                        <NodeReleaseStatus operation={releaseStates[node.node_uuid]} />
                         </>}
                       </div>
                     )}
                   </div>
                 )}
-                {isDetail && detailTab === 'diagnostics' && <section className="border-t pt-3 text-xs text-muted-foreground">
+                { detailTab === 'diagnostics' && <section className="border-t pt-3 text-xs text-muted-foreground">
                   <h3 className="mb-2 text-sm font-semibold text-foreground">{t('nodes.technicalDetails')}</h3>
                   <div className="mt-3 space-y-2 rounded-md bg-muted/30 p-3">
                     <p className="break-all font-mono">UUID: {node.node_uuid}</p>
@@ -872,7 +695,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                   </div>
                 </section>}
               </div>
-              {isDetail && (detailTab === 'xray' || detailTab === 'tls' || detailTab === 'diagnostics') && canManageXray && node.status === 'approved' && (
+              { (detailTab === 'xray' || detailTab === 'tls' || detailTab === 'diagnostics') && canManageXray && node.status === 'approved' && (
                 <div className="min-w-0 w-full space-y-2 border-t pt-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => {
@@ -999,37 +822,18 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                         </div>
                       </div>
                       </>}
-                      {detailTab === 'tls' && <div className="space-y-2 border-t pt-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-medium">TLS-сертификаты из пресетов WayLane</p>
-                          <Link className="text-sm font-medium text-primary underline" to="/tls-presets">Каталог сертификатов</Link>
-                        </div>
-                        <p className="text-muted-foreground text-xs">
-                          Привязка по tag TLS inbound. Приватный ключ не отображается; ротация пресета автоматически
-                          поставит обновление Xray в очередь.
-                        </p>
-                        {agentTLSBindings[node.node_uuid]?.map(binding => (
-                          <p key={binding.inbound_tag} className="text-muted-foreground text-xs break-all">
-                            {binding.inbound_tag} · {binding.preset_name} · ревизия {binding.revision} · SHA-256 {binding.fingerprint_sha256.slice(0, 16)}…
-                          </p>
-                        ))}
-                        <Input aria-label="Agent TLS inbound tag" placeholder="Tag TLS inbound"
-                          value={tlsInboundTag} onChange={e => setTlsInboundTag(e.target.value)} maxLength={256} />
-                        <select aria-label="TLS preset" className="border-input bg-background w-full rounded-md border p-2 text-sm"
-                          value={tlsPresetId} onChange={e => setTlsPresetId(e.target.value)}>
-                          <option value="">Выберите существующий TLS-пресет</option>
-                          {tlsPresetChoices.map(preset => (
-                            <option key={preset.id} value={preset.id}>
-                              {preset.name} · revision {preset.revision}
-                            </option>
-                          ))}
-                        </select>
-                        {canBindTLS && (
-                          <Button size="sm" variant="outline"
-                            disabled={xrayBusy || !xrayStates[node.node_uuid]?.configured}
-                            onClick={() => void bindExistingTLS(node.node_uuid)}>Привязать сертификат</Button>
-                        )}
-                      </div>}
+                      {detailTab === 'tls' && <NodeTLSBindings
+                        bindings={agentTLSBindings[node.node_uuid] ?? []}
+                        presets={tlsPresetChoices}
+                        inboundTag={tlsInboundTag}
+                        onInboundTagChange={setTlsInboundTag}
+                        selectedPresetId={tlsPresetId}
+                        onPresetChange={setTlsPresetId}
+                        canBind={canBindTLS}
+                        busy={xrayBusy}
+                        configured={Boolean(xrayStates[node.node_uuid]?.configured)}
+                        onBind={() => void bindExistingTLS(node.node_uuid)}
+                      />}
                       {detailTab === 'xray' && <div className="space-y-2 border-t pt-3">
                         <p className="text-sm font-medium">Пользователи Xray и коммерческие подписки</p>
                         <p className="text-muted-foreground text-xs">
@@ -1076,43 +880,11 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                           Синхронизировать пользователей
                         </Button>
                       </div>}
-                      {detailTab === 'diagnostics' && <div className="space-y-2 border-t pt-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-medium">Статистика Xray по UUID подписок</p>
-                          <Button size="sm" variant="outline" disabled={xrayBusy}
-                            onClick={() => void readXrayUsage(node.node_uuid)}>Обновить счётчики</Button>
-                        </div>
-                        <p className="text-muted-foreground text-xs">
-                          Только наблюдение через приватный StatsService/WSS при явном разрешении
-                          WAYLANE_XRAY_STATS_READONLY=true на Node. Отображаемые суммарные
-                          счётчики не равны списанным коммерческим байтам: при включённом Backend
-                          флаге биллинга учитываются только новые проверенные приращения.
-                          Для получения чисел требуется включить
-                          stats и statsUserUplink/statsUserDownlink в policy Xray, затем явно перезапустить
-                          ядро для применения настроек.
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                          Коммерческое начисление: {xrayUsageStates[node.node_uuid]?.billing_enabled
-                            ? 'разрешено оператором Backend'
-                            : 'выключено (только диагностика)'}.
-                        </p>
-                        {xrayUsageStates[node.node_uuid]?.samples.length === 0 && (
-                          <p className="text-muted-foreground text-xs">Счётчики пока не поступали.</p>
-                        )}
-                        {xrayUsageStates[node.node_uuid]?.samples.slice(0, 20).map(sample => (
-                          <div key={sample.subscription_uuid} className="min-w-0 border-b pb-2 text-xs">
-                            <p className="break-all font-mono">{sample.subscription_uuid}</p>
-                            <p className="text-muted-foreground">
-                              ↑ {BigInt(sample.total_uplink).toLocaleString('ru-RU')} Б ·
-                              {' '}↓ {BigInt(sample.total_downlink).toLocaleString('ru-RU')} Б ·
-                              {' '}наблюдение {new Date(sample.observed_at).toLocaleString()}
-                            </p>
-                          </div>
-                        ))}
-                        {(xrayUsageStates[node.node_uuid]?.samples.length ?? 0) > 20 && (
-                          <p className="text-muted-foreground text-xs">Показаны первые 20 записей из {xrayUsageStates[node.node_uuid]?.samples.length}.</p>
-                        )}
-                      </div>}
+                      {detailTab === 'diagnostics' && <NodeXrayUsage
+                        data={xrayUsageStates[node.node_uuid]}
+                        busy={xrayBusy}
+                        onRefresh={() => void readXrayUsage(node.node_uuid)}
+                      />}
                       {xrayStates[node.node_uuid]?.last_error && (
                         <p role="alert" className="text-destructive text-xs">{xrayStates[node.node_uuid].last_error}</p>
                       )}
@@ -1120,7 +892,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid?
                   )}
                 </div>
               )}
-              {isDetail && detailTab === 'overview' && canApprove && node.status !== 'revoked' && (
+              {detailTab === 'overview' && canApprove && node.status !== 'revoked' && (
                 <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
                   {node.status === 'pending' && <Button size="sm" disabled={loading} onClick={() => void decide(node.node_uuid, 'approve')}>Подтвердить</Button>}
                   <AlertDialog>

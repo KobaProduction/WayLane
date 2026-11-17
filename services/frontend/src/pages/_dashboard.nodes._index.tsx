@@ -1,9 +1,9 @@
-import NodeRegistryPanel from '@/features/nodes/components/node-registry-panel'
+import NodeRegistryList from '@/features/nodes/components/node-registry-list'
 
 export default function NodesPage() {
   return (
     <div className="space-y-6">
-      <NodeRegistryPanel />
+      <NodeRegistryList />
     </div>
   )
 }

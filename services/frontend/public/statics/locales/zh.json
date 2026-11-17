@@ -64,7 +64,7 @@
   "create": "创建",
   "nodes": {
     "details": {"title": "节点", "description": "该节点的注册、状态和操作", "back": "返回节点列表", "tabsTitle": "节点分区", "tabs": {"overview": "概览", "operations": "生命周期", "registry": "镜像仓库", "xray": "Xray", "tls": "TLS", "diagnostics": "诊断"}, "open": "打开节点", "loading": "正在加载节点…", "notFound": "注册表中未找到节点。", "registrationNote": "注册已批准不代表 WSS 已连接或 VPN 正在工作。", "notApproved": "请先批准节点注册才能执行操作。", "noRegistryAccess": "管理镜像仓库需要节点修改权限。", "xrayUnavailable": "当前节点不支持或无权使用 Xray 控制。"},
-    "registryOverview": {"title": "节点注册表", "description": "注册状态与 Agent 最近报告。已批准并不代表已连接。", "refresh": "刷新列表", "stats": "注册状态概览", "all": "全部", "approved": "已批准", "pending": "待批准", "revoked": "已撤销", "noMatches": "没有此状态的节点", "rename": "重命名"},
+    "registryOverview": {"title": "节点注册表", "description": "注册状态与 Agent 最近报告。已批准并不代表已连接。", "refresh": "刷新列表", "stats": "注册状态概览", "all": "全部", "approved": "已批准", "pending": "待批准", "revoked": "已撤销", "noMatches": "没有此状态的节点", "rename": "重命名", "wssUnknown": "尚未检查 WSS 信号", "wssRecent": "WSS：检查时的心跳为最近 90 秒内", "wssStale": "WSS：检查时未发现最近 90 秒内的心跳"},
     "presets": { "title": "Xray 预设", "description": "管理 Xray 密钥和配置预设" },
     "title": "节点",
     "description": "管理您的节点",
