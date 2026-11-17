@@ -6,7 +6,8 @@ export type XrayStatus = {
   action?: string
   region?: string | null
   runtime_status?: string
-  applied_generation?: number
+  reported_at?: string | null
+  applied_generation?: number | null
   source_core_id?: number | null
   last_error?: string | null
 }

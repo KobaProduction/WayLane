@@ -63,6 +63,8 @@
   "today": "今天",
   "create": "创建",
   "nodes": {
+    "xrayApply": {"unloaded":"尚未加载 Xray 状态","unconfigured":"尚未配置 Xray","queued":"等待节点确认","applied":"节点已确认应用配置","stopped":"节点已确认停止","error":"节点报告错误","requires_restart":"Xray 需要重启","unknown":"尚未确认应用配置","appliedGeneration":"已应用","desiredGeneration":"期望","lastReport":"最近 Xray 报告","errorLabel":"错误"},
+    "controlEvents": {"title":"节点控制历史","description":"已记录的控制事件，不代表实时连接状态。","refresh":"刷新事件","noAccess":"没有读取节点日志的权限。","loading":"正在加载事件…","lastRead":"上次成功读取","lastWss":"最近记录的 WSS 事件","notLive":"不能证明当前仍已连接。","noWss":"没有记录 WSS 连接事件。","empty":"节点历史为空。","records":"最近的控制事件","kind":{"connected":"已记录 WSS 连接","disconnected":"已记录 WSS 断开","approved":"节点注册已批准","revoked":"节点注册已撤销","desired_queued":"命令已排队","xray_result":"节点报告 Xray 结果","awg_result":"节点报告 AWG 结果","node_error":"节点报告错误"}},
     "details": {"title": "节点", "description": "该节点的注册、状态和操作", "back": "返回节点列表", "tabsTitle": "节点分区", "tabs": {"overview": "概览", "operations": "生命周期", "registry": "镜像仓库", "xray": "Xray", "tls": "TLS", "diagnostics": "诊断"}, "open": "打开节点", "loading": "正在加载节点…", "notFound": "注册表中未找到节点。", "registrationNote": "注册已批准不代表 WSS 已连接或 VPN 正在工作。", "notApproved": "请先批准节点注册才能执行操作。", "noRegistryAccess": "管理镜像仓库需要节点修改权限。", "xrayUnavailable": "当前节点不支持或无权使用 Xray 控制。"},
     "registryOverview": {"title": "节点注册表", "description": "注册状态与 Agent 最近报告。已批准并不代表已连接。", "refresh": "刷新列表", "stats": "注册状态概览", "all": "全部", "approved": "已批准", "pending": "待批准", "revoked": "已撤销", "noMatches": "没有此状态的节点", "rename": "重命名", "wssUnknown": "尚未检查 WSS 信号", "wssRecent": "WSS：检查时的心跳为最近 90 秒内", "wssStale": "WSS：检查时未发现最近 90 秒内的心跳"},
     "presets": { "title": "Xray 预设", "description": "管理 Xray 密钥和配置预设" },

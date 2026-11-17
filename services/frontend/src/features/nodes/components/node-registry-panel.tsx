@@ -8,6 +8,8 @@ import { NodeTLSBindings, type AgentTLSBinding, type TLSPresetSummary } from './
 import { NodeXrayUsage, type XrayUsageState } from './node-xray-usage'
 import { NodeXrayRuntimeControls, type XrayCommand } from './node-xray-runtime-controls'
 import { NodeXrayCoreAssignment } from './node-xray-core-assignment'
+import { NodeXrayApplyStatus } from './node-xray-apply-status'
+import { NodeControlEvents } from './node-control-events'
 import { NodeXrayClientManagement } from './node-xray-client-management'
 import type { XrayInboundInfo, XrayStatus, EditorCoreOption } from './node-xray-types'
 import { useTranslation } from 'react-i18next'
@@ -33,6 +35,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
   const { t } = useTranslation()
   const canRead = hasPermission(admin, 'nodes', 'read')
   const canReadWss = hasPermission(admin, 'nodes', 'stats')
+  const canReadEvents = hasPermission(admin, 'nodes', 'logs')
   const canApprove = hasPermission(admin, 'nodes', 'update')
   const [entries, setEntries] = useState<NodeRegistration[]>([])
   const currentNode = entries.find(node => node.node_uuid === detailNodeUuid)
@@ -675,6 +678,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                     )}
                   </div>
                 </section>}
+                {detailTab === 'diagnostics' && <NodeControlEvents nodeUuid={node.node_uuid} allowed={canReadEvents} />}
               </div>
               { (detailTab === 'xray' || detailTab === 'tls' || detailTab === 'diagnostics') && canManageXray && node.status === 'approved' && (
                 <div className="min-w-0 w-full space-y-2 border-t pt-3">
@@ -684,22 +688,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                       if (detailTab === 'tls') void refreshTLSBindings(node.node_uuid)
                       if (detailTab === 'diagnostics') void readXrayUsage(node.node_uuid)
                     }} disabled={!node.capabilities?.includes('xray.protobuf.binary')}>Обновить данные Xray</Button>
-                    <span className="text-muted-foreground text-xs">
-                      {!node.capabilities?.includes('xray.protobuf.binary')
-                        ? t('nodes.xrayNotSupported')
-                        : !xrayStates[node.node_uuid]
-                          ? t('nodes.xrayNotLoaded')
-                          : xrayStates[node.node_uuid].configured
-                            ? t('nodes.xrayRunningSummary', {
-                                version: xrayStates[node.node_uuid].image_version,
-                                status: t(`nodes.logs.status.${xrayStates[node.node_uuid].runtime_status}`, {
-                                  defaultValue: xrayStates[node.node_uuid].runtime_status,
-                                }),
-                                applied: xrayStates[node.node_uuid].applied_generation,
-                                generation: xrayStates[node.node_uuid].generation,
-                              })
-                            : t('nodes.xrayNotConfigured')}
-                    </span>
+                    <NodeXrayApplyStatus current={xrayStates[node.node_uuid]} />
                   </div>
                   {xrayTarget === node.node_uuid && (
                     <div className="space-y-2">
@@ -756,9 +745,6 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                         busy={xrayBusy}
                         onRefresh={() => void readXrayUsage(node.node_uuid)}
                       />}
-                      {xrayStates[node.node_uuid]?.last_error && (
-                        <p role="alert" className="text-destructive text-xs">{xrayStates[node.node_uuid].last_error}</p>
-                      )}
                     </div>
                   )}
                 </div>

@@ -18,7 +18,8 @@ test('a saved Core is the primary Xray workflow; manual JSON remains optional an
   })))
   assert.match(coreHtml, /Сохранённый Xray Core/)
   assert.match(coreHtml, /Test Core/)
-  assert.match(coreHtml, /поколение 8 \/ желаемое 9/)
+  assert.match(coreHtml, /Назначен в конфигурации/)
+  assert.doesNotMatch(coreHtml, /Node подтвердила применение/) // The status belongs to its server-backed status widget.
   assert.match(coreHtml, /Применить профиль/)
   const manual = renderToStaticMarkup(createElement(NodeXrayRuntimeControls, {
     imageVersion: '26.10.21', region: '', configuration: '', configured: true, busy: false,

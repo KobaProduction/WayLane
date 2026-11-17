@@ -29,10 +29,6 @@ export function NodeXrayCoreAssignment({ cores, selectedCoreId, onCoreChange, cu
         {applied?.name ?? `Core #${current.source_core_id}`}
       </Link>
     </p>}
-    {current && <p className="text-xs text-muted-foreground" role="status">
-      Конфигурация Node: поколение {current.applied_generation ?? '—'} / желаемое {current.generation ?? '—'}
-      {' · '}{current.runtime_status ?? 'статус Xray неизвестен'}
-    </p>}
     <div className="flex flex-wrap items-center gap-2">
       <select aria-label="Сохранённый профиль Xray" className="border-input bg-background min-h-10 min-w-0 max-w-full flex-1 rounded-md border px-3 text-sm"
         value={selectedCoreId} onChange={event => onCoreChange(event.target.value)}>
