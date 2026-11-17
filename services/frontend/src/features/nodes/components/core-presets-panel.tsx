@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { generateRealityKeyPair, generateRealityShortId } from '@/lib/xray-generation'
 import { $fetch } from '@/service/http'
@@ -37,6 +38,7 @@ export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
   canUpdate: boolean
   canDelete: boolean
 }) {
+  const [searchParams] = useSearchParams()
   const [presets, setPresets] = useState<Preset[]>([])
   const [cores, setCores] = useState<CoreTarget[]>([])
   const [bindings, setBindings] = useState<Binding[]>([])
@@ -47,7 +49,7 @@ export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
   const [selectedCore, setSelectedCore] = useState('')
   const [selectedInbound, setSelectedInbound] = useState('')
   const [busy, setBusy] = useState(false)
-  const [expanded, setExpanded] = useState(() => new URLSearchParams(window.location.search).get('presets') === 'reality')
+  const [expanded, setExpanded] = useState(() => searchParams.get('presets') === 'reality')
   const [applyNeeded, setApplyNeeded] = useState<number[]>([])
   const load = useCallback(async () => {
     const [items, targets, attached] = await Promise.all([

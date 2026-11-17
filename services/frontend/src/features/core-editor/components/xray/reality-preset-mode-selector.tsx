@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { confirmedRealityBinding, effectiveRealityPresetSelection, type RealityBinding } from '@/features/core-editor/kit/reality-preset-binding'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -20,19 +21,11 @@ type RealityPreset = {
   revision: number
   data: { publicKey?: string; shortIds?: string[] }
 }
-type RealityBinding = { core_id: number; inbound_tag: string; kind: string; preset_id: string }
-
-export function confirmedRealityBinding(data: unknown, coreId: number | null, tag: string): string | null {
-  if (coreId === null || !Array.isArray(data)) return null
-  const row = (data as RealityBinding[]).find(item =>
-    item && item.core_id === coreId && item.inbound_tag === tag && item.kind === 'reality' && typeof item.preset_id === 'string',
-  )
-  return row?.preset_id ?? null
-}
 
 interface Props {
   open: boolean
   coreId: number | null
+  inboundSaved: boolean
   inboundTag: string
   initialPresetId?: string
   hasUnsavedChanges: boolean
@@ -47,7 +40,7 @@ function readableError(error: unknown): string {
   return typeof detail === 'string' ? detail : response?.message ?? 'Не удалось изменить привязку REALITY'
 }
 
-export function RealityPresetModeSelector({ open, coreId, inboundTag, initialPresetId, hasUnsavedChanges, mode, onModeChange, onApplied }: Props) {
+export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundTag, initialPresetId, hasUnsavedChanges, mode, onModeChange, onApplied }: Props) {
   const { admin } = useAdmin()
   const canUpdate = hasPermission(admin, 'cores', 'update')
   const [presets, setPresets] = useState<RealityPreset[]>([])
@@ -98,17 +91,19 @@ export function RealityPresetModeSelector({ open, coreId, inboundTag, initialPre
   useEffect(() => { setReplacementKey('') }, [open, coreId, inboundTag])
 
   const currentPreset = useMemo(() => presets.find(item => item.id === binding), [presets, binding])
-  const selectedPreset = useMemo(() => presets.find(item => item.id === selected), [presets, selected])
+  // The list may be populated after the select mounts; keep the confirmed binding selected by default.
+  const selectedValue = effectiveRealityPresetSelection(selected, binding)
+  const selectedPreset = useMemo(() => presets.find(item => item.id === selectedValue), [presets, selectedValue])
   const verified = loadedScope === scope && !loading && !loadFailed
-  const ready = verified && canUpdate && coreId !== null && !hasUnsavedChanges && !pending
+  const ready = verified && canUpdate && coreId !== null && inboundSaved && !hasUnsavedChanges && !pending
   const mismatch = verified && (initialPresetId ?? null) !== binding
 
   const changePreset = async () => {
-    if (!ready || !selected || !coreId || mismatch) return
+    if (!ready || !selectedValue || !coreId || mismatch) return
     setPending(true)
     try {
       await $fetch('/api/core-presets/bindings', {
-        method: 'POST', body: { core_id: coreId, inbound_tag: inboundTag, preset_id: selected },
+        method: 'POST', body: { core_id: coreId, inbound_tag: inboundTag, preset_id: selectedValue },
       })
       await queryClient.invalidateQueries({ queryKey: getListCoreBindingsQueryKey() })
       await queryClient.invalidateQueries({ queryKey: getGetCoreConfigQueryKey(coreId) })
@@ -152,7 +147,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundTag, initialPre
       {(!verified && !loadFailed) && <p className="text-xs text-muted-foreground">Загрузка пресетов и привязок…</p>}
       {loadFailed && <div className="space-y-2"><p className="text-xs text-destructive">Не удалось проверить привязки. Изменения запрещены.</p><Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>Повторить</Button></div>}
       {mismatch && <p className="text-xs text-destructive">Сохранённая ссылка REALITY не совпадает с привязкой на сервере. Обновите страницу, прежде чем менять режим.</p>}
-      {coreId === null && <p className="text-xs text-muted-foreground">Пресеты подключаются к сохранённому ядру. Сначала сохраните ядро, затем выберите пресет здесь.</p>}
+      {(coreId === null || !inboundSaved) && <p className="text-xs text-muted-foreground">Для привязки пресета сначала сохраните inbound и ядро в ручном режиме. Затем откройте inbound снова.</p>}
       {!canUpdate && <p className="text-xs text-muted-foreground">Для изменения режима требуется разрешение на редактирование ядер.</p>}
       {hasUnsavedChanges && <p className="text-xs text-amber-600">Сохраните или отмените текущие изменения ядра перед сменой источника ключей.</p>}
       {mode === 'manual' && !binding && !initialPresetId && <p className="text-xs text-muted-foreground">Настройте приватный ключ и Short IDs в полях ниже. Генерация новой пары доступна здесь же.</p>}
@@ -168,7 +163,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundTag, initialPre
       )}
       {mode === 'preset' && (
         <div className="space-y-2">
-          <Select value={selected} onValueChange={setSelected} disabled={!verified}>
+          <Select value={selectedValue} onValueChange={setSelected} disabled={!verified}>
             <SelectTrigger aria-label="Пресет REALITY"><SelectValue placeholder="Выберите REALITY-пресет" /></SelectTrigger>
             <SelectContent>{presets.map(item => <SelectItem key={item.id} value={item.id}>{item.name} · v{item.revision}</SelectItem>)}</SelectContent>
           </Select>
@@ -181,11 +176,11 @@ export function RealityPresetModeSelector({ open, coreId, inboundTag, initialPre
           )}
           {presets.length === 0 && verified && <p className="text-xs text-muted-foreground">REALITY-пресетов пока нет.</p>}
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" disabled={!ready || !selected || selected === binding || mismatch} size="sm" onClick={() => void changePreset()}>{binding ? 'Заменить привязку' : 'Привязать пресет'}</Button>
+            <Button type="button" disabled={!ready || !selectedValue || selectedValue === binding || mismatch} size="sm" onClick={() => void changePreset()}>{binding ? 'Заменить привязку' : 'Привязать пресет'}</Button>
             <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>Обновить список</Button>
-            <a className="text-xs text-primary underline" href="/nodes/cores?presets=reality" target="_blank" rel="noopener noreferrer">Создать / управлять ключами и пресетами</a>
+            <a className="text-xs text-primary underline" href="#/nodes/cores?presets=reality" target="_blank" rel="noopener noreferrer">Создать / управлять ключами и пресетами</a>
           </div>
-          {binding && selected === binding && verified && <p className="text-xs text-muted-foreground">Этот пресет уже привязан к inbound.</p>}
+          {binding && selectedValue === binding && verified && <p className="text-xs text-muted-foreground">Этот пресет уже привязан к inbound.</p>}
           <p className="text-xs text-muted-foreground">Для ядра, назначенного Node, изменение привязки запрещено сервером. Сначала потребуется безопасное переназначение профиля.</p>
         </div>
       )}

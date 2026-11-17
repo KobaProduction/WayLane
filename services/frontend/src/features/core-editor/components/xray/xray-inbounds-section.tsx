@@ -4325,6 +4325,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
                           <RealityPresetModeSelector
                             open={detailOpen}
                             coreId={coreId}
+                            inboundSaved={dialogMode === 'edit'}
                             inboundTag={inbound.tag}
                             initialPresetId={realityPresetId}
                             hasUnsavedChanges={hasActualChanges}

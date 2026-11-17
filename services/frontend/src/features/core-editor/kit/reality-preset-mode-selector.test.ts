@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { confirmedRealityBinding } from '@/features/core-editor/components/xray/reality-preset-mode-selector'
+import { confirmedRealityBinding, effectiveRealityPresetSelection } from '@/features/core-editor/kit/reality-preset-binding'
 
 test('only matching backend REALITY binding is recognized in the editor', () => {
   const rows = [
@@ -13,4 +13,11 @@ test('only matching backend REALITY binding is recognized in the editor', () => 
   assert.equal(confirmedRealityBinding(rows, 5, 'b'), null)
   assert.equal(confirmedRealityBinding(rows, null, 'a'), null)
   assert.equal(confirmedRealityBinding(undefined, 5, 'a'), null)
+})
+
+
+test('confirmed REALITY preset remains selected when async Select resets its draft value', () => {
+  assert.equal(effectiveRealityPresetSelection('', 'managed-one'), 'managed-one')
+  assert.equal(effectiveRealityPresetSelection('managed-two', 'managed-one'), 'managed-two')
+  assert.equal(effectiveRealityPresetSelection('', null), '')
 })
