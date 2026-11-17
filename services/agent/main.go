@@ -59,27 +59,27 @@ func checkDocker(ctx context.Context, run dockerRun) error {
 	return nil
 }
 
-// The outer Agent already uses the physical Linux host network namespace.
-// RootlessKit must preserve that namespace: Docker's stock dind-rootless
-// entrypoint defaults to slirp4netns (with a private port-driver), which
-// silently isolates even inner containers started with --network host.
-// Launch the same private dockerd beneath RootlessKit directly, omitting
-// all rootless port forwarding and the slirp-specific flags.
+// The outer Agent uses the physical Linux host network namespace. Docker
+// Engine 29.5+ needs RootlessKit's detached-netns mode to make child
+// --network host containers use that physical namespace. RootlessKit's own
+// network driver must remain non-host, otherwise Moby's RootlessKit info
+// endpoint crashes and the private daemon cannot serve Docker clients.
+// Keep the vendor daemon entrypoint and scope its network flags to this child.
 func rootlessDockerdArgs() []string {
 	return []string{
-		"--net=host", "--copy-up=/etc", "--copy-up=/run",
-		"docker-init", "--", "dockerd", "--host=unix://" + dockerSocket,
-		"--storage-driver=vfs", "--tls=false",
-		// The daemon has no bridge-networked workloads. The host network
-		// namespace does not grant CAP_NET_ADMIN, so never create Docker NAT,
-		// bridge interfaces or iptables rules there.
-		"--bridge=none", "--iptables=false", "--ip6tables=false",
-		"--ip-forward=false", "--ip-masq=false",
-		// The durable rootless-run volume retains an obsolete docker.pid from
-		// an earlier PID namespace. Avoid false "PID is still running" errors
-		// on Agent restart by keeping this daemon-only pidfile on tmpfs.
+		"dockerd", "--host=unix://" + dockerSocket, "--storage-driver=vfs", "--tls=false",
+		// A PID from the previous child namespace must never block startup.
 		"--pidfile=/tmp/waylane-dockerd.pid",
 	}
+}
+
+func rootlessDockerdCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "dockerd-entrypoint.sh", rootlessDockerdArgs()...)
+	cmd.Env = append(os.Environ(),
+		"DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns",
+		"DOCKERD_ROOTLESS_ROOTLESSKIT_FLAGS=--detach-netns",
+	)
+	return cmd
 }
 
 func startDockerd(ctx context.Context) (<-chan error, error) {
@@ -89,7 +89,7 @@ func startDockerd(ctx context.Context) (<-chan error, error) {
 	if err := reclaimStaleContainerdRuntime(filepath.Join(filepath.Dir(dockerSocket), "docker/containerd")); err != nil {
 		return nil, fmt.Errorf("unsafe private Docker runtime state: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "rootlesskit", rootlessDockerdArgs()...)
+	cmd := rootlessDockerdCommand(ctx)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

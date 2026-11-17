@@ -8,10 +8,10 @@ It uses the Agent-owned rootless Docker socket and never starts a
 second daemon. Changing a Node version does not restart Agent.
 
 Node and all VPN Cores use host networking on rootless Docker >=29.5,
-under an outer Agent with Linux host networking. RootlessKit itself must
-use `--net=host`, not its default `slirp4netns`: the latter would give
-Docker `--network host` a *private* network namespace and require
-manual forwarding for inbound VPN ports. The *inner* Node process
+under an outer Agent with Linux host networking. RootlessKit uses the
+native `--detach-netns` mode with its private `slirp4netns` daemon network:
+Docker `--network host` on Engine 29.5+ then joins the *physical* host
+network, without RootlessKit per-port forwarding. The *inner* Node process
 uses container UID 0 inside its isolated rootless user namespace: that UID
 maps to the **outer non-root Agent UID 1000**, never host root. Running the
 inner Node as UID 1000 instead maps to a subordinate UID and cannot access

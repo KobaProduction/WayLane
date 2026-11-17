@@ -17,21 +17,24 @@ uses only a private Unix socket at NODE_STATE_DIR/control/agent.sock:
 No inbound TCP management listener is created. Updates pull before cutover
 and attempt rollback to the prior Node image on startup failure.
 
-The outer Agent and its private RootlessKit daemon use the **same Linux host
-network namespace** (`rootlesskit --net=host`), and the inner Node/Core
-containers use `--network host` in that private daemon. Docker's stock
-`dind-rootless` entrypoint uses `slirp4netns` and a builtin port driver,
-so Agent deliberately launches RootlessKit/dockerd directly without either.
-This allows unprivileged TCP/UDP VPN listeners to bind the Linux host without
-manual RootlessKit port mappings. Because only host-networked Node and
-Core containers are supported, the private daemon has its default bridge
-and all Docker iptables/masquerading disabled: rootless processes must not
-attempt to modify the physical host's NAT tables. The external router/firewall
-remains a separate network responsibility. The dockerd PID file is placed in
-Agent's ephemeral `/tmp` tmpfs, not the persisted rootless runtime volume, so
-an obsolete PID from a former namespace cannot block a later restart.
-Existing private volumes, rootless UID mapping and Unix-only control are
-unchanged.
+The outer Agent uses Linux `network_mode: host`. Its private Docker
+Engine 29.5+ starts via the standard rootless daemon entrypoint, with
+`DOCKERD_ROOTLESS_ROOTLESSKIT_FLAGS=--detach-netns`. RootlessKit keeps its
+isolated daemon network driver (`slirp4netns`); detached networking lets
+Node and VPN Core containers launched with `--network host` join the
+**physical Linux host network namespace**, rather than RootlessKit's own
+private network. Inbound VPN ports then require no per-Core RootlessKit
+forwarding or static Compose port mapping. Docker may retain its own
+private bridge for image builds, but the VPN Core runs directly on host
+networking. This is the native Docker >=29.5 configuration; RootlessKit
+`--net=host` is unsupported by Moby's RootlessKit version reporting and
+must not be substituted.
+
+The daemon PID file is stored in Agent's ephemeral `/tmp` tmpfs, rather
+than a persistent runtime volume containing PIDs from earlier namespaces.
+The existing private Docker data, Node identity, rootless UID mapping and
+Unix-only Agent management API are preserved. The physical router firewall
+and WAN NAT remain separate from the Docker network model.
 
 The Agent and its Node/core children use host networking through rootless
 Docker 29.5+. The outer Agent stays UID 1000 (non-root). The inner Node

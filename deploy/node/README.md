@@ -134,19 +134,19 @@ Xray execution or externally reachable TCP/UDP VPN traffic.
 
 ## Host network and dynamic ports
 
-The outer Agent uses `network_mode: host`. Its embedded RootlessKit is
-started directly with `--net=host` instead of the stock Docker rootless
-entrypoint's `slirp4netns` and builtin port-driver. Node and VPN Cores
-use `--network host` in the private Docker daemon and therefore share the
-Linux host network namespace. No RootlessKit port-forward API, static
-Compose `ports:` mapping, forwarding sidecar or per-Core Agent rule is
-necessary. A Core can change its unprivileged TCP/UDP listeners without
-reinstalling Agent; the physical router's port forwarding is independent.
-The private daemon disables Docker bridge and NAT/iptables management, since
-host-networked Node and VPN Core containers do not require these features and
-rootless UID 1000 cannot manage the Linux host firewall. The Linux host
-firewall/cloud security rules, Docker Desktop host networking, IPv6,
-privileged ports (<1024) and TUN/UDP must be accepted separately.
+The outer Agent uses `network_mode: host`. Its embedded Docker Engine
+29.5+ runs through the vendor `dockerd-entrypoint.sh` with native
+RootlessKit `--detach-netns`, while keeping `slirp4netns` for the private
+daemon network. The Node and VPN Cores use `--network host` in the private
+Docker daemon, **joining the physical Linux host network namespace**. No
+RootlessKit port-forward API, static Compose `ports:` mapping or per-Core
+Agent port rule is needed. VPN TCP/UDP listeners change dynamically without
+reinstalling Agent; the physical router's WAN forwarding is independent.
+Do not use RootlessKit `--net=host`: this conflicts with Moby 29.5's
+RootlessKit version reporting. Keep Docker's private build networking;
+run Node and VPN Cores with `--network host` as the existing launcher does.
+The host firewall/cloud security rules, IPv6, privileged ports (<1024),
+Docker Desktop host settings and TUN/UDP remain independent acceptance gates.
 
 ## Experimental AWG 3.1 — isolated Docker Desktop only
 
