@@ -142,7 +142,10 @@ Linux host network namespace. No RootlessKit port-forward API, static
 Compose `ports:` mapping, forwarding sidecar or per-Core Agent rule is
 necessary. A Core can change its unprivileged TCP/UDP listeners without
 reinstalling Agent; the physical router's port forwarding is independent.
-The Linux host firewall/cloud security rules, Docker Desktop host networking, IPv6,
+The private daemon disables Docker bridge and NAT/iptables management, since
+host-networked Node and VPN Core containers do not require these features and
+rootless UID 1000 cannot manage the Linux host firewall. The Linux host
+firewall/cloud security rules, Docker Desktop host networking, IPv6,
 privileged ports (<1024) and TUN/UDP must be accepted separately.
 
 ## Experimental AWG 3.1 — isolated Docker Desktop only

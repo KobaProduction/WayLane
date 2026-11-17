@@ -70,6 +70,11 @@ func rootlessDockerdArgs() []string {
 		"--net=host", "--copy-up=/etc", "--copy-up=/run",
 		"docker-init", "--", "dockerd", "--host=unix://" + dockerSocket,
 		"--storage-driver=vfs", "--tls=false",
+		// The daemon has no bridge-networked workloads. The host network
+		// namespace does not grant CAP_NET_ADMIN, so never create Docker NAT,
+		// bridge interfaces or iptables rules there.
+		"--bridge=none", "--iptables=false", "--ip6tables=false",
+		"--ip-forward=false", "--ip-masq=false",
 	}
 }
 

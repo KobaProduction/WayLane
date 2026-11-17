@@ -122,6 +122,8 @@ func TestEmbeddedRootlessDockerUsesPhysicalHostNetwork(t *testing.T) {
 		"--net=host", "--copy-up=/etc", "--copy-up=/run",
 		"docker-init -- dockerd", "--host=unix://" + dockerSocket,
 		"--storage-driver=vfs", "--tls=false",
+		"--bridge=none", "--iptables=false", "--ip6tables=false",
+		"--ip-forward=false", "--ip-masq=false",
 	} {
 		if !strings.Contains(actual, required) {
 			t.Fatalf("missing host-network RootlessKit argument %q", required)
