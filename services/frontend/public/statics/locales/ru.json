@@ -2443,6 +2443,7 @@
     "download": "Получено"
   },
   "coreEditor": {
+    "topology": {"title":"Связи маршрутизации","description":"Предпросмотр настроенных тегов. Не измеряет доступность или фактический маршрут трафика.","openBalancers":"Балансировщики","openRules":"Правила","counts":"Связанные сущности","outbounds":"Outbound","balancers":"Балансировщики","rules":"Правила","warnings":"Требуют внимания","previewList":"Соответствие тегов балансировщиков","usedBy":"Используется правилами","matchingOutbounds":"Outbound по префиксу","unmatchedSelectors":"Нет outbound для префикса","unknownFallback":"Fallback не найден","routingDiagnostics":"Проверка целей правил","rule":"Правило","missingTarget":"Цель не найдена","outboundWins":"Указан outbound: Xray игнорирует balancerTag.","noDanglingRules":"Отсутствующих целей Routing не найдено.","reassignBeforeDelete":"Сначала измените правила, использующие балансировщик: {{tags}}","chooseOneTarget":"Выберите одну цель — outbound или балансировщик. При выборе другой цели предыдущая очищается.","selectorPreview":"Предпросмотр префиксов тегов","selectorNote":"Проверяются только теги текущего Core, а не доступность соединений.","openOutbounds":"Исходящие","showTagMatching":"Просмотреть соответствия outbound и использование правилами","noObservation":"Для leastPing/leastLoad не задан источник проверок. Настройте Observatory через кнопку наблюдения; просмотр не меняет профиль."},
     "awg": {
         "engine": "Режим WireGuard",
         "plain": "WireGuard (стандартные клиенты)",

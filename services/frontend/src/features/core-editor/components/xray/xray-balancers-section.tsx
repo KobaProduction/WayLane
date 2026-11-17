@@ -16,6 +16,9 @@ import { useXrayPersistModifyGuard } from '@/features/core-editor/hooks/use-xray
 import { inferParityFieldMode, parseRoutingRuleFieldValue, routingBalancerFieldToString } from '@/features/core-editor/kit/xray-parity-value'
 import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
 import { validateBalancerForCommit } from '@/features/core-editor/kit/balancer-dialog-schema'
+import { referencedBalancerTags, renameBalancerWithReferences } from '@/features/core-editor/kit/balancer-routing-topology'
+import { RoutingTopologyOverview } from './routing-topology-overview'
+import { toast } from 'sonner'
 import { profileDuplicateTagMessage, profileTagHasDuplicateUsage } from '@/features/core-editor/kit/profile-tag-uniqueness'
 import { remapIndexAfterArrayMove } from '@/features/core-editor/kit/remap-index-after-move'
 import { createDefaultRoutingBalancer, getGeneratedRoutingBalancerFields } from '@waylane/xray-config-kit'
@@ -389,13 +392,7 @@ export function XrayBalancersSection({ headerAddPulse, headerAddEpoch }: XrayBal
     [t],
   )
 
-  useEffect(() => {
-    if (!profile || balancers.length === 0 || profileHasObservation(profile)) return
-    updateXrayProfile(p => {
-      if ((p.routing?.balancers ?? []).length === 0 || profileHasObservation(p)) return p
-      return ensureObservationForProfile(p, collectOutboundSelectors(p))
-    })
-  }, [profile, balancers.length, updateXrayProfile])
+
 
   if (!profile) return null
 
@@ -467,7 +464,7 @@ export function XrayBalancersSection({ headerAddPulse, headerAddEpoch }: XrayBal
     }
     const committed: RoutingBalancer = { ...b, tag: parsed.data.tag, selector: parsed.data.selector }
     updateXrayProfile(p => {
-      const next = replaceBalancer(p, selected, committed)
+      const next = renameBalancerWithReferences(p, selected, committed)
       if (balancerRequiresObservation(committed)) {
         return ensureObservationForProfile(next, collectOutboundSelectors(next))
       }
@@ -597,6 +594,7 @@ export function XrayBalancersSection({ headerAddPulse, headerAddEpoch }: XrayBal
 
   return (
     <div className="space-y-6">
+      <RoutingTopologyOverview profile={profile} section="balancers" />
       <CoreEditorDataTable
         columns={columns}
         data={balancers}
@@ -623,10 +621,24 @@ export function XrayBalancersSection({ headerAddPulse, headerAddEpoch }: XrayBal
           setDetailOpen(true)
         }}
         onRemoveRow={i => {
+          const referenced = referencedBalancerTags(profile, [i])
+          if (referenced.length > 0) {
+            toast.error(t('coreEditor.topology.reassignBeforeDelete', {
+              defaultValue: 'Сначала переназначьте правила Routing, использующие балансировщик: {{tags}}', tags: referenced.join(', '),
+            }))
+            return
+          }
           updateXrayProfile(p => removeBalancer(p, i))
           setSelected(0)
         }}
         onBulkRemove={indices => {
+          const referenced = referencedBalancerTags(profile, indices)
+          if (referenced.length > 0) {
+            toast.error(t('coreEditor.topology.reassignBeforeDelete', {
+              defaultValue: 'Сначала переназначьте правила Routing, использующие балансировщик: {{tags}}', tags: referenced.join(', '),
+            }))
+            return
+          }
           const rm = new Set(indices)
           updateXrayProfile(p => {
             const routing = p.routing ?? defaultRouting()
@@ -744,6 +756,13 @@ export function XrayBalancersSection({ headerAddPulse, headerAddEpoch }: XrayBal
                     clearAllLabel={t('coreEditor.balancer.clearSelectors', { defaultValue: 'Clear all' })}
                     addButtonLabel={t('coreEditor.balancer.addOutboundTag', { defaultValue: 'Add tag' })}
                   />
+                  <div className="rounded-md border border-dashed px-3 py-2 text-xs" aria-live="polite">
+                    <p className="font-medium">{t('coreEditor.topology.selectorPreview', { defaultValue: 'Предпросмотр выбора по префиксу тега' })}</p>
+                    <p className="mt-1 break-words text-muted-foreground">
+                      {profileTagOptions.outboundTags.filter(tag => (b.selector ?? []).some(prefix => tag.startsWith(prefix))).join(', ') || '—'}
+                    </p>
+                    <p className="mt-1 text-muted-foreground">{t('coreEditor.topology.selectorNote', { defaultValue: 'Проверяются только теги текущего Core, не доступность соединений.' })}</p>
+                  </div>
                   {selectorCommitError ? (
                     <p className="text-destructive text-sm font-medium" role="alert">
                       {selectorCommitError}

@@ -12,6 +12,8 @@ import { remapIndexAfterArrayMove } from '@/features/core-editor/kit/remap-index
 import { collectRoutingRuleDialogFormErrors, collectRoutingRuleDialogIssues, routingRuleDialogHasBlockingErrors } from '@/features/core-editor/kit/routing-rule-dialog-validation'
 import { inferParityFieldMode, parseRoutingRuleFieldValue, routingRuleFieldToString } from '@/features/core-editor/kit/xray-parity-value'
 import { ValidationSummary } from '@/features/core-editor/components/shared/validation-summary'
+import { RoutingTopologyOverview } from './routing-topology-overview'
+import { routingActionTargetPatch } from '@/features/core-editor/kit/routing-action-target'
 import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
 import { createDefaultRoutingRule, getRoutingRuleFormCapabilities } from '@waylane/xray-config-kit'
 import type { Issue, Profile, Routing, RoutingRule, XrayGeneratedFormField } from '@waylane/xray-config-kit'
@@ -457,7 +459,9 @@ export function XrayRoutingSection({ headerAddPulse, headerAddEpoch }: XrayRouti
                 field.onChange(v)
                 try {
                   const { value, clearDomains, clearDomain } = parseRoutingRuleFieldValue(jsonKey, def, v)
-                  const patch: Record<string, unknown> = { [jsonKey]: value }
+                  const patch = routingActionTargetPatch(jsonKey, value)
+                  if (jsonKey === 'outboundTag' && typeof value === 'string' && value.trim()) form.setValue('balancerTag', '')
+                  if (jsonKey === 'balancerTag' && typeof value === 'string' && value.trim()) form.setValue('outboundTag', '')
                   if (clearDomains) patch.domains = undefined
                   if (clearDomain) patch.domain = undefined
                   patchRule(patch as Partial<RoutingRule>)
@@ -484,6 +488,7 @@ export function XrayRoutingSection({ headerAddPulse, headerAddEpoch }: XrayRouti
 
   return (
     <div className="space-y-6">
+      <RoutingTopologyOverview profile={profile} section="routing" />
       <CoreEditorDataTable
         columns={columns}
         data={rules}
@@ -577,12 +582,15 @@ export function XrayRoutingSection({ headerAddPulse, headerAddEpoch }: XrayRouti
                         <div className="bg-muted/30 text-muted-foreground mb-4 flex items-start gap-2 rounded-md border px-3 py-2.5 text-xs">
                           <Info className="text-foreground/70 mt-0.5 h-3.5 w-3.5 shrink-0" />
                           <span>
-                            {t('coreEditor.routing.routingActionHint', {
-                              defaultValue: 'Choose one target for matched traffic. When both are set, outboundTag takes precedence over balancerTag.',
+                            {t('coreEditor.topology.chooseOneTarget', {
+                              defaultValue: 'Выберите одну цель: outbound или балансировщик. При выборе другой цели предыдущая будет очищена.',
                             })}
                           </span>
                         </div>
                         <div className="grid gap-4 sm:grid-cols-2">{sectionKeys.map(k => renderField(k))}</div>
+                        {rule?.outboundTag && rule?.balancerTag && <p role="status" className="mt-3 text-xs text-destructive">
+                          {t('coreEditor.topology.outboundWins', { defaultValue: 'Задан outboundTag; balancerTag игнорируется Xray.' })}
+                        </p>}
                       </AccordionContent>
                     </AccordionItem>
                   )

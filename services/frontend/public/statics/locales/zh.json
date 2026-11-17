@@ -2511,6 +2511,7 @@
     "download": "下载"
   },
   "coreEditor": {
+    "topology": {"title":"路由关联","description":"仅预览配置中的标签，不测量可用性或实际流量路径。","openBalancers":"负载均衡器","openRules":"路由规则","counts":"关联项目","outbounds":"出站","balancers":"均衡器","rules":"规则","warnings":"需要检查","previewList":"均衡器标签匹配","usedBy":"引用此项的规则","matchingOutbounds":"匹配前缀的出站","unmatchedSelectors":"没有匹配该前缀的出站","unknownFallback":"找不到备用出站","routingDiagnostics":"路由目标检查","rule":"规则","missingTarget":"找不到目标","outboundWins":"已指定出站：Xray 将忽略 balancerTag。","noDanglingRules":"未发现缺失的路由目标。","reassignBeforeDelete":"请先调整引用这些均衡器的规则：{{tags}}","chooseOneTarget":"仅选择一个目标：出站或均衡器。切换目标会清除上一个目标。","selectorPreview":"标签前缀匹配预览","selectorNote":"仅匹配当前 Core 配置的标签，不代表连接健康状态。","openOutbounds":"出站","showTagMatching":"查看出站匹配及规则引用","noObservation":"leastPing/leastLoad 未配置观测源。请通过观测设置配置 Observatory；查看页面不会修改配置。"},
     "awg": {
         "engine": "WireGuard 传输模式",
         "plain": "WireGuard（标准客户端）",

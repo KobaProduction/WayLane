@@ -2468,6 +2468,7 @@
     "download": "دریافت"
   },
   "coreEditor": {
+    "topology": {"title":"ارتباطات مسیریابی","description":"پیش‌نمایش برچسب‌های پیکربندی‌شده؛ نه سنجش دسترسی یا مسیر واقعی ترافیک.","openBalancers":"متعادل‌کننده‌ها","openRules":"قوانین مسیریابی","counts":"موجودیت‌های مرتبط","outbounds":"خروجی‌ها","balancers":"متعادل‌کننده‌ها","rules":"قوانین","warnings":"نیازمند توجه","previewList":"تطابق برچسب متعادل‌کننده‌ها","usedBy":"ارجاع از قوانین","matchingOutbounds":"خروجی‌های مطابق پیشوند","unmatchedSelectors":"هیچ خروجی مطابق پیشوند نیست","unknownFallback":"مسیر پشتیبان یافت نشد","routingDiagnostics":"بررسی مقصدهای مسیریابی","rule":"قانون","missingTarget":"مقصد یافت نشد","outboundWins":"خروجی تعیین شده است؛ Xray برچسب متعادل‌کننده را نادیده می‌گیرد.","noDanglingRules":"مقصد ناموجودی در قوانین یافت نشد.","reassignBeforeDelete":"ابتدا قوانین ارجاع‌دهنده به این متعادل‌کننده‌ها را تغییر دهید: {{tags}}","chooseOneTarget":"یک مقصد، خروجی یا متعادل‌کننده را انتخاب کنید؛ انتخاب دیگری قبلی را پاک می‌کند.","selectorPreview":"پیش‌نمایش تطابق پیشوند برچسب","selectorNote":"فقط برچسب‌های Core بررسی می‌شوند، نه سلامت اتصال.","openOutbounds":"خروجی‌ها","showTagMatching":"نمایش تطابق خروجی‌ها و ارجاع قوانین","noObservation":"برای leastPing/leastLoad منبع پایش تعریف نشده است. Observatory را از بخش پایش تنظیم کنید؛ مشاهده پروفایل آن را تغییر نمی‌دهد."},
     "awg": {
         "engine": "حالت انتقال WireGuard",
         "plain": "WireGuard (کلاینت‌های استاندارد)",

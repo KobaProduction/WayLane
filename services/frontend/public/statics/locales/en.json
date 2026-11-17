@@ -2558,6 +2558,7 @@
     "download": "Download"
   },
   "coreEditor": {
+    "topology": {"title":"Routing relationships","description":"Configured-tag preview. Does not measure availability or live routing.","openBalancers":"Balancers","openRules":"Routing rules","counts":"Related entities","outbounds":"Outbounds","balancers":"Balancers","rules":"Rules","warnings":"Needs attention","previewList":"Balancer tag matches","usedBy":"Referenced by rules","matchingOutbounds":"Outbounds matching prefixes","unmatchedSelectors":"No outbound matches prefix","unknownFallback":"Fallback not found","routingDiagnostics":"Routing target checks","rule":"Rule","missingTarget":"Target not found","outboundWins":"Outbound is set; Xray ignores balancerTag.","noDanglingRules":"No missing routing targets found.","reassignBeforeDelete":"Reassign rules using these balancers first: {{tags}}","chooseOneTarget":"Choose one target: outbound or balancer. Selecting the other clears the previous target.","selectorPreview":"Tag-prefix match preview","selectorNote":"Matches configured Core tags only, not connection health.","openOutbounds":"Outbounds","showTagMatching":"View outbound matches and rule references","noObservation":"leastPing/leastLoad has no observation source. Configure Observatory using the observation control; viewing the profile does not change it."},
     "awg": {
         "engine": "WireGuard transport",
         "plain": "WireGuard (standard clients)",
