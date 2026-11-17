@@ -49,6 +49,7 @@ const Settings = () => {
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const isCoreEditorPage = /^\/nodes\/cores\/[^/]+$/.test(location.pathname)
+  const isNodeDetailPage = location.pathname.startsWith('/nodes/registry/')
 
   // A route change must never keep the onboarding modal above the logs/core
   // pages. Those views are independent operator tasks.
@@ -90,14 +91,15 @@ const Settings = () => {
   }, [location.pathname])
 
   useEffect(() => {
-    if (isCoreEditorPage || visibleTabs.length === 0) return
+    if (isCoreEditorPage || isNodeDetailPage || visibleTabs.length === 0) return
     const currentTab = visibleTabs.find(tab => location.pathname === tab.url)
     if (!currentTab) {
       navigate(visibleTabs[0].url, { replace: true })
     }
-  }, [isCoreEditorPage, location.pathname, navigate, visibleTabs])
+  }, [isCoreEditorPage, isNodeDetailPage, location.pathname, navigate, visibleTabs])
 
   const getPageHeaderProps = () => {
+    if (isNodeDetailPage) return { title: 'nodes.details.title', description: 'nodes.details.description', buttonIcon: undefined, buttonText: undefined, onButtonClick: undefined }
     if (location.pathname.startsWith('/nodes/cores')) {
       return {
         title: 'settings.cores.title',
@@ -150,7 +152,7 @@ const Settings = () => {
         </PageTransition>
       )}
       <div className="flex min-h-0 w-full flex-1 flex-col">
-        {!isCoreEditorPage && (
+        {!isCoreEditorPage && !isNodeDetailPage && (
           <>
           <div className="border-b px-4 py-2 sm:hidden">
             <select aria-label={t('nodes.sectionSwitcher')}

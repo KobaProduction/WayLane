@@ -23,6 +23,7 @@ const Groups = lazyWithChunkRecovery(() => import('../pages/_dashboard.groups'))
 const Hosts = lazyWithChunkRecovery(() => import('../pages/_dashboard.hosts'))
 const Nodes = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes'))
 const NodesPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes._index'))
+const NodeDetailPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.detail'))
 const NodeLogs = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.logs'))
 const NodeTokens = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.tokens'))
 const XrayPresets = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.presets'))
@@ -199,6 +200,14 @@ export const router = createHashRouter([
             element: (
               <Suspense fallback={<LoadingSpinner />}>
                 <NodeWireGuard />
+              </Suspense>
+            ),
+          },
+          {
+            path: '/nodes/registry/:nodeUuid',
+            element: (
+              <Suspense fallback={<LoadingSpinner />}>
+                <NodeDetailPage />
               </Suspense>
             ),
           },

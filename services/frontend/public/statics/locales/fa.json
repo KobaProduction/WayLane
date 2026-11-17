@@ -2119,6 +2119,7 @@
     "loadingReleases": "در حال بارگذاری نسخه‌ها..."
   },
   "nodes": {
+    "details": {"title": "نود", "description": "ثبت، وضعیت و عملیات این نود", "back": "بازگشت به فهرست نودها", "tabsTitle": "بخش‌های نود", "tabs": {"overview": "نمای کلی", "operations": "عملیات", "registry": "مخزن", "xray": "Xray", "tls": "TLS", "diagnostics": "عیب‌یابی"}, "open": "باز کردن نود", "loading": "بارگیری نود…", "notFound": "نود در فهرست ثبت یافت نشد.", "registrationNote": "تأیید ثبت به معنای اتصال فعال WSS یا VPN نیست.", "notApproved": "عملیات فقط پس از تأیید نود در دسترس است.", "noRegistryAccess": "مدیریت مخزن نیازمند مجوز تغییر نود است.", "xrayUnavailable": "کنترل Xray در این نود در دسترس یا مجاز نیست."},
     "registryOverview": {"title": "فهرست نودها", "description": "وضعیت ثبت و آخرین گزارش Agent. تأیید به معنای اتصال فعال نیست.", "refresh": "به‌روزرسانی فهرست", "stats": "خلاصه ثبت نودها", "all": "همه", "approved": "تأییدشده", "pending": "در انتظار", "revoked": "لغوشده", "noMatches": "نودی با این وضعیت وجود ندارد", "rename": "تغییر نام"},
     "presets": { "title": "پیش‌تنظیم‌های Xray", "description": "مدیریت کلیدها و پیش‌تنظیم‌های پیکربندی Xray" },
     "title": "گره‌ها",

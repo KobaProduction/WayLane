@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { registrationCounts, filterByRegistration } from './node-registry-overview'
+import { registrationCounts, filterByRegistration, validRegistrationFilter } from './node-registry-overview'
 
 test('registration overview counts authorizations without inventing connectivity', () => {
   const nodes = [
@@ -15,4 +15,14 @@ test('registration overview counts authorizations without inventing connectivity
   assert.deepEqual(filterByRegistration(nodes, 'revoked').map(n => n.name), ['revoked-access'])
   assert.deepEqual(filterByRegistration(nodes, 'all'), nodes)
   assert.deepEqual(registrationCounts([]), { all: 0, approved: 0, pending: 0, revoked: 0 })
+})
+
+
+test('registration filter deep links accept only named statuses', () => {
+  for (const filter of ['all', 'approved', 'pending', 'revoked'] as const) {
+    assert.equal(validRegistrationFilter(filter), filter)
+  }
+  for (const invalid of ['online', 'connected', '', '../registry', null]) {
+    assert.equal(validRegistrationFilter(invalid), 'all')
+  }
 })

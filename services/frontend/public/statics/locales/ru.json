@@ -99,6 +99,7 @@
   "today": "Сегодня",
   "create": "Создать",
   "nodes": {
+    "details": {"title": "Узел", "description": "Регистрация, состояние и операции этой Node", "back": "К списку узлов", "tabsTitle": "Разделы Node", "tabs": {"overview": "Обзор", "operations": "Обновление", "registry": "Registry", "xray": "Xray", "tls": "TLS", "diagnostics": "Диагностика"}, "open": "Открыть узел", "loading": "Загрузка данных Node…", "notFound": "Node не найдена в реестре.", "registrationNote": "Статус регистрации не гарантирует активного WSS или работы VPN.", "notApproved": "Операции доступны после подтверждения Node.", "noRegistryAccess": "Для управления Registry нужны права изменения Node.", "xrayUnavailable": "Управление Xray на этой Node недоступно или не разрешено."},
     "registryOverview": {"title": "Реестр узлов", "description": "Регистрация и последний отчёт Agent. Подтверждение не означает подключение.", "refresh": "Обновить список", "stats": "Сводка по регистрациям", "all": "Всего", "approved": "Подтверждены", "pending": "Ожидают", "revoked": "Отозваны", "noMatches": "Узлов с таким статусом нет", "rename": "Переименовать"},
     "presets": { "title": "Пресеты Xray", "description": "Управление ключами и конфигурационными пресетами Xray" },
     "title": "Узлы",

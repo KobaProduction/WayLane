@@ -11,3 +11,8 @@ export function registrationCounts(nodes: readonly { status: RegistrationStatus 
 export function filterByRegistration<T extends { status: RegistrationStatus }>(nodes: readonly T[], filter: RegistrationFilter): T[] {
   return filter === 'all' ? [...nodes] : nodes.filter(node => node.status === filter)
 }
+
+/** URL filters are explicit and survive reload/back navigation; unknown values fail closed to all. */
+export function validRegistrationFilter(value: string | null): RegistrationFilter {
+  return value === 'approved' || value === 'pending' || value === 'revoked' ? value : 'all'
+}
