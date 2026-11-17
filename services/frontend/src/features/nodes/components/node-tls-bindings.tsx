@@ -37,7 +37,7 @@ export function NodeTLSBindings({ bindings, presets, inboundTag, onInboundTagCha
   return <section className="space-y-3 border-t pt-3" aria-label="TLS-сертификаты из пресетов WayLane">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 className="text-sm font-semibold">TLS-сертификаты из пресетов WayLane</h3>
-      <Link className="text-sm font-medium text-primary underline underline-offset-2" to="/tls-presets">Каталог сертификатов</Link>
+      <Link className="text-sm font-medium text-primary underline underline-offset-2" to="/tls-presets?tab=bindings">Управление TLS-привязками</Link>
     </div>
     <p className="text-xs text-muted-foreground">Привязка сертификата к TLS inbound по tag. Приватные ключи остаются в Backend.</p>
     {bindings.length === 0 && <p className="text-xs text-muted-foreground">Привязок TLS пока нет.</p>}
