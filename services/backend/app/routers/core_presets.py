@@ -33,6 +33,12 @@ class PresetInput(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     kind: str = Field(pattern="^(reality|vless|routing)$")
     data: dict
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class PresetRenameInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=1)
 
 
 class BindingInput(BaseModel):
@@ -143,6 +149,36 @@ async def create_preset(
     return {"id": entry["id"], "name": entry["name"], "kind": body.kind, "data": public, "revision": 1}
 
 
+@router.patch("/{preset_id}/name")
+async def rename_preset(
+    preset_id: str,
+    body: PresetRenameInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("cores", "update")),
+):
+    """Rename only metadata; never decrypt or rotate the vault secret or mutate assigned Cores."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "Preset name cannot be blank")
+    try:
+        result = await db.execute(
+            update(core_presets)
+            .where(core_presets.c.id == preset_id, core_presets.c.revision == body.expected_revision)
+            .values(name=name, revision=core_presets.c.revision + 1)
+        )
+        if result.rowcount != 1:
+            await db.rollback()
+            if (await db.execute(select(core_presets.c.id).where(core_presets.c.id == preset_id))).first() is None:
+                raise HTTPException(404, "Core preset not found")
+            raise HTTPException(409, "Core preset changed; reload before renaming")
+        await db.commit()
+    except IntegrityError as error:
+        await db.rollback()
+        raise HTTPException(409, "Preset name already exists within kind") from error
+    return {"id": preset_id, "name": name, "revision": body.expected_revision + 1,
+            "requires_node_apply": False}
+
+
 @router.put("/{preset_id}")
 async def replace_preset(
     preset_id: str,
@@ -150,7 +186,13 @@ async def replace_preset(
     db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("cores", "update")),
 ):
-    old = await _lookup(db, preset_id)
+    old = (
+        await db.execute(select(core_presets).where(core_presets.c.id == preset_id).with_for_update())
+    ).mappings().one_or_none()
+    if not old:
+        raise HTTPException(404, "Core preset not found")
+    if body.expected_revision is not None and old["revision"] != body.expected_revision:
+        raise HTTPException(409, "Core preset changed; reload before replacing")
     if body.kind != old["kind"]:
         raise HTTPException(422, "Preset kind cannot change")
     try:

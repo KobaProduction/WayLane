@@ -10,7 +10,6 @@ export default function XrayPresetsPage() {
   return (
     <div className="w-full space-y-4 px-4 py-4">
       <CorePresetsPanel
-        standalone
         canCreate={hasPermission(admin, 'cores', 'create')}
         canUpdate={hasPermission(admin, 'cores', 'update')}
         canDelete={hasPermission(admin, 'cores', 'delete')}

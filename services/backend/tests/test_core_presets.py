@@ -232,7 +232,23 @@ async def test_switch_reality_preset_back_to_manual_requires_valid_new_key(tmp_p
                 config=core.config, source_core_id=core_id, updated_at=datetime.now(UTC),
             ))
             await db.commit()
-            from app.routers.core_presets import RealityManualInput
+            # Metadata-only rename is safe even while this Core is assigned to a Node.
+            # It must not enqueue a generation or re-materialize the private key.
+            from app.db.core_presets import core_presets
+            from app.routers.core_presets import PresetRenameInput, RealityManualInput
+            secret_before = (await db.execute(
+                select(core_presets.c.encrypted_secret).where(core_presets.c.id == preset["id"])
+            )).scalar_one()
+            result = await api.rename_preset(
+                preset["id"], PresetRenameInput(name="Renamed while assigned", expected_revision=1), db, None
+            )
+            assert result["requires_node_apply"] is False
+            assert (await db.execute(select(core_presets.c.encrypted_secret).where(
+                core_presets.c.id == preset["id"]
+            ))).scalar_one() == secret_before
+            assert (await db.execute(select(node_agent_xray_desired.c.generation).where(
+                node_agent_xray_desired.c.node_uuid == node["node_uuid"]
+            ))).scalar_one() == 1
             with pytest.raises(HTTPException) as protected:
                 await api.unbind_reality_to_manual(
                     RealityManualInput(core_id=core_id, inbound_tag="reality-in", private_key=sample_private()), db, None)
@@ -261,3 +277,78 @@ async def test_switch_reality_preset_back_to_manual_requires_valid_new_key(tmp_p
             assert refreshed == [core_id, core_id]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rename_only_preserves_encrypted_secret_and_rejects_stale_revision(tmp_path, monkeypatch):
+    from cryptography.fernet import Fernet
+    from app.db.core_presets import core_presets
+    from app.routers.core_presets import PresetRenameInput
+
+    monkeypatch.setenv("WAYLANE_TLS_SECRET_KEY", Fernet.generate_key().decode())
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/rename.db")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with factory() as db:
+            one = await api.create_preset(PresetInput(name="Initial", kind="reality", data={
+                "private_key": sample_private(), "short_ids": ["aabb"],
+            }), db, None)
+            two = await api.create_preset(PresetInput(name="Other", kind="reality", data={
+                "private_key": sample_private(), "short_ids": ["abcd"],
+            }), db, None)
+            secret_before = (
+                await db.execute(select(core_presets.c.encrypted_secret).where(core_presets.c.id == one["id"]))
+            ).scalar_one()
+            public_before = one["data"]
+            result = await api.rename_preset(
+                one["id"], PresetRenameInput(name="  New name  ", expected_revision=1), db, None
+            )
+            assert result == {"id": one["id"], "name": "New name", "revision": 2,
+                              "requires_node_apply": False}
+            stored = (
+                await db.execute(select(core_presets).where(core_presets.c.id == one["id"]))
+            ).mappings().one()
+            assert stored["encrypted_secret"] == secret_before
+            assert stored["public_data"] == public_before
+            assert stored["revision"] == 2
+
+            with pytest.raises(HTTPException) as stale:
+                await api.rename_preset(one["id"], PresetRenameInput(name="Stale", expected_revision=1), db, None)
+            assert stale.value.status_code == 409
+            await db.rollback()
+            with pytest.raises(HTTPException) as name_conflict:
+                await api.rename_preset(one["id"], PresetRenameInput(name="Other", expected_revision=2), db, None)
+            assert name_conflict.value.status_code == 409
+            await db.rollback()
+            with pytest.raises(HTTPException) as rotate_conflict:
+                await api.replace_preset(one["id"], PresetInput(
+                    name="New name", kind="reality", expected_revision=1,
+                    data={"private_key": sample_private(), "short_ids": ["ffab"]},
+                ), db, None)
+            assert rotate_conflict.value.status_code == 409
+            await db.rollback()
+            assert (await api.list_presets(db, None))[0]["kind"] == "reality"
+            assert two["name"] == "Other"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_apply_saved_core_queues_new_snapshot_not_old_restart(monkeypatch):
+    from app.routers import core as core_api
+    accepted = []
+
+    async def queue(db, core_id, *, restart_only=False, live_update=False):
+        accepted.append((core_id, restart_only, live_update))
+        return 2 if core_id == 42 else 0
+
+    monkeypatch.setattr(core_api, "queue_assigned_editor_cores", queue)
+    assert await core_api.apply_saved_core_to_assigned_nodes(42, None, None) == {
+        "queued_nodes": 2, "status": "queued",
+    }
+    assert await core_api.apply_saved_core_to_assigned_nodes(43, None, None) == {
+        "queued_nodes": 0, "status": "no_assigned_nodes",
+    }
+    assert accepted == [(42, False, False), (43, False, False)]

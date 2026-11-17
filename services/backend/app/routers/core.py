@@ -120,6 +120,17 @@ async def get_cores_simple(
     return await core_operator.get_cores_simple(db=db, query=query)
 
 
+@router.post("/{core_id}/apply")
+async def apply_saved_core_to_assigned_nodes(
+    core_id: int,
+    admin: AdminDetails = Depends(require_permission("cores", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue a saved public Core snapshot; a restart-only command reuses the old one."""
+    queued = await queue_assigned_editor_cores(db, core_id, restart_only=False)
+    return {"queued_nodes": queued, "status": "queued" if queued else "no_assigned_nodes"}
+
+
 @router.post("/{core_id}/restart", status_code=status.HTTP_204_NO_CONTENT)
 async def restart_core(
     core_id: int,
