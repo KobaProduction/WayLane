@@ -6,6 +6,10 @@ import { NodeReleaseStatus, type NodeReleaseOperation } from './node-release-sta
 import { NodeRegistryCredentials, type NodeRegistryProfile, type RegistryDraft } from './node-registry-credentials'
 import { NodeTLSBindings, type AgentTLSBinding, type TLSPresetSummary } from './node-tls-bindings'
 import { NodeXrayUsage, type XrayUsageState } from './node-xray-usage'
+import { NodeXrayRuntimeControls, type XrayCommand } from './node-xray-runtime-controls'
+import { NodeXrayCoreAssignment } from './node-xray-core-assignment'
+import { NodeXrayClientManagement } from './node-xray-client-management'
+import type { XrayInboundInfo, XrayStatus, EditorCoreOption } from './node-xray-types'
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { NODE_DETAIL_TABS, validNodeDetailTab } from './node-detail-tabs'
@@ -17,31 +21,8 @@ import { OFFICIAL_NODE_REPOSITORY, approvedNodeReleaseImage, withNodeReleaseRepo
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
-
-type XrayInboundInfo = {
-  tag: string
-  protocol: string
-  port: number
-  user_count: number
-  identities: string[]
-}
-
-type XrayStatus = {
-  configured: boolean
-  generation?: number
-  image_version?: string
-  action?: string
-  region?: string | null
-  runtime_status?: string
-  applied_generation?: number
-  source_core_id?: number | null
-  last_error?: string | null
-}
-
-type EditorCoreOption = { id: number; name: string; type: string | null }
 
 /** Autonomous WayLane Node registration and supported core controls. */
 export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid: string }) {
@@ -363,7 +344,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
           expected_generation: xrayStates[uuid]?.generation ?? 0,
         },
       })
-      toast.success('Конфигурация Core Editor отправлена ноде через WSS')
+      toast.success('Применение Xray Core поставлено в очередь Node. Подтверждение применения проверьте в статусе Xray.')
       await readXray(uuid)
       await readXrayInbounds(uuid)
     } catch (error) {
@@ -403,7 +384,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
         '/xray/tls/' + encodeURIComponent(tlsInboundTag.trim()), {
         method: 'PUT', body: { preset_id: tlsPresetId, expected_generation: generation },
       })
-      toast.success('TLS-пресет привязан; новая конфигурация отправлена ноде')
+      toast.success('TLS-пресет привязан, обновление Xray поставлено в очередь. Проверьте поколение применения.')
       await readXray(uuid)
       await refreshTLSBindings(uuid)
     } catch (e) {
@@ -423,7 +404,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
     }, null, 2))
   }
 
-  const changeXray = async (uuid: string, action: 'deploy' | 'update' | 'restart' | 'stop' | 'reconfigure') => {
+  const changeXray = async (uuid: string, action: XrayCommand) => {
     if (!canManageXray) return
     setXrayBusy(true)
     try {
@@ -445,7 +426,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
       await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray', {
         method: 'PUT', body: payload,
       })
-      toast.success('Операция Xray поставлена в очередь ноды')
+      toast.success('Операция Xray поставлена в очередь. Результат будет доступен после подтверждения Node.')
       await readXray(uuid)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось отправить команду Xray')
@@ -468,7 +449,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
         '/xray/inbounds/' + encodeURIComponent(xrayInboundTag.trim()) + '/users', {
         method: 'PUT', body: { expected_generation: expectedGeneration, users },
       })
-      toast.success('Синхронизация пользователей Xray запланирована')
+      toast.success('Синхронизация клиентов Xray поставлена в очередь. Проверьте применение на Node.')
       await readXray(uuid)
       await readXrayInbounds(uuid)
     } catch (error) {
@@ -722,106 +703,30 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                   </div>
                   {xrayTarget === node.node_uuid && (
                     <div className="space-y-2">
-                      {detailTab === 'xray' && <>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Input aria-label="Xray image version" value={xrayVersion}
-                          onChange={e => setXrayVersion(e.target.value)} placeholder="Версия Xray, например 26.10.21" />
-                        <Input aria-label="Xray region label" value={xrayRegion}
-                          onChange={e => setXrayRegion(e.target.value)} maxLength={64}
-                          placeholder="Регион / метка маршрута" />
-                      </div>
-                      <p className="text-muted-foreground text-xs">Метка региона не перемещает сервер и не меняет IP. Маршрут и сервер назначения задаются через JSON-конфигурацию Xray.</p>
-                      <Textarea aria-label="Xray configuration JSON" value={xrayConfig} rows={8}
-                        className="font-mono text-xs" onChange={e => setXrayConfig(e.target.value)}
-                        placeholder="JSON-конфигурация Xray: inbounds, outbounds, routing" />
-                      <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={demoXray}>Тестовый SOCKS5 с новым паролем</Button>
-                        <Button size="sm" disabled={xrayBusy || !xrayConfig.trim()}
-                          onClick={() => void changeXray(node.node_uuid, 'deploy')}>Развернуть</Button>
-                        <Button variant="outline" size="sm" disabled={xrayBusy}
-                          onClick={() => void changeXray(node.node_uuid, 'update')}>Обновить образ Xray (с перезапуском)</Button>
-                        <Button variant="outline" size="sm" disabled={xrayBusy || !xrayConfig.trim()}
-                          onClick={() => void changeXray(node.node_uuid, 'reconfigure')}>Применить конфигурацию без рестарта Xray</Button>
-                        <Button variant="outline" size="sm" disabled={xrayBusy}
-                          onClick={() => void changeXray(node.node_uuid, 'restart')}>Перезапустить</Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="destructive" size="sm" disabled={xrayBusy || !xrayStates[node.node_uuid]?.configured}>Остановить</Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Остановить Xray на этой ноде?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                VPN-подключения через это ядро будут прерваны. Действие не затрагивает другие ноды и ядра.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Отмена</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => void changeXray(node.node_uuid, 'stop')}>Остановить Xray</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                        <Button variant="outline" size="sm" disabled={xrayBusy}
-                          onClick={() => void readXray(node.node_uuid)}>Статус</Button>
-                      </div>
-                      <div className="space-y-2 border-t pt-3">
-                        <p className="text-sm font-medium">Профиль из Core Editor</p>
-                        <p className="text-muted-foreground text-xs">
-                          Выберите сохранённый профиль Xray по имени. Применение заменит конфигурацию
-                          Xray на этой ноде и может прервать подключения. Другие ноды не затрагиваются.
-                          Секреты управляемых пресетов не выводятся в браузер.
-                        </p>
-                        {xrayStates[node.node_uuid]?.source_core_id != null && (
-                          <p className="text-muted-foreground text-xs">
-                            Последний применённый профиль: <Link className="underline" to={'/nodes/cores/' + xrayStates[node.node_uuid].source_core_id}>
-                              {editorCores.find(core => core.id === xrayStates[node.node_uuid]?.source_core_id)?.name ?? 'Открыть профиль'}
-                            </Link>
-                          </p>
-                        )}
-                        <div className="flex flex-wrap items-center gap-2">
-                          <select aria-label="Сохранённый профиль Xray" className="border-input bg-background min-h-9 min-w-56 max-w-full rounded-md border px-3 py-1 text-sm"
-                            value={editorCoreIds[node.node_uuid] ?? ''}
-                            onChange={event => setEditorCoreIds(prev => ({ ...prev, [node.node_uuid]: event.target.value }))}>
-                            <option value="">Выберите Xray Core</option>
-                            {editorCores.map(core => <option key={core.id} value={core.id}>{core.name}</option>)}
-                          </select>
-                          {editorCoreIds[node.node_uuid] && <Link className="text-sm underline" to={'/nodes/cores/' + editorCoreIds[node.node_uuid]}>Открыть редактор</Link>}
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button size="sm" disabled={xrayBusy || !editorCoreIds[node.node_uuid] || !xrayStates[node.node_uuid]}>
-                                Применить весь профиль к Xray
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Применить конфигурацию к этой Node?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Работающее ядро Xray может быть перезапущено. Проверяйте клиентские подключения после применения.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Отмена</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => void applyEditorCore(node.node_uuid)}>Применить конфигурацию</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </div>
-                      <div className="space-y-2 border-t pt-3">
-                        <p className="text-sm font-medium">Только правила маршрутизации из Core Editor</p>
-                        <p className="text-muted-foreground text-xs">
-                          Использует сохранённые правила, balancers и параметры маршрутизации Xray Core Editor.
-                          Остальные разделы текущего Xray не изменяются.
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          <span className="text-muted-foreground text-xs">{editorCores.find(core => String(core.id) === editorCoreIds[node.node_uuid])?.name ?? 'Выберите профиль выше'}</span>
-                          <Button size="sm" variant="outline" disabled={xrayBusy || !xrayStates[node.node_uuid]?.configured}
-                            onClick={() => void synchronizeEditorRouting(node.node_uuid)}>
-                            Применить правила редактора
-                          </Button>
-                        </div>
-                      </div>
-                      </>}
+                      {detailTab === 'xray' && <div className="space-y-4">
+                        <NodeXrayCoreAssignment
+                          cores={editorCores}
+                          selectedCoreId={editorCoreIds[node.node_uuid] ?? ''}
+                          onCoreChange={value => setEditorCoreIds(previous => ({ ...previous, [node.node_uuid]: value }))}
+                          current={xrayStates[node.node_uuid]}
+                          busy={xrayBusy}
+                          onApply={() => void applyEditorCore(node.node_uuid)}
+                          onApplyRouting={() => void synchronizeEditorRouting(node.node_uuid)}
+                        />
+                        <NodeXrayRuntimeControls
+                          imageVersion={xrayVersion}
+                          region={xrayRegion}
+                          configuration={xrayConfig}
+                          configured={Boolean(xrayStates[node.node_uuid]?.configured)}
+                          busy={xrayBusy}
+                          onImageVersionChange={setXrayVersion}
+                          onRegionChange={setXrayRegion}
+                          onConfigurationChange={setXrayConfig}
+                          onGenerateSample={demoXray}
+                          onCommand={action => void changeXray(node.node_uuid, action)}
+                          onRefresh={() => void readXray(node.node_uuid)}
+                        />
+                      </div>}
                       {detailTab === 'tls' && <NodeTLSBindings
                         bindings={agentTLSBindings[node.node_uuid] ?? []}
                         presets={tlsPresetChoices}
@@ -834,52 +739,18 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                         configured={Boolean(xrayStates[node.node_uuid]?.configured)}
                         onBind={() => void bindExistingTLS(node.node_uuid)}
                       />}
-                      {detailTab === 'xray' && <div className="space-y-2 border-t pt-3">
-                        <p className="text-sm font-medium">Пользователи Xray и коммерческие подписки</p>
-                        <p className="text-muted-foreground text-xs">
-                          Для VLESS, VMess и Trojan можно включить автоматическую синхронизацию.
-                          WayLane будет допускать только оплаченные активные подписки из связанных групп,
-                          используя UUID подписки в качестве технической идентичности. Выключенные, истёкшие
-                          и превысившие лимиты подписки исключаются. Привязку к группе/inbound задайте в каталоге.
-                          SOCKS5 и остальные протоколы по умолчанию остаются под ручным управлением.
-                        </p>
-                        <div className="space-y-2 text-xs text-muted-foreground">
-                          {(xrayInboundStates[node.node_uuid] || []).map(inbound => {
-                            const managed = managedInboundStates[node.node_uuid]?.includes(inbound.tag) ?? false
-                            const supported = ['vless', 'vmess', 'trojan'].includes(inbound.protocol)
-                            return (
-                              <div key={inbound.tag} className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
-                                <span className="break-all">
-                                  {inbound.tag} · {inbound.protocol} · {managed
-                                    ? 'управляется коммерческими подписками (актуальное количество только в WSS)'
-                                    : `${inbound.user_count} ручных клиентов`}
-                                  {!managed && inbound.identities.length ? ': ' + inbound.identities.join(', ') : ''}
-                                </span>
-                                {supported && <Button size="sm" variant="outline" disabled={xrayBusy || xrayStates[node.node_uuid]?.runtime_status !== 'running'}
-                                  onClick={() => void changeManagedInbound(node.node_uuid, inbound.tag, !managed)}>
-                                  {managed ? 'Отключить подписки' : 'Управлять подписками'}
-                                </Button>}
-                              </div>
-                            )
-                          })}
-                        </div>
-                        <p className="text-muted-foreground text-xs">
-                          Ручная синхронизация ниже заменяет всех клиентов выбранного inbound.
-                          Для inbound под управлением подписок она запрещена.
-                        </p>
-                        <Input aria-label="Xray inbound tag" placeholder="Tag inbound"
-                          value={xrayInboundTag} onChange={e => setXrayInboundTag(e.target.value)} maxLength={128} />
-                        <Textarea aria-label="Xray inbound users JSON" value={xrayUsersJSON}
-                          rows={5} className="font-mono text-xs"
-                          placeholder={'[{"user":"qa","pass":"strong-password"}]'}
-                          onChange={e => setXrayUsersJSON(e.target.value)} />
-                        <Button size="sm" variant="outline"
-                          disabled={xrayBusy || !xrayUsersJSON.trim() || !xrayStates[node.node_uuid]?.configured ||
-                            (managedInboundStates[node.node_uuid] || []).includes(xrayInboundTag.trim())}
-                          onClick={() => void synchronizeInboundUsers(node.node_uuid)}>
-                          Синхронизировать пользователей
-                        </Button>
-                      </div>}
+                      {detailTab === 'xray' && <NodeXrayClientManagement
+                        inbounds={xrayInboundStates[node.node_uuid] ?? []}
+                        managedInboundTags={managedInboundStates[node.node_uuid] ?? []}
+                        runtime={xrayStates[node.node_uuid]}
+                        inboundTag={xrayInboundTag}
+                        onInboundTagChange={setXrayInboundTag}
+                        usersJson={xrayUsersJSON}
+                        onUsersJsonChange={setXrayUsersJSON}
+                        busy={xrayBusy}
+                        onManageInbound={(tag, enabled) => void changeManagedInbound(node.node_uuid, tag, enabled)}
+                        onSyncUsers={() => void synchronizeInboundUsers(node.node_uuid)}
+                      />}
                       {detailTab === 'diagnostics' && <NodeXrayUsage
                         data={xrayUsageStates[node.node_uuid]}
                         busy={xrayBusy}
