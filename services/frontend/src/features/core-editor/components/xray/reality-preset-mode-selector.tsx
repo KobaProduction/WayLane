@@ -1,5 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { confirmedRealityBinding, effectiveRealityPresetSelection, type RealityBinding } from '@/features/core-editor/kit/reality-preset-binding'
+import { selectCoreEditorHasActualChanges } from '@/features/core-editor/kit/core-editor-change-state'
+import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -38,6 +40,9 @@ interface Props {
 function readableError(error: unknown): string {
   const response = error as { data?: { detail?: unknown }; response?: { data?: { detail?: unknown } }; message?: string }
   const detail = response?.data?.detail ?? response?.response?.data?.detail
+  if (typeof detail === 'string' && detail.includes('Core is assigned to an autonomous Node')) {
+    return 'Ядро назначено Node. Перед сменой ключей безопасно переназначьте ядро в настройках Node.'
+  }
   return typeof detail === 'string' ? detail : response?.message ?? 'Не удалось изменить привязку REALITY'
 }
 
@@ -96,11 +101,15 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
   const selectedValue = effectiveRealityPresetSelection(selected, binding)
   const selectedPreset = useMemo(() => presets.find(item => item.id === selectedValue), [presets, selectedValue])
   const verified = loadedScope === scope && !loading && !loadFailed
-  const ready = verified && canUpdate && coreId !== null && inboundSaved && !hasUnsavedChanges && !pending
+  const ready = verified && canUpdate && coreId !== null && inboundSaved && !pending
   const mismatch = verified && (initialPresetId ?? null) !== binding
 
   const changePreset = async () => {
     if (!ready || !selectedValue || !coreId || mismatch) return
+    if (hasUnsavedChanges || selectCoreEditorHasActualChanges(useCoreEditorStore.getState())) {
+      toast.error('В ядре есть несохранённые изменения. Сохраните или отмените их перед заменой пресета.')
+      return
+    }
     setPending(true)
     try {
       await $fetch('/api/core-presets/bindings', {
@@ -117,6 +126,10 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
 
   const switchToManual = async () => {
     if (!ready || !coreId || !binding || !replacementKey.trim() || mismatch) return
+    if (hasUnsavedChanges || selectCoreEditorHasActualChanges(useCoreEditorStore.getState())) {
+      toast.error('В ядре есть несохранённые изменения. Сохраните или отмените их перед заменой ключа.')
+      return
+    }
     if (!window.confirm('Снять привязку к защищённому пресету и сохранить новый приватный ключ прямо в конфигурации ядра?')) return
     setPending(true)
     try {
@@ -135,9 +148,12 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
 
   return (
     <div className="space-y-3 rounded-md border bg-muted/20 p-3 sm:col-span-2" data-testid="reality-preset-mode-selector">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Источник ключей REALITY</p>
-        <p className="text-xs text-muted-foreground">Вручную — ключи хранятся в конфигурации ядра. Пресет — приватный ключ зашифрован в Backend и не раскрывается редактору.</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">Ключи REALITY</p>
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer">О режимах</summary>
+          <p className="mt-1 max-w-lg">В ручном режиме ключ находится в JSON ядра. Управляемый пресет хранит приватный ключ зашифрованным в Backend.</p>
+        </details>
       </div>
       <Tabs value={mode} onValueChange={value => onModeChange(value === 'preset' ? 'preset' : 'manual')}>
         <TabsList className="grid w-full grid-cols-2">
@@ -148,13 +164,14 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
       {(!verified && !loadFailed) && <p className="text-xs text-muted-foreground">Загрузка пресетов и привязок…</p>}
       {loadFailed && <div className="space-y-2"><p className="text-xs text-destructive">Не удалось проверить привязки. Изменения запрещены.</p><Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>Повторить</Button></div>}
       {mismatch && <p className="text-xs text-destructive">Сохранённая ссылка REALITY не совпадает с привязкой на сервере. Обновите страницу, прежде чем менять режим.</p>}
-      {(coreId === null || !inboundSaved) && <p className="text-xs text-muted-foreground">Для привязки пресета сначала сохраните inbound и ядро в ручном режиме. Затем откройте inbound снова.</p>}
-      {!canUpdate && <p className="text-xs text-muted-foreground">Для изменения режима требуется разрешение на редактирование ядер.</p>}
-      {hasUnsavedChanges && <p className="text-xs text-amber-600">Сохраните или отмените текущие изменения ядра перед сменой источника ключей.</p>}
-      {mode === 'manual' && !binding && !initialPresetId && <p className="text-xs text-muted-foreground">Настройте приватный ключ и Short IDs в полях ниже. Генерация новой пары доступна здесь же.</p>}
+      {mode === 'preset' && (coreId === null || !inboundSaved) && <p className="text-xs text-muted-foreground">Сначала сохраните новый inbound и ядро, затем выберите пресет.</p>}
+      {mode === 'preset' && !canUpdate && <p className="text-xs text-muted-foreground">Для изменения привязки нужны права редактирования ядра.</p>}
       {mode === 'manual' && binding && verified && (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Сейчас привязан пресет «{currentPreset?.name ?? binding}». Для перехода в ручной режим нужен новый приватный ключ; прежний секрет прочитать нельзя. При смене ключа существующим клиентам понадобится обновлённая подписка.</p>
+          <p className="text-xs text-muted-foreground">Привязан «{currentPreset?.name ?? binding}». Для ручного режима укажите новый ключ.</p>
+          <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Что произойдёт при смене ключа</summary>
+            <p className="mt-1">Прежний приватный ключ нельзя прочитать. После замены потребуется обновление клиентских подписок.</p>
+          </details>
           <Input type="password" autoComplete="off" aria-label="Новый приватный ключ REALITY" placeholder="Новый приватный ключ X25519" value={replacementKey} onChange={event => setReplacementKey(event.target.value)} />
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => setReplacementKey(generateRealityKeyPair().privateKey)}>Сгенерировать новый ключ</Button>
@@ -169,20 +186,24 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
             <SelectContent>{presets.map(item => <SelectItem key={item.id} value={item.id}>{item.name} · v{item.revision}</SelectItem>)}</SelectContent>
           </Select>
           {selectedPreset && (
-            <div className="space-y-1 text-xs text-muted-foreground">
-              <p>Публичный ключ: <code className="break-all">{selectedPreset.data.publicKey ?? '—'}</code></p>
-              <p>Short IDs: {(selectedPreset.data.shortIds ?? []).join(', ') || '—'}</p>
-              <p>Приватный ключ хранится зашифрованным; для замены ключей отредактируйте пресет.</p>
-            </div>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Публичные параметры · {(selectedPreset.data.shortIds ?? []).length} Short ID</summary>
+              <div className="mt-2 space-y-1">
+                <p>Публичный ключ: <code className="break-all">{selectedPreset.data.publicKey ?? '—'}</code></p>
+                <p>Short IDs: {(selectedPreset.data.shortIds ?? []).join(', ') || '—'}</p>
+                <p>Приватный ключ хранится в защищённом хранилище.</p>
+              </div>
+            </details>
           )}
           {presets.length === 0 && verified && <p className="text-xs text-muted-foreground">REALITY-пресетов пока нет.</p>}
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" disabled={!ready || !selectedValue || selectedValue === binding || mismatch} size="sm" onClick={() => void changePreset()}>{binding ? 'Заменить привязку' : 'Привязать пресет'}</Button>
+            {selectedValue === binding && binding && verified
+              ? <span className="text-xs text-muted-foreground">Пресет уже подключён</span>
+              : selectedValue && <Button type="button" disabled={!ready || mismatch} size="sm" onClick={() => void changePreset()}>{binding ? 'Заменить пресет' : 'Привязать пресет'}</Button>}
             <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>Обновить список</Button>
             <Link className="text-xs text-primary underline" to="/nodes/presets?kind=reality" target="_blank" rel="noopener noreferrer">Управление пресетами</Link>
           </div>
-          {binding && selectedValue === binding && verified && <p className="text-xs text-muted-foreground">Этот пресет уже привязан к inbound.</p>}
-          <p className="text-xs text-muted-foreground">Для ядра, назначенного Node, изменение привязки запрещено сервером. Сначала потребуется безопасное переназначение профиля.</p>
+
         </div>
       )}
     </div>
