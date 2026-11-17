@@ -47,3 +47,20 @@ test('other protocols keep port lists', () => {
   assert.deepEqual(issuePaths({ protocol: 'vless', tag: 'V', port: '' }), [])
   assert.deepEqual(messagesAt('port', { protocol: 'vless', tag: 'V', port: '0' }), ['Port must be a port number or list like 443, 1000-2000,444.'])
 })
+
+test('manual REALITY requires its own secret, but managed mode does not request encrypted keys', () => {
+  const reality = {
+    protocol: 'vless', tag: 'REALITY', port: '443', security: 'reality',
+    sec_serverNames: 'www.example.com', sec_target: 'www.example.com:443',
+    sec_shortIds: 'aabbccdd', sec_privateKey: '',
+    sec_mldsa65Verify: 'not-a-real-verify', sec_mldsa65Seed: '',
+  }
+  const manual = issuePaths({ ...reality, realityKeyMode: 'manual' })
+  assert.ok(manual.includes('sec_privateKey'))
+  assert.ok(manual.includes('sec_mldsa65Verify'))
+  const managed = issuePaths({ ...reality, realityKeyMode: 'preset' })
+  assert.deepEqual(managed, [])
+  const malformed = issuePaths({ ...reality, realityKeyMode: 'preset', sec_serverNames: '', sec_target: '' })
+  assert.ok(malformed.includes('sec_serverNames'))
+  assert.ok(malformed.includes('sec_target'))
+})

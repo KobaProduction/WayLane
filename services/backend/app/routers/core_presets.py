@@ -1,5 +1,6 @@
 """Managed REALITY, VLESS encryption and routing presets for Xray cores."""
 
+from copy import deepcopy
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,10 +17,12 @@ from app.models.admin import AdminDetails
 from app.operation.core_presets import (
     ROUTING_TAG,
     CorePresetError,
+    _find_inbound,
     build_preset,
     project_public_config,
 )
 from app.operation.tls_presets import TlsPresetError
+from app.utils.crypto import get_x25519_public_key
 
 from .authentication import require_permission
 
@@ -36,6 +39,12 @@ class BindingInput(BaseModel):
     core_id: int = Field(gt=0)
     preset_id: str = Field(min_length=36, max_length=36)
     inbound_tag: str = Field(min_length=1, max_length=256)
+
+
+class RealityManualInput(BaseModel):
+    core_id: int = Field(gt=0)
+    inbound_tag: str = Field(min_length=1, max_length=256)
+    private_key: str = Field(min_length=40, max_length=80)
 
 
 def _summary(row):
@@ -298,6 +307,57 @@ async def bind_preset(
         "kind": preset["kind"],
         "requires_node_apply": True,
     }
+
+
+@router.post("/bindings/reality/manual")
+async def unbind_reality_to_manual(
+    body: RealityManualInput,
+    db: AsyncSession = Depends(get_db),
+    _: AdminDetails = Depends(require_permission("cores", "update")),
+):
+    """Remove a managed REALITY reference only with a valid replacement key.
+
+    Active Node assignments remain fenced; the previously configured secret
+    is never returned or decrypted for manual editing.
+    """
+    await _ensure_preset_change_not_bound_to_node(db, [body.core_id])
+    binding = (
+        await db.execute(select(core_preset_bindings).where(
+            core_preset_bindings.c.core_id == body.core_id,
+            core_preset_bindings.c.kind == "reality",
+            core_preset_bindings.c.inbound_tag == body.inbound_tag,
+        ))
+    ).mappings().one_or_none()
+    if not binding:
+        raise HTTPException(404, "REALITY preset binding not found")
+    core = await db.get(CoreConfig, body.core_id)
+    if core is None or core.type not in (None, CoreType.xray, "xray"):
+        raise HTTPException(422, "REALITY binding requires an Xray core")
+    config = deepcopy(core.config)
+    try:
+        if not get_x25519_public_key(body.private_key):
+            raise CorePresetError("Invalid replacement REALITY private key")
+        inbound = _find_inbound(config, body.inbound_tag)
+        stream = inbound.get("streamSettings") or {}
+        if stream.get("security") != "reality":
+            raise CorePresetError("REALITY inbound is no longer configured")
+        settings = stream.get("realitySettings") or {}
+        if settings.get("waylanePresetId") != binding["preset_id"]:
+            raise CorePresetError("REALITY preset reference mismatch")
+        for key in ("waylanePresetId", "publicKey", "mldsa65Seed", "mldsa65Verify"):
+            settings.pop(key, None)
+        settings["privateKey"] = body.private_key
+        validated = core_manager.validate_core(
+            config, core.exclude_inbound_tags, core.fallbacks_inbound_tags, core.type,
+        )
+    except (CorePresetError, ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await db.execute(delete(core_preset_bindings).where(core_preset_bindings.c.id == binding["id"]))
+    core.config = config
+    await db.commit()
+    await _refresh_core(core, validated)
+    return {"core_id": core.id, "inbound_tag": body.inbound_tag,
+            "mode": "manual", "requires_node_apply": True}
 
 
 @router.get("/targets")

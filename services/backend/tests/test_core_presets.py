@@ -2,21 +2,25 @@
 
 import base64
 import json
+from datetime import UTC
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import x25519
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.xray import XRayConfig
 from app.db import Base
-from app.db.core_presets import core_preset_bindings, core_presets
 from app.db.models import CoreConfig, CoreType
 from app.operation.core_presets import (
-    CorePresetError, ROUTING_TAG, build_preset, hydrate_core_preset_config,
-    project_bound_core_config, project_public_config,
+    ROUTING_TAG,
+    CorePresetError,
+    build_preset,
+    hydrate_core_preset_config,
+    project_bound_core_config,
+    project_public_config,
 )
 from app.operation.tls_presets import decrypt_private_key
 from app.routers import core_presets as api
@@ -96,8 +100,9 @@ def test_reality_projection_parses_without_private_key():
 
 
 def build_preset_for_test(kind, body):
-    from cryptography.fernet import Fernet
     import os
+
+    from cryptography.fernet import Fernet
     os.environ.setdefault("WAYLANE_TLS_SECRET_KEY", Fernet.generate_key().decode())
     return build_preset(kind, body)
 
@@ -186,5 +191,73 @@ async def test_presets_binding_projection_rotation_and_hydration(tmp_path, monke
             clean = await project_bound_core_config(db, core_id, edited)
             assert "leaked" not in json.dumps(clean)
             assert "privateKey" not in json.dumps(clean)
+    finally:
+        await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_switch_reality_preset_back_to_manual_requires_valid_new_key(tmp_path, monkeypatch):
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("WAYLANE_TLS_SECRET_KEY", Fernet.generate_key().decode())
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/manual-mode.db")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    refreshed = []
+
+    async def observe(core, _):
+        refreshed.append(core.id)
+
+    monkeypatch.setattr(api, "_refresh_core", observe)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with factory() as db:
+            core = CoreConfig(name="Manual switch", type=CoreType.xray,
+                              config=core_example(), exclude_inbound_tags=set(), fallbacks_inbound_tags=set())
+            db.add(core)
+            await db.commit()
+            core_id = core.id
+            old_key = core.config["inbounds"][0]["streamSettings"]["realitySettings"]["privateKey"]
+            preset = await api.create_preset(PresetInput(name="Encrypted source", kind="reality", data={
+                "private_key": sample_private(), "short_ids": ["aabb"],
+            }), db, None)
+            await api.bind_preset(BindingInput(core_id=core_id, preset_id=preset["id"], inbound_tag="reality-in"), db, None)
+            assert old_key not in json.dumps(core.config)
+            # The saved Core must not have its managed key changed under an active Node.
+            from datetime import datetime
+
+            from app.db.models import node_agent_xray_desired
+            from app.routers.node_registry import create_classic_node
+            node = await create_classic_node(db=db, _=object())
+            await db.execute(node_agent_xray_desired.insert().values(
+                node_uuid=node["node_uuid"], generation=1, action="deploy", image_version="26.10.21",
+                config=core.config, source_core_id=core_id, updated_at=datetime.now(UTC),
+            ))
+            await db.commit()
+            from app.routers.core_presets import RealityManualInput
+            with pytest.raises(HTTPException) as protected:
+                await api.unbind_reality_to_manual(
+                    RealityManualInput(core_id=core_id, inbound_tag="reality-in", private_key=sample_private()), db, None)
+            assert protected.value.status_code == 409
+            await db.rollback()
+            await db.execute(node_agent_xray_desired.delete().where(node_agent_xray_desired.c.node_uuid == node["node_uuid"]))
+            await db.commit()
+            with pytest.raises(HTTPException) as invalid:
+                await api.unbind_reality_to_manual(
+                    RealityManualInput(core_id=core_id, inbound_tag="reality-in", private_key="!" * 43), db, None)
+            assert invalid.value.status_code == 422
+            assert (await api.list_core_bindings(db, None))[0]["preset_id"] == preset["id"]
+            await db.rollback()
+            await db.refresh(core)
+            replacement = sample_private()
+            result = await api.unbind_reality_to_manual(
+                RealityManualInput(core_id=core_id, inbound_tag="reality-in", private_key=replacement), db, None)
+            assert result["mode"] == "manual"
+            assert await api.list_core_bindings(db, None) == []
+            settings = core.config["inbounds"][0]["streamSettings"]["realitySettings"]
+            assert settings["privateKey"] == replacement
+            assert "publicKey" not in settings
+            assert "waylanePresetId" not in settings
+            assert settings["shortIds"] == ["aabb"]
+            assert XRayConfig(core.config).inbounds_by_tag["reality-in"]["pbk"]
+            assert refreshed == [core_id, core_id]
     finally:
         await engine.dispose()

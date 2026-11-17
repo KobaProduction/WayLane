@@ -22,6 +22,7 @@ import { pruneSockoptObject, XrayStreamSockoptInboundAccordion } from '@/feature
 import { InboundFallbacksEditor } from '@/features/core-editor/components/xray/inbound-fallbacks-editor'
 import { MasqueSettingsFields } from '@/features/core-editor/components/xray/masque-settings-fields'
 import { RealityScanDialog } from '@/features/core-editor/components/xray/reality-scan-dialog'
+import { RealityPresetModeSelector } from '@/features/core-editor/components/xray/reality-preset-mode-selector'
 import { FieldMessages } from '@/features/core-editor/components/xray/stream-form-inputs'
 import { guardStreamFormsCommit } from '@/features/core-editor/components/xray/stream-form-validity'
 import { WireguardInboundFields } from '@/features/core-editor/components/xray/wireguard-inbound-fields'
@@ -57,6 +58,8 @@ import {
 import { vlessFlowSelectValues, vlessVisionFlowHintShown, withXdriveInboundFlowIssue } from '@/features/core-editor/kit/xdrive-fields'
 import { coerceVerifyPeerCertByNameList, inferParityFieldMode, outboundSettingToString, parseOutboundSettingValue, stringifyJsonFormRecord } from '@/features/core-editor/kit/xray-parity-value'
 import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
+import { selectCoreEditorHasActualChanges } from '@/features/core-editor/kit/core-editor-change-state'
+import { profileToPersistedConfig } from '@/features/core-editor/kit/xray-adapter'
 import useDirDetection from '@/hooks/use-dir-detection'
 import { cn } from '@/lib/utils'
 import {
@@ -961,6 +964,8 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
   const dir = useDirDetection()
   const profile = useCoreEditorStore(s => s.xrayProfile)
   const updateXrayProfile = useCoreEditorStore(s => s.updateXrayProfile)
+  const coreId = useCoreEditorStore(s => s.coreId)
+  const hasActualChanges = useCoreEditorStore(selectCoreEditorHasActualChanges)
   const { assertNoPersistBlockingErrors } = useXrayPersistModifyGuard()
   const [selected, setSelected] = useState(0)
   const [detailOpen, setDetailOpen] = useState(false)
@@ -1036,6 +1041,15 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
     return getInboundSecuritySelectOptions(caps, inbound.protocol, 'security' in inbound ? inbound.security?.type : undefined)
   }, [caps, inbound])
 
+  const realityPresetId = useMemo(() => {
+    if (!profile || !profile.inbounds[selected]) return undefined
+    const inbounds = profileToPersistedConfig(profile).inbounds
+    const row = Array.isArray(inbounds) ? inbounds[selected] as Record<string, unknown> | undefined : undefined
+    const stream = row?.streamSettings as Record<string, unknown> | undefined
+    const reality = stream?.realitySettings as Record<string, unknown> | undefined
+    return typeof reality?.waylanePresetId === 'string' ? reality.waylanePresetId : undefined
+  }, [profile, selected])
+
   const inboundDialogSchema = useMemo(() => createInboundDialogSchema(caps, t), [caps, t])
 
   const form = useForm<InboundDialogFormValues>({
@@ -1054,6 +1068,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
       shadowsocksNetwork: 'tcp,udp',
       transport: 'tcp',
       security: 'none',
+      realityKeyMode: 'manual',
       tunnelRewriteAddress: '',
       tunnelRewritePort: '',
       tunnelAllowedNetwork: 'tcp,udp',
@@ -1190,6 +1205,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
       sniffingRouteOnly: sniffing?.routeOnly ? 'true' : 'false',
       transport: 'transport' in row && row.transport ? row.transport.type : 'tcp',
       security: row.protocol === 'hysteria' ? 'tls' : 'security' in row && row.security ? row.security.type : 'none',
+      realityKeyMode: realityPresetId ? 'preset' : 'manual',
       tunName: row.protocol === 'tun' && typeof (row as { name?: unknown }).name === 'string' ? String((row as { name?: unknown }).name) : '',
       tunMtu: row.protocol === 'tun' && typeof (row as { mtu?: unknown }).mtu === 'number' ? String((row as { mtu?: number }).mtu) : '',
       wgSecretKey: row.protocol === 'wireguard' && typeof (row as { secretKey?: unknown }).secretKey === 'string' ? String((row as { secretKey?: unknown }).secretKey) : '',
@@ -1273,6 +1289,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
   const watchedPort = form.watch('port')
   const watchedTransport = form.watch('transport')
   const watchedSecurity = form.watch('security')
+  const watchedRealityKeyMode = form.watch('realityKeyMode') === 'preset' ? 'preset' : 'manual'
   const watchedShadowsocksNetwork = form.watch('shadowsocksNetwork')
 
   useEffect(() => {
@@ -1670,7 +1687,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
   }
 
   const assertMldsa65PairForCommit = async (): Promise<boolean> => {
-    if (form.getValues('security') !== 'reality') return true
+    if (form.getValues('security') !== 'reality' || form.getValues('realityKeyMode') === 'preset') return true
     const seed = String(form.getValues(INBOUND_FORM_FIELD_SEC_MLDSA65_SEED) ?? '').trim()
     const verify = String(form.getValues(INBOUND_FORM_FIELD_SEC_MLDSA65_VERIFY) ?? '').trim()
     if (!seed && !verify) return true
@@ -1693,6 +1710,10 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
 
   const commitAddInbound = async () => {
     if (!profile) return
+    if (form.getValues('security') === 'reality' && form.getValues('realityKeyMode') === 'preset') {
+      toast.error('Сначала сохраните ядро в ручном режиме, затем привяжите пресет.')
+      return
+    }
     if (!draftInbound || draftInbound.protocol === 'unmanaged') return
     if (!assertNoPersistBlockingErrors()) return
     const tagValue = form.getValues('tag') ?? ''
@@ -1726,6 +1747,11 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
 
   const commitEditInbound = async () => {
     if (dialogMode !== 'edit' || !inbound) return
+    if (form.getValues('security') === 'reality' &&
+        (form.getValues('realityKeyMode') === 'preset') !== Boolean(realityPresetId)) {
+      toast.error('Сначала примените изменение режима REALITY через селектор пресета.')
+      return
+    }
     const tagValue = form.getValues('tag') ?? ''
     if (isTagDuplicate(tagValue)) {
       setDuplicateTagError(tagValue)
@@ -4295,7 +4321,24 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
                           </div>
                         )}
 
+                        {inboundSecurityType === 'reality' && (
+                          <RealityPresetModeSelector
+                            open={detailOpen}
+                            coreId={coreId}
+                            inboundTag={inbound.tag}
+                            initialPresetId={realityPresetId}
+                            hasUnsavedChanges={hasActualChanges}
+                            mode={watchedRealityKeyMode}
+                            onModeChange={mode => {
+                              form.setValue('realityKeyMode', mode)
+                              form.clearErrors(['sec_privateKey', 'sec_mldsa65Seed', 'sec_mldsa65Verify'])
+                            }}
+                            onApplied={() => finalizeDetailClose()}
+                          />
+                        )}
                         {displaySecurityFieldOrderMain.map(jsonKey => {
+                          if (inboundSecurityType === 'reality' && (watchedRealityKeyMode === 'preset' || Boolean(realityPresetId)) &&
+                              ['privateKey', 'publicKey', 'shortIds', 'shortId', 'mldsa65Seed', 'mldsa65Verify'].includes(jsonKey)) return null
                           // The MASQUE box's HTTP version select owns the ALPN.
                           if (inbound.protocol === 'masque' && jsonKey === 'alpn') return null
                           if (inbound.protocol === 'hysteria' && inboundSecurityType === 'tls' && (jsonKey === 'minVersion' || jsonKey === 'maxVersion')) {
@@ -4471,7 +4514,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
                                   </AccordionItem>
                                 </Accordion>
                               )}
-                              {isReality && jsonKey === 'serverNames' && (
+                              {isReality && watchedRealityKeyMode === 'manual' && !realityPresetId && jsonKey === 'serverNames' && (
                                 <div className="sm:col-span-2">
                                   <LoaderButton
                                     type="button"
@@ -4484,7 +4527,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
                                   </LoaderButton>
                                 </div>
                               )}
-                              {isReality && jsonKey === 'publicKey' && (
+                              {isReality && watchedRealityKeyMode === 'manual' && !realityPresetId && jsonKey === 'publicKey' && (
                                 <div className="sm:col-span-2">
                                   <LoaderButton
                                     type="button"
@@ -4497,7 +4540,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
                                   </LoaderButton>
                                 </div>
                               )}
-                              {isReality && jsonKey === 'fingerprint' && (
+                              {isReality && watchedRealityKeyMode === 'manual' && !realityPresetId && jsonKey === 'fingerprint' && (
                                 <div className="w-full min-w-0 space-y-2 sm:col-span-2">
                                   <LoaderButton
                                     type="button"

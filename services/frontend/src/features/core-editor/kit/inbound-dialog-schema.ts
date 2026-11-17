@@ -128,13 +128,13 @@ export function createInboundDialogSchema(caps: Caps, t: TFunction) {
         })
       }
 
-      // REALITY: private key required; public key may stay empty (e.g. client-only / derived elsewhere).
+      // Only manual REALITY stores a private key. Confirmed presets keep it encrypted on Backend.
       const raw = data as Record<string, unknown>
       const privateKeyLabel = t('coreEditor.field.privateKey', { defaultValue: 'Private Key' })
       const shortIdsLabel = t('coreEditor.field.shortIds', { defaultValue: 'Short IDs' })
 
       const privateKeyValue = typeof raw.sec_privateKey === 'string' ? raw.sec_privateKey.trim() : ''
-      if (privateKeyValue === '') {
+      if (data.realityKeyMode !== 'preset' && privateKeyValue === '') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: required(privateKeyLabel),
@@ -179,7 +179,7 @@ export function createInboundDialogSchema(caps: Caps, t: TFunction) {
       const mldsaVerifyValue =
         typeof raw[INBOUND_FORM_FIELD_SEC_MLDSA65_VERIFY] === 'string' ? String(raw[INBOUND_FORM_FIELD_SEC_MLDSA65_VERIFY]).trim() : ''
 
-      if (mldsaVerifyValue && !mldsaSeedValue) {
+      if (data.realityKeyMode !== 'preset' && mldsaVerifyValue && !mldsaSeedValue) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: t('coreEditor.inbound.validation.mldsa65VerifyRequiresSeed', {
@@ -189,7 +189,7 @@ export function createInboundDialogSchema(caps: Caps, t: TFunction) {
         })
       }
 
-      if (mldsaSeedValue) {
+      if (data.realityKeyMode !== 'preset' && mldsaSeedValue) {
         const seedCheck = validateMldsa65Seed(mldsaSeedValue)
         if (!seedCheck.ok) {
           ctx.addIssue({
@@ -211,7 +211,7 @@ export function createInboundDialogSchema(caps: Caps, t: TFunction) {
         }
       }
 
-      if (mldsaVerifyValue) {
+      if (data.realityKeyMode !== 'preset' && mldsaVerifyValue) {
         const verifyCheck = validateMldsa65Verify(mldsaVerifyValue)
         if (!verifyCheck.ok) {
           ctx.addIssue({

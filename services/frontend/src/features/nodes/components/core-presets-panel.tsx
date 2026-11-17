@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { generateRealityKeyPair, generateRealityShortId } from '@/lib/xray-generation'
 import { $fetch } from '@/service/http'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,7 +47,7 @@ export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
   const [selectedCore, setSelectedCore] = useState('')
   const [selectedInbound, setSelectedInbound] = useState('')
   const [busy, setBusy] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(() => new URLSearchParams(window.location.search).get('presets') === 'reality')
   const [applyNeeded, setApplyNeeded] = useState<number[]>([])
   const load = useCallback(async () => {
     const [items, targets, attached] = await Promise.all([
@@ -201,6 +202,17 @@ export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
         <Input placeholder="Название пресета" value={name} maxLength={120}
           onChange={event => setName(event.target.value)} />
         {kind === 'reality' && <>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => {
+              const pair = generateRealityKeyPair()
+              setFields(current => ({ ...current, private_key: pair.privateKey, public_key: pair.publicKey }))
+            }}>Сгенерировать пару X25519</Button>
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => {
+              const next = generateRealityShortId()
+              setFields(current => ({ ...current, short_ids: [current.short_ids?.trim(), next].filter(Boolean).join(', ') }))
+            }}>Добавить Short ID</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">При замене пресета старый приватный ключ не раскрывается. Генерация создаёт новую пару; изменение ключа требует обновления клиентских подписок.</p>
           <label className="block text-sm">
             Приватный ключ REALITY (сервер, хранится зашифрованным)
             <Textarea className="mt-1 font-mono text-xs" value={fields.private_key ?? ''} placeholder="Вставьте приватный ключ Xray x25519"
