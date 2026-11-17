@@ -1,257 +1,319 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { toast } from 'sonner'
-import { $fetch } from '@/service/http'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { $fetch } from '@/service/http'
+import {
+  FIREWALL_SCENARIOS, FIREWALL_SCENARIO_KEYS,
+  firewallDraftChanged, validFirewallScenario, validFirewallTab,
+  validateFirewallDraft, validateMessageTemplate, validateWebhookFields,
+} from '../firewall-workspace-contract'
+import type { FirewallEditor, FirewallScenario, PreviewResponse } from '../firewall-workspace-contract'
+import { SubscriptionFirewallEvents } from './subscription-firewall-events'
 
-type Template = { title: string; lines: string[] }
-type Editor = {
-  enabled: boolean
-  scenarios: Record<string, Template>
-  webhook_enabled: boolean
-  webhook_url: string | null
-  device_check_url: string | null
-}
-type Event = {
-  id: string
-  event_type: string
-  status: string
-  attempts: number
-  last_error: string | null
-  next_attempt_at: string | null
-  created_at: string
-  delivered_at: string | null
-}
-const scenarios: Record<string, string> = {
-  invalid_link: 'Ссылка на подписку недействительна',
-  device_limit: 'Превышен лимит устройств',
-  hwid_required: 'HWID отсутствует',
-  unsupported_client: 'Приложение не поддерживается',
-  rate_limited: 'Слишком частое обновление',
-  access_denied: 'Доступ запрещён',
-  bot_unavailable: 'Ошибка проверки устройства',
-}
 const base = '/api/subscription-firewall'
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : 'Неизвестная ошибка'
+function errorMessage(error: unknown): string {
+  const err = error as { data?: { detail?: unknown }; response?: { data?: { detail?: unknown } }; message?: string }
+  const detail = err?.data?.detail ?? err?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  return error instanceof Error ? error.message : 'Не удалось выполнить запрос'
 }
 
-export function SubscriptionFirewallDesigner() {
-  const [config, setConfig] = useState<Editor | null>(null)
-  const [active, setActive] = useState('invalid_link')
-  const [events, setEvents] = useState<Event[]>([])
-  const [eventSummary, setEventSummary] = useState<Record<string, number>>({})
-  const [preview, setPreview] = useState<{ base64_payload: string; announce: string } | null>(null)
-  const [busy, setBusy] = useState(false)
+/** Read-only preview: this isn't a live subscription request or an admission-policy decision. */
+function MessagePreview({ preview, scenario, currentSignature }: {
+  preview: { scenario: FirewallScenario; signature: string; data: PreviewResponse } | null
+  scenario: FirewallScenario
+  currentSignature: string
+}) {
+  const outdated = Boolean(preview && (preview.scenario !== scenario || preview.signature !== currentSignature))
+  if (!preview) return <p className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Предпросмотр ещё не сформирован. Выберите сценарий и нажмите «Сформировать».</p>
+  if (outdated) return <p role="status" className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">Шаблон изменился. Сформируйте предпросмотр заново, чтобы не видеть устаревший результат.</p>
+  return <div className="space-y-3 rounded-lg border p-4" data-testid="firewall-preview-result">
+    <div className="space-y-1">
+      <p className="font-semibold">{preview.data.title}</p>
+      <p className="text-xs text-muted-foreground">Результат Backend для выбранного шаблона · Base64 + announce. Не является проверкой подписки пользователя.</p>
+    </div>
+    <div className="space-y-1 rounded-md bg-muted/40 px-3 py-3">
+      {preview.data.lines.map((line, index) => <p key={index} className="break-words text-sm">{line}</p>)}
+    </div>
+    <details className="text-xs text-muted-foreground">
+      <summary className="cursor-pointer font-medium">Технические поля ответа</summary>
+      <p className="mt-2 font-medium">Заголовок announce</p>
+      <code className="block break-all">{preview.data.announce}</code>
+      <p className="mt-2 font-medium">Тело ответа (Base64)</p>
+      <code className="block break-all">{preview.data.base64_payload}</code>
+    </details>
+  </div>
+}
+
+export function SubscriptionFirewallDesigner({ canUpdate = true }: { canUpdate?: boolean }) {
+  const [params, setParams] = useSearchParams()
+  const tab = validFirewallTab(params.get('tab'))
+  const scenario = validFirewallScenario(params.get('scenario'))
+  const [config, setConfig] = useState<FirewallEditor | null>(null)
+  const [savedConfig, setSavedConfig] = useState<FirewallEditor | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [previewBusy, setPreviewBusy] = useState(false)
   const [loadError, setLoadError] = useState('')
-  const refresh = useCallback(async () => {
+  const [saveError, setSaveError] = useState('')
+  const [reloadPromptOpen, setReloadPromptOpen] = useState(false)
+  const [preview, setPreview] = useState<{ scenario: FirewallScenario; signature: string; data: PreviewResponse } | null>(null)
+  const revision = useRef(0)
+
+  const loadConfig = useCallback(async () => {
+    const request = ++revision.current
+    setLoading(true)
+    setLoadError('')
     try {
-      const [settings, rows, summary] = await Promise.all([
-        $fetch<Editor>(base),
-        $fetch<Event[]>(base + '/device-events'),
-        $fetch<Record<string, number>>(base + '/device-events/summary'),
-      ])
-      setConfig(settings)
-      setEvents(rows)
-      setEventSummary(summary)
-      setLoadError('')
+      const saved = await $fetch<FirewallEditor>(base)
+      if (revision.current !== request) return
+      setConfig(saved)
+      setSavedConfig(saved)
+      setPreview(null)
+      setSaveError('')
     } catch (error) {
-      setLoadError(message(error))
-      throw error
+      if (revision.current === request) setLoadError(errorMessage(error))
+    } finally {
+      if (revision.current === request) setLoading(false)
     }
   }, [])
-  useEffect(() => { void refresh().catch(() => {}) }, [refresh])
+
+  useEffect(() => {
+    void loadConfig()
+    return () => { revision.current += 1 }
+  }, [loadConfig])
+
+  const dirty = firewallDraftChanged(savedConfig, config)
+  const problems = config ? validateFirewallDraft(config) : []
+  const template = config?.scenarios[scenario]
+  const templateErrors = template ? validateMessageTemplate(template) : []
+  const previewSignature = template ? JSON.stringify(template) : ''
+
+  function changeTab(value: string) {
+    const next = validFirewallTab(value)
+    const query = new URLSearchParams(params)
+    if (next === 'messages') query.delete('tab')
+    else query.set('tab', next)
+    setParams(query)
+  }
+
+  function changeScenario(key: FirewallScenario) {
+    const query = new URLSearchParams(params)
+    if (key === 'invalid_link') query.delete('scenario')
+    else query.set('scenario', key)
+    setParams(query)
+  }
 
   function updateTemplate(field: 'title' | 'lines', value: string) {
-    setConfig(current => current ? {
-      ...current,
-      scenarios: {
+    if (!canUpdate) return
+    setConfig(current => {
+      if (!current) return current
+      const existing = current.scenarios[scenario]
+      return { ...current, scenarios: {
         ...current.scenarios,
-        [active]: {
-          ...current.scenarios[active],
-          [field]: field === 'lines' ? value.split('\n') : value,
-        },
-      },
-    } : current)
-    setPreview(null)
-  }
-  async function act(task: () => Promise<void>) {
-    setBusy(true)
-    try { await task() }
-    catch (error) { toast.error(message(error)) }
-    finally { setBusy(false) }
-  }
-  function save() {
-    if (!config) return
-    void act(async () => {
-      await $fetch(base, { method: 'PUT', body: config })
-      toast.success('Настройки сохранены')
-      await refresh()
+        [scenario]: { ...existing, [field]: field === 'lines' ? value.split('\n') : value },
+      } }
     })
-  }
-  function showPreview() {
-    if (!config) return
-    void act(async () => {
-      setPreview(await $fetch(base + '/preview/' + active, {
-        method: 'POST',
-        body: config.scenarios[active],
-      }))
-    })
-  }
-  function retry() {
-    void act(async () => {
-      const data = await $fetch<{ selected: number; delivered: number }>(base + '/retry-device-events', {
-        method: 'POST',
-      })
-      toast.success('Доставлено ' + data.delivered + ' из ' + data.selected)
-      await refresh()
-    })
+    setSaveError('')
   }
 
-  function requeue(event: Event) {
-    if (!window.confirm('Заново запустить отправку события ' + event.id + '?')) return
-    void act(async () => {
-      await $fetch(base + '/device-events/' + event.id + '/requeue', { method: 'POST' })
-      toast.success('Событие возвращено в очередь; следующая отправка по расписанию')
-      await refresh()
-    })
+  function updateSetting(patch: Partial<FirewallEditor>) {
+    if (!canUpdate) return
+    setConfig(current => current ? { ...current, ...patch } : current)
+    setSaveError('')
   }
 
-  if (!config) return (
-    <div className="space-y-3 p-4" aria-live="polite">
-      {loadError ? (
-        <div role="alert" className="space-y-2 rounded-md border border-destructive/40 p-4 text-sm">
-          <p>Не удалось загрузить Subscription Firewall: {loadError}</p>
-          <Button type="button" variant="outline" onClick={() => void refresh().catch(() => {})}>Повторить загрузку</Button>
-        </div>
-      ) : <p className="text-sm text-muted-foreground">Загрузка Subscription Firewall…</p>}
+  async function save() {
+    if (!canUpdate || !config || !dirty || problems.length > 0 || saving) return
+    const payload = config
+    setSaving(true)
+    setSaveError('')
+    try {
+      const response = await $fetch<FirewallEditor>(base, { method: 'PUT', body: payload })
+      setConfig(response)
+      setSavedConfig(response)
+      toast.success('Настройки Subscription Firewall сохранены в Backend')
+    } catch (error) {
+      setSaveError(errorMessage(error))
+      toast.error('Настройки не сохранены. Исправьте ошибку и повторите.')
+    } finally { setSaving(false) }
+  }
+
+  async function formPreview() {
+    if (!template || templateErrors.length > 0 || previewBusy) return
+    setPreviewBusy(true)
+    const signature = JSON.stringify(template)
+    try {
+      const result = await $fetch<PreviewResponse>(base + '/preview/' + scenario, { method: 'POST', body: template })
+      setPreview({ scenario, signature, data: result })
+    } catch (error) {
+      toast.error(errorMessage(error))
+    } finally { setPreviewBusy(false) }
+  }
+
+  return <div className="min-w-0 space-y-4 px-4 py-4" data-testid="firewall-workspace">
+    {!canUpdate && <p role="status" className="rounded-lg border p-3 text-sm text-muted-foreground">Режим просмотра: изменение конфигурации и ручная доставка событий недоступны для этой роли.</p>}
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3">
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Конфигурация Firewall</p>
+        <p className="text-xs text-muted-foreground" role="status">
+          {loading && !savedConfig ? 'Загрузка настроек…' : !config ? 'Настройки недоступны' : dirty ? 'Есть несохранённые изменения' : 'Нет несохранённых изменений'}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={loading || saving} onClick={() => dirty ? setReloadPromptOpen(true) : void loadConfig()}>
+          Перезагрузить
+        </Button>
+        <Button type="button" size="sm" disabled={!canUpdate || !dirty || problems.length > 0 || saving || loading} onClick={() => void save()}>
+          {saving ? 'Сохранение…' : 'Сохранить изменения'}
+        </Button>
+      </div>
     </div>
-  )
-  const template = config.scenarios[active]
-
-  return <div className="space-y-4 p-4">
-    {loadError && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 p-3 text-sm">
-      <span>Не удалось обновить данные: {loadError}</span>
-      <Button type="button" variant="outline" size="sm" onClick={() => void refresh().catch(() => {})}>Повторить</Button>
+    {loadError && <div role="alert" className="space-y-2 rounded-lg border border-destructive/40 p-3 text-sm text-destructive">
+      <p>Не удалось загрузить конфигурацию: {loadError}</p>
+      <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => dirty ? setReloadPromptOpen(true) : void loadConfig()}>Повторить загрузку</Button>
     </div>}
-    <Tabs defaultValue="messages" className="w-full">
-      <TabsList className="w-full justify-start">
-        <TabsTrigger value="messages">Клиентские сообщения</TabsTrigger>
-        <TabsTrigger value="events">Вебхуки и события</TabsTrigger>
+    {saveError && <p role="alert" className="break-words rounded-md border border-destructive/40 p-3 text-sm text-destructive">Не удалось сохранить: {saveError}</p>}
+    {problems.length > 0 && <div role="alert" className="rounded-lg border border-destructive/40 p-3 text-sm">
+      <p className="font-medium">Перед сохранением исправьте ошибки:</p>
+      <ul className="mt-1 list-disc space-y-1 pl-5 text-destructive">{problems.map((problem, index) => <li key={`${index}:${problem}`}>{problem}</li>)}</ul>
+    </div>}
+    <Tabs value={tab} onValueChange={changeTab} className="w-full space-y-4">
+      <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1" aria-label="Разделы Subscription Firewall">
+        <TabsTrigger className="min-h-10 flex-1 sm:flex-none" value="messages">Сценарии</TabsTrigger>
+        <TabsTrigger className="min-h-10 flex-1 sm:flex-none" value="preview">Предпросмотр</TabsTrigger>
+        <TabsTrigger className="min-h-10 flex-1 sm:flex-none" value="webhook">Webhook</TabsTrigger>
+        <TabsTrigger className="min-h-10 flex-1 sm:flex-none" value="events">Доставка событий</TabsTrigger>
       </TabsList>
-      <TabsContent value="messages" className="mt-4">
-    <Card>
-      <CardHeader>
-        <CardTitle>Шаблоны ответов подписки</CardTitle>
-        <p className="text-sm text-muted-foreground">Настройка сообщений для поддерживаемых клиентов при ошибках доступа.</p>
-        <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">О формате ответов</summary>
-          Base64 и заголовок announce не применяются к HTML и запросам без HWID. Проверка доступа остаётся обязательной.
-        </details>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <label className="flex items-center gap-2 text-sm">
-          <Switch checked={config.enabled} onCheckedChange={enabled => setConfig({ ...config, enabled })} />
-          Заменять ошибки на понятные сообщения (HTTP 200 для поддерживаемых клиентов)
-        </label>
-        <label className="block text-sm">
-          Сценарий
-          <select className="bg-background mt-1 h-10 w-full rounded-md border px-3" value={active}
-            onChange={event => { setActive(event.target.value); setPreview(null) }}>
-            {Object.entries(scenarios).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
-          </select>
-        </label>
-        <label className="block text-sm">
-          Заголовок сообщения
-          <Input value={template.title} maxLength={256} onChange={event => updateTemplate('title', event.target.value)} />
-        </label>
-        <label className="block text-sm">
-          Информационные строки (1–8, каждая до 256 символов)
-          <Textarea rows={4} value={template.lines.join('\n')} onChange={event => updateTemplate('lines', event.target.value)} />
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={busy} onClick={showPreview}>Предпросмотр ответа</Button>
-          <Button disabled={busy} onClick={save}>Сохранить шаблоны</Button>
-        </div>
-        {preview && <div className="rounded-md border p-3 text-sm">
-          <p className="font-medium">HTTP 200 · Base64 · announce</p>
-          <p className="whitespace-pre-wrap">{template.lines.join('\n')}</p>
-          <details className="mt-2"><summary>Технические данные ответа</summary>
-            <code className="block break-all text-xs">{preview.announce}</code>
-            <code className="block break-all text-xs">{preview.base64_payload}</code>
-          </details>
-        </div>}
-      </CardContent>
-    </Card>
+      <TabsContent value="messages" className="space-y-4">
+        {config && <>
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3">
+            <div className="max-w-xl space-y-1">
+              <p className="text-sm font-medium">Ответы при ошибках подписки</p>
+              <p className="text-xs text-muted-foreground">Сообщения используются для поддерживаемых клиентов с HWID. Настоящий HTTP-статус и проверка доступа не меняются для остальных форматов.</p>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={config.enabled} disabled={!canUpdate || saving} onCheckedChange={enabled => updateSetting({ enabled })} />
+              {config.enabled ? 'Включено' : 'Выключено'}
+            </label>
+          </div>
+          <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(12rem,16rem)_minmax(0,1fr)]">
+            <nav aria-label="Сценарии Firewall" className="min-w-0 space-y-1 rounded-lg border p-2">
+              {FIREWALL_SCENARIO_KEYS.map(key => <button type="button" key={key}
+                aria-current={key === scenario ? 'page' : undefined}
+                onClick={() => changeScenario(key)}
+                className={`w-full rounded-md px-3 py-3 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring ${key === scenario ? 'bg-primary/10 font-medium text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+                {FIREWALL_SCENARIOS[key]}
+              </button>)}
+            </nav>
+            <section className="min-w-0 space-y-4 rounded-lg border p-4" aria-label="Редактор сценария">
+              <div className="space-y-1">
+                <h3 className="text-base font-semibold">{FIREWALL_SCENARIOS[scenario]}</h3>
+                <p className="text-xs text-muted-foreground">Этот текст появится в подписочном клиенте при соответствующей ошибке, если формат поддерживается.</p>
+              </div>
+              <label className="block space-y-2 text-sm">
+                <span>Заголовок</span>
+                <Input disabled={!canUpdate || saving} aria-label="Заголовок сценария" value={template?.title ?? ''} maxLength={256}
+                  onChange={event => updateTemplate('title', event.target.value)} />
+              </label>
+              <label className="block space-y-2 text-sm">
+                <span>Информационные строки <span className="text-muted-foreground">(1–8, до 256 символов)</span></span>
+                <Textarea disabled={!canUpdate || saving} aria-label="Строки сценария" rows={5} value={template?.lines.join('\n') ?? ''}
+                  onChange={event => updateTemplate('lines', event.target.value)} />
+              </label>
+              {templateErrors.length > 0 && <p role="alert" className="text-sm text-destructive">{templateErrors.join(' ')}</p>}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">Изменения сохраняются общей кнопкой вверху.</p>
+                <Button type="button" variant="outline" disabled={templateErrors.length > 0} onClick={() => changeTab('preview')}>Открыть предпросмотр</Button>
+              </div>
+            </section>
+          </div>
+        </>}
+        {!config && !loadError && <p className="text-sm text-muted-foreground">Загрузка сценариев…</p>}
       </TabsContent>
-      <TabsContent value="events" className="mt-4">
-    <Card>
-      <CardHeader>
-        <CardTitle>Контроль устройств и вебхуки</CardTitle>
-        <p className="text-sm text-muted-foreground">Состояние доставки событий устройств и настройки внешнего webhook.</p>
-        <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">Защита и повторные отправки</summary>
-          События HWID подписываются HMAC SHA-256; секрет задаётся в Backend через WAYLANE_DEVICE_WEBHOOK_SECRET.
-          Недоставленные события сохраняются в БД, повторы выполняются до 10 попыток с увеличением задержки.
-        </details>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <label className="flex items-center gap-2 text-sm">
-          <Switch checked={config.webhook_enabled}
-            onCheckedChange={webhook_enabled => setConfig({ ...config, webhook_enabled })} />
-          Отправлять события об устройствах
-        </label>
-        <label className="block text-sm">
-          URL обработчика событий (HTTPS)
-          <Input value={config.webhook_url ?? ''} placeholder="https://example.com/device-event"
-            onChange={event => setConfig({ ...config, webhook_url: event.target.value || null })} />
-        </label>
-        <label className="block text-sm">
-          URL проверки устройств legacy /webhook/check_device (необязательно)
-          <Input value={config.device_check_url ?? ''} placeholder="https://example.com/webhook/check_device"
-            onChange={event => setConfig({ ...config, device_check_url: event.target.value || null })} />
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={save}>Сохранить webhook</Button>
-          <Button variant="outline" disabled={busy} onClick={retry}>Повторить недоставленные</Button>
-          <Button variant="outline" disabled={busy} onClick={() => void act(refresh)}>Обновить список</Button>
-        </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-          <span>Ожидают: {eventSummary.pending ?? 0}</span>
-          <span>В отправке: {eventSummary.sending ?? 0}</span>
-          <span>Повтор: {eventSummary.failed ?? 0}</span>
-          <span>Доставлены: {eventSummary.delivered ?? 0}</span>
-          <span className={(eventSummary.exhausted ?? 0) > 0 ? 'font-medium text-destructive' : ''}>
-            Исчерпали попытки: {eventSummary.exhausted ?? 0}
-          </span>
-        </div>
-        <div className="max-h-60 space-y-2 overflow-auto text-xs">
-          {!events.length && <p className="text-muted-foreground">Событий пока нет</p>}
-          {events.map(event => <div key={event.id} className="rounded-md border p-2">
-            <p>
-              {event.event_type} · <strong>{event.status}</strong> · попытки: {event.attempts}/10
-              {event.last_error && ' · причина: ' + event.last_error}
-            </p>
-            <p className="mt-1 text-muted-foreground">
-              {event.next_attempt_at
-                ? 'Следующая попытка: ' + new Date(event.next_attempt_at).toLocaleString()
-                : event.status === 'exhausted'
-                  ? 'Автоматические попытки остановлены — требуется вмешательство'
-                  : event.status === 'delivered' ? 'Доставлено' : 'Ожидает обработки'}
-            </p>
-            {event.status === 'exhausted' && (
-              <Button className="mt-2" size="sm" variant="outline" disabled={busy} onClick={() => requeue(event)}>
-                Вернуть в очередь
-              </Button>
-            )}
-          </div>)}
-        </div>
-      </CardContent>
-    </Card>
+      <TabsContent value="preview" className="space-y-4">
+        <section className="min-w-0 space-y-4 rounded-lg border p-4">
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold">Предпросмотр ответа</h3>
+            <p className="text-sm text-muted-foreground">Backend формирует Base64/announce из текущего черновика. Это не запрос к подписке реального пользователя и не изменение правил доступа.</p>
+          </div>
+          {config && <>
+            <label className="block space-y-2 text-sm">
+              <span>Сценарий</span>
+              <select className="bg-background h-10 w-full rounded-md border px-3" value={scenario}
+                aria-label="Сценарий предпросмотра" onChange={event => changeScenario(validFirewallScenario(event.target.value))}>
+                {FIREWALL_SCENARIO_KEYS.map(key => <option value={key} key={key}>{FIREWALL_SCENARIOS[key]}</option>)}
+              </select>
+            </label>
+            {templateErrors.length > 0 && <p role="alert" className="text-sm text-destructive">{templateErrors.join(' ')}</p>}
+            <Button type="button" disabled={previewBusy || templateErrors.length > 0} onClick={() => void formPreview()}>
+              {previewBusy ? 'Формирование…' : 'Сформировать предпросмотр'}
+            </Button>
+            <MessagePreview preview={preview} scenario={scenario} currentSignature={previewSignature} />
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Когда этот формат используется</summary>
+              <p className="mt-2">Только для поддерживаемых клиентов текстовых подписок (например Happ, V2RayTun, ClientHub) с HWID. Для HTML, JSON, YAML и запросов без HWID обычный HTTP-ответ и контроль доступа сохраняются.</p>
+            </details>
+          </>}
+        </section>
+      </TabsContent>
+      <TabsContent value="webhook" className="space-y-4">
+        <section className="min-w-0 space-y-4 rounded-lg border p-4">
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold">Webhook событий устройств</h3>
+            <p className="text-sm text-muted-foreground">WayLane передаёт подписанные события HWID во внешний сервис. Секрет HMAC задаётся только на Backend и не отображается в этой форме.</p>
+          </div>
+          {config && <>
+            <label className="flex items-center gap-3 text-sm">
+              <Switch disabled={!canUpdate || saving} checked={config.webhook_enabled} onCheckedChange={webhook_enabled => updateSetting({ webhook_enabled })} />
+              Отправлять события устройств
+            </label>
+            <label className="block space-y-2 text-sm">
+              <span>URL получателя webhook</span>
+              <Input disabled={!canUpdate || saving} aria-label="URL получателя webhook" type="url" autoComplete="off" placeholder="https://example.com/device-events"
+                value={config.webhook_url ?? ''} maxLength={2048}
+                onChange={event => updateSetting({ webhook_url: event.target.value || null })} />
+            </label>
+            <details className="space-y-3 text-sm">
+              <summary className="cursor-pointer font-medium">Legacy-проверка устройств (дополнительно)</summary>
+              <label className="mt-3 block space-y-2 text-sm">
+                <span>URL `/webhook/check_device`</span>
+                <Input disabled={!canUpdate || saving} aria-label="URL legacy-проверки устройства" type="url" autoComplete="off" placeholder="https://example.com/webhook/check_device"
+                  value={config.device_check_url ?? ''} maxLength={2048}
+                  onChange={event => updateSetting({ device_check_url: event.target.value || null })} />
+              </label>
+            </details>
+            {validateWebhookFields(config).length > 0 && <p role="alert" className="text-sm text-destructive">{validateWebhookFields(config).join(' ')}</p>}
+            <p className="text-xs text-muted-foreground">Сервер дополнительно проверяет HTTPS, внутренние адреса и наличие HMAC-секрета. HTTP для внутреннего получателя возможен только по серверному allowlist.</p>
+            <p className="text-xs text-muted-foreground">Изменения сохраняются общей кнопкой вверху. Сохранение не подтверждает, что внешняя система получает события.</p>
+          </>}
+        </section>
+      </TabsContent>
+      <TabsContent value="events" className="space-y-4">
+        <SubscriptionFirewallEvents webhookEnabled={Boolean(savedConfig?.webhook_enabled)} canUpdate={canUpdate} />
       </TabsContent>
     </Tabs>
+    <AlertDialog open={reloadPromptOpen} onOpenChange={setReloadPromptOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Отменить несохранённые изменения?</AlertDialogTitle>
+          <AlertDialogDescription>Повторная загрузка заменит черновик данными Backend. Сохранённые настройки не затронет.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Продолжить редактирование</AlertDialogCancel>
+          <AlertDialogAction onClick={() => void loadConfig()}>Отменить изменения и загрузить</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 }

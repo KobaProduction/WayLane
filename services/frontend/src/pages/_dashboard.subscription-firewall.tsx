@@ -6,8 +6,9 @@ import { Link } from 'react-router'
 
 export default function SubscriptionFirewallPage() {
   const { admin } = useAdmin()
-  if (!hasPermission(admin, 'settings', 'read') || !hasPermission(admin, 'settings', 'update')) {
-    return <p role="alert" className="px-4 py-6 text-sm text-muted-foreground">Недостаточно прав для управления Subscription Firewall.</p>
+  const canUpdate = hasPermission(admin, 'settings', 'update')
+  if (!hasPermission(admin, 'settings', 'read')) {
+    return <p role="alert" className="px-4 py-6 text-sm text-muted-foreground">Недостаточно прав для просмотра Subscription Firewall.</p>
   }
 
   return (
@@ -15,9 +16,9 @@ export default function SubscriptionFirewallPage() {
       <PageHeader title="subscriptionFirewall.title" description="subscriptionFirewall.description" />
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
         <p className="text-sm text-muted-foreground">Сообщения об ошибках подписок, вебхуки и доставка событий устройств.</p>
-        <Link className="text-primary text-sm font-medium underline underline-offset-4" to="/settings/subscriptions">Общие настройки подписок</Link>
+        {canUpdate && <Link className="text-primary text-sm font-medium underline underline-offset-4" to="/settings/subscriptions">Общие настройки подписок</Link>}
       </div>
-      <SubscriptionFirewallDesigner />
+      <SubscriptionFirewallDesigner canUpdate={canUpdate} />
     </div>
   )
 }
