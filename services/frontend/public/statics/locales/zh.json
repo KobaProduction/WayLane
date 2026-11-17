@@ -63,6 +63,7 @@
   "today": "今天",
   "create": "创建",
   "nodes": {
+    "registryOverview": {"title": "节点注册表", "description": "注册状态与 Agent 最近报告。已批准并不代表已连接。", "refresh": "刷新列表", "stats": "注册状态概览", "all": "全部", "approved": "已批准", "pending": "待批准", "revoked": "已撤销", "noMatches": "没有此状态的节点", "rename": "重命名"},
     "presets": { "title": "Xray 预设", "description": "管理 Xray 密钥和配置预设" },
     "title": "节点",
     "description": "管理您的节点",

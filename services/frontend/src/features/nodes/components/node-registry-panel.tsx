@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { filterByRegistration, registrationCounts, type RegistrationFilter } from './node-registry-overview'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { $fetch } from '@/service/http'
@@ -126,6 +127,9 @@ export default function NodeDiscoveryPanel() {
   const canCreate = hasPermission(admin, 'nodes', 'create')
   const canApprove = hasPermission(admin, 'nodes', 'update')
   const [entries, setEntries] = useState<Registration[]>([])
+  const [registrationFilter, setRegistrationFilter] = useState<RegistrationFilter>('all')
+  const counts = useMemo(() => registrationCounts(entries), [entries])
+  const visibleNodes = useMemo(() => filterByRegistration(entries, registrationFilter), [entries, registrationFilter])
   const [nameEditors, setNameEditors] = useState<Record<string, string>>({})
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null)
   const [releaseTargets, setReleaseTargets] = useState<Record<string, string>>({})
@@ -547,20 +551,28 @@ export default function NodeDiscoveryPanel() {
   if (!canRead) return null
 
   return (
-    <Card className="m-4 min-w-0 shadow-sm">
-      <CardHeader className="pb-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <Card className="m-4 min-w-0 border-0 shadow-none">
+      <CardHeader className="px-0 pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <CardTitle>{t('nodes.connectedTitle')}</CardTitle>
-            <CardDescription>{t('nodes.connectedDescription')}</CardDescription>
+            <CardTitle>{t('nodes.registryOverview.title', { defaultValue: 'Реестр узлов' })}</CardTitle>
+            <CardDescription>{t('nodes.registryOverview.description', { defaultValue: 'Статус регистрации и последний отчёт Agent; подтверждение не означает активное соединение.' })}</CardDescription>
           </div>
-          <Badge variant="outline" className="shrink-0">{entries.length} {t('nodes.countLabel')}</Badge>
+          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+            {t('nodes.registryOverview.refresh', { defaultValue: 'Обновить список' })}
+          </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium">{t('nodes.registeredServers')}</span>
-          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>Обновить</Button>
+      <CardContent className="space-y-4 px-0">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={t('nodes.registryOverview.stats', { defaultValue: 'Статистика регистрации' })}>
+          {(['all', 'approved', 'pending', 'revoked'] as const).map(status => (
+            <button key={status} type="button" aria-pressed={registrationFilter === status}
+              className={`rounded-lg border px-3 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring ${registrationFilter === status ? 'border-primary bg-primary/5' : 'hover:bg-muted/40'}`}
+              onClick={() => setRegistrationFilter(status)}>
+              <span className="block text-xl font-semibold tabular-nums">{counts[status]}</span>
+              <span className="text-xs text-muted-foreground">{t(`nodes.registryOverview.${status}`, { defaultValue: status === 'all' ? 'Всего' : status === 'approved' ? 'Подтверждены' : status === 'pending' ? 'Ожидают' : 'Отозваны' })}</span>
+            </button>
+          ))}
         </div>
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
         {entries.length === 0 && !error && (
@@ -574,16 +586,35 @@ export default function NodeDiscoveryPanel() {
             )}
           </div>
         )}
-        <div className="space-y-2">
-          {entries.map(node => (
-            <div key={node.node_uuid} className="min-w-0 space-y-4 rounded-xl border p-4 shadow-sm">
+        {entries.length > 0 && visibleNodes.length === 0 && (
+          <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground" role="status">
+            {t('nodes.registryOverview.noMatches', { defaultValue: 'Узлов с таким статусом нет.' })}
+          </p>
+        )}
+        <div className="space-y-3">
+          {visibleNodes.map(node => (
+            <div key={node.node_uuid} className="min-w-0 space-y-4 rounded-xl border bg-card p-4">
               <div className="min-w-0 space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 break-words text-base font-semibold">{node.display_name}</span>
-                  <Badge variant={node.status === 'approved' ? 'green' : node.status === 'pending' ? 'yellow' : 'red'}>
-                    {t(`nodes.nodeStatus.${node.status}`, { defaultValue: node.status })}
-                  </Badge>
-                  <Badge variant="outline">{node.connection_mode === 'classic' ? 'Classic' : 'Discovery'}</Badge>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 break-words text-base font-semibold">{node.display_name}</span>
+                      <Badge variant={node.status === 'approved' ? 'outline' : node.status === 'pending' ? 'yellow' : 'red'}>
+                        {t(`nodes.nodeStatus.${node.status}`, { defaultValue: node.status })}
+                      </Badge>
+                      <Badge variant="secondary">{node.connection_mode === 'classic' ? 'Classic' : 'Discovery'}</Badge>
+                    </div>
+                    <p className="text-muted-foreground text-sm">
+                      {node.last_seen_at ? `${t('nodes.lastSeen')}: ${new Date(node.last_seen_at).toLocaleString()}` : t('nodes.awaitingFirstHeartbeat')}
+                      {' · '}{t('nodes.agentVersion')}: {node.node_version}
+                    </p>
+                  </div>
+                  {canApprove && !(node.node_uuid in nameEditors) && (
+                    <Button size="sm" variant="outline" className="shrink-0"
+                      onClick={() => setNameEditors(prev => ({ ...prev, [node.node_uuid]: node.display_name }))}>
+                      {t('nodes.registryOverview.rename', { defaultValue: 'Переименовать' })}
+                    </Button>
+                  )}
                 </div>
                 {canApprove && node.node_uuid in nameEditors && (
                   <div className="flex flex-wrap gap-2">
@@ -598,18 +629,9 @@ export default function NodeDiscoveryPanel() {
                     </Button>
                   </div>
                 )}
-                {canApprove && !(node.node_uuid in nameEditors) && (
-                  <Button size="sm" variant="outline"
-                    onClick={() => setNameEditors(prev => ({ ...prev, [node.node_uuid]: node.display_name }))}>
-                    Переименовать
-                  </Button>
-                )}
-                <p className="text-muted-foreground text-sm">
-                  {node.last_seen_at ? `${t('nodes.lastSeen')}: ${new Date(node.last_seen_at).toLocaleString()}` : t('nodes.awaitingFirstHeartbeat')}
-                  {' · '}{t('nodes.agentVersion')}: {node.node_version}
-                </p>
-                {canApprove && node.status !== 'revoked' && (
-                  <div className="space-y-2 rounded-md bg-muted/30 p-3">
+
+                {canApprove && node.status === 'approved' && (
+                  <div className="space-y-2 border-t pt-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button type="button" size="sm" variant="outline"
                         onClick={() => {
@@ -622,7 +644,7 @@ export default function NodeDiscoveryPanel() {
                         }}>
                         {releaseTarget === node.node_uuid ? t('nodes.releaseHide') : t('nodes.releaseSettings')}
                       </Button>
-                      {!node.capabilities?.includes('node.release.v1') && (
+                      {releaseTarget === node.node_uuid && !node.capabilities?.includes('node.release.v1') && (
                         <span className="text-muted-foreground text-xs">{t('nodes.releaseUnavailable')}</span>
                       )}
                     </div>
@@ -773,7 +795,7 @@ export default function NodeDiscoveryPanel() {
                       void readEditorCores()
                       void $fetch<TLSPresetSummary[]>('/api/tls-presets')
                         .then(setTlsPresetChoices).catch(() => setTlsPresetChoices([]))
-                    }} disabled={!node.capabilities?.includes('xray.protobuf.binary')}>Xray: управление (DEV)</Button>
+                    }} disabled={!node.capabilities?.includes('xray.protobuf.binary')}>Настройки Xray</Button>
                     <span className="text-muted-foreground text-xs">
                       {!node.capabilities?.includes('xray.protobuf.binary')
                         ? t('nodes.xrayNotSupported')

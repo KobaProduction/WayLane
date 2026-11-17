@@ -2119,6 +2119,7 @@
     "loadingReleases": "در حال بارگذاری نسخه‌ها..."
   },
   "nodes": {
+    "registryOverview": {"title": "فهرست نودها", "description": "وضعیت ثبت و آخرین گزارش Agent. تأیید به معنای اتصال فعال نیست.", "refresh": "به‌روزرسانی فهرست", "stats": "خلاصه ثبت نودها", "all": "همه", "approved": "تأییدشده", "pending": "در انتظار", "revoked": "لغوشده", "noMatches": "نودی با این وضعیت وجود ندارد", "rename": "تغییر نام"},
     "presets": { "title": "پیش‌تنظیم‌های Xray", "description": "مدیریت کلیدها و پیش‌تنظیم‌های پیکربندی Xray" },
     "title": "گره‌ها",
     "description": "مدیریت گره‌ها",

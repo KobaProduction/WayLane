@@ -64,6 +64,7 @@
   "alltime": "All time",
   "today": "Today",
   "nodes": {
+    "registryOverview": {"title": "Node registry", "description": "Registration and last Agent report. Approval does not mean connected.", "refresh": "Refresh list", "stats": "Registration overview", "all": "All", "approved": "Approved", "pending": "Pending", "revoked": "Revoked", "noMatches": "No nodes with this status", "rename": "Rename"},
     "presets": { "title": "Xray Presets", "description": "Manage Xray keys and configuration presets" },
     "title": "Nodes",
     "description": "Manage your nodes",
