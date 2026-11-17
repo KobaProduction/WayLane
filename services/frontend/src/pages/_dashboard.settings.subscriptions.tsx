@@ -1,4 +1,3 @@
-import { SubscriptionFirewallDesigner } from '@/features/subscriptions/components/subscription-firewall-designer'
 import { buildDefaultApplications } from '@/features/subscriptions/components/default-applications-catalog'
 import { SubscriptionApplicationSheet } from '@/features/subscriptions/components/subscription-application-sheet'
 import { SubscriptionApplicationsSection } from '@/features/subscriptions/components/subscription-applications-section'
@@ -27,6 +26,7 @@ import { useEffect, useState } from 'react'
 import { FieldErrors, useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { Link } from 'react-router'
 import { useSettingsContext } from './_dashboard.settings'
 
 export default function SubscriptionSettings() {
@@ -366,6 +366,10 @@ export default function SubscriptionSettings() {
 
   return (
     <div className="w-full">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+        <p className="text-sm text-muted-foreground">Сценарии ошибок подписок и события устройств настраиваются отдельно.</p>
+        <Link className="text-primary text-sm font-medium underline underline-offset-4" to="/subscription-firewall">Subscription Firewall</Link>
+      </div>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-6 p-4 sm:space-y-8 sm:py-6 lg:space-y-10 lg:py-8">
           <SubscriptionGeneralSettingsSection form={form} />
@@ -411,7 +415,6 @@ export default function SubscriptionSettings() {
         </form>
       </Form>
 
-      <SubscriptionFirewallDesigner />
 
       <SubscriptionApplicationSheet
         variant="create"

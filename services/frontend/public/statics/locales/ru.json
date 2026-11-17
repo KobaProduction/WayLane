@@ -1,4 +1,5 @@
 {
+  "subscriptionFirewall": { "title": "Subscription Firewall", "description": "Сообщения подписок и доставка событий устройств" },
   "subscriptionManageDevices": "Устройства",
   "subscriptionNoDevices": "Устройства пока не зарегистрированы",
   "subscriptionUnknownDevice": "Неизвестное устройство",

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type Template = { title: string; lines: string[] }
 type Editor = {
@@ -47,17 +48,24 @@ export function SubscriptionFirewallDesigner() {
   const [eventSummary, setEventSummary] = useState<Record<string, number>>({})
   const [preview, setPreview] = useState<{ base64_payload: string; announce: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const refresh = useCallback(async () => {
-    const [settings, rows, summary] = await Promise.all([
-      $fetch<Editor>(base),
-      $fetch<Event[]>(base + '/device-events'),
-      $fetch<Record<string, number>>(base + '/device-events/summary'),
-    ])
-    setConfig(settings)
-    setEvents(rows)
-    setEventSummary(summary)
+    try {
+      const [settings, rows, summary] = await Promise.all([
+        $fetch<Editor>(base),
+        $fetch<Event[]>(base + '/device-events'),
+        $fetch<Record<string, number>>(base + '/device-events/summary'),
+      ])
+      setConfig(settings)
+      setEvents(rows)
+      setEventSummary(summary)
+      setLoadError('')
+    } catch (error) {
+      setLoadError(message(error))
+      throw error
+    }
   }, [])
-  useEffect(() => { void refresh().catch(error => toast.error(message(error))) }, [refresh])
+  useEffect(() => { void refresh().catch(() => {}) }, [refresh])
 
   function updateTemplate(field: 'title' | 'lines', value: string) {
     setConfig(current => current ? {
@@ -114,17 +122,36 @@ export function SubscriptionFirewallDesigner() {
     })
   }
 
-  if (!config) return <p className="p-4 text-sm text-muted-foreground">Загрузка дизайнера…</p>
+  if (!config) return (
+    <div className="space-y-3 p-4" aria-live="polite">
+      {loadError ? (
+        <div role="alert" className="space-y-2 rounded-md border border-destructive/40 p-4 text-sm">
+          <p>Не удалось загрузить Subscription Firewall: {loadError}</p>
+          <Button type="button" variant="outline" onClick={() => void refresh().catch(() => {})}>Повторить загрузку</Button>
+        </div>
+      ) : <p className="text-sm text-muted-foreground">Загрузка Subscription Firewall…</p>}
+    </div>
+  )
   const template = config.scenarios[active]
 
-  return <div className="space-y-5 p-4">
+  return <div className="space-y-4 p-4">
+    {loadError && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 p-3 text-sm">
+      <span>Не удалось обновить данные: {loadError}</span>
+      <Button type="button" variant="outline" size="sm" onClick={() => void refresh().catch(() => {})}>Повторить</Button>
+    </div>}
+    <Tabs defaultValue="messages" className="w-full">
+      <TabsList className="w-full justify-start">
+        <TabsTrigger value="messages">Клиентские сообщения</TabsTrigger>
+        <TabsTrigger value="events">Вебхуки и события</TabsTrigger>
+      </TabsList>
+      <TabsContent value="messages" className="mt-4">
     <Card>
       <CardHeader>
-        <CardTitle>Subscription Firewall — дизайнер клиентских сообщений</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Legacy-формат для клиентских подписок: Base64 с информационными строками и заголовком announce.
-          Не применяется к HTML и запросам без HWID; проверка реального доступа остаётся обязательной.
-        </p>
+        <CardTitle>Шаблоны ответов подписки</CardTitle>
+        <p className="text-sm text-muted-foreground">Настройка сообщений для поддерживаемых клиентов при ошибках доступа.</p>
+        <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">О формате ответов</summary>
+          Base64 и заголовок announce не применяются к HTML и запросам без HWID. Проверка доступа остаётся обязательной.
+        </details>
       </CardHeader>
       <CardContent className="space-y-3">
         <label className="flex items-center gap-2 text-sm">
@@ -160,16 +187,16 @@ export function SubscriptionFirewallDesigner() {
         </div>}
       </CardContent>
     </Card>
+      </TabsContent>
+      <TabsContent value="events" className="mt-4">
     <Card>
       <CardHeader>
-        <CardTitle>Контроль устройств и webhook</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          События создания, изменения, удаления и сброса HWID подписываются HMAC SHA-256.
-          Секрет задаётся только в backend: WAYLANE_DEVICE_WEBHOOK_SECRET.
-          Недоставленные события сохраняются в БД и автоматически повторяются каждые 30 секунд,
-          когда наступает время следующей попытки (exponential backoff, максимум 10 попыток).
-          Уведомления о событиях устройств передаются внешним сервисам через webhook.
-        </p>
+        <CardTitle>Контроль устройств и вебхуки</CardTitle>
+        <p className="text-sm text-muted-foreground">Состояние доставки событий устройств и настройки внешнего webhook.</p>
+        <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">Защита и повторные отправки</summary>
+          События HWID подписываются HMAC SHA-256; секрет задаётся в Backend через WAYLANE_DEVICE_WEBHOOK_SECRET.
+          Недоставленные события сохраняются в БД, повторы выполняются до 10 попыток с увеличением задержки.
+        </details>
       </CardHeader>
       <CardContent className="space-y-3">
         <label className="flex items-center gap-2 text-sm">
@@ -224,5 +251,7 @@ export function SubscriptionFirewallDesigner() {
         </div>
       </CardContent>
     </Card>
+      </TabsContent>
+    </Tabs>
   </div>
 }

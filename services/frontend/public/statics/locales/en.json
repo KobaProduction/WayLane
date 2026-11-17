@@ -1,4 +1,5 @@
 {
+  "subscriptionFirewall": { "title": "Subscription Firewall", "description": "Subscription error messages and device event delivery" },
   "subscriptionManageDevices": "Devices",
   "subscriptionNoDevices": "No devices registered",
   "subscriptionUnknownDevice": "Unknown device",

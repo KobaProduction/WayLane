@@ -215,6 +215,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             },
           ]
         : []),
+      ...(hasPermission(admin, 'settings', 'read') && hasPermission(admin, 'settings', 'update')
+        ? [
+            {
+              title: 'subscriptionFirewall.title',
+              url: '/subscription-firewall',
+              icon: RssIcon,
+            },
+          ]
+        : []),
       ...(hasPermission(admin, 'nodes', 'stats')
         ? [
             {

@@ -32,6 +32,7 @@ const CleanupSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.
 const GeneralSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.general'))
 const HwidSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.hwid'))
 const SubscriptionSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.subscriptions'))
+const SubscriptionFirewallPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.subscription-firewall'))
 const WebhookSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.webhook'))
 const Statistics = lazyWithChunkRecovery(() => import('../pages/_dashboard.statistics'))
 const TemplatesLayout = lazyWithChunkRecovery(() => import('../pages/_dashboard.templates'))
@@ -100,6 +101,14 @@ export const router = createHashRouter([
         element: (
           <Suspense fallback={<LoadingSpinner />}>
             <Subscriptions />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/subscription-firewall',
+        element: (
+          <Suspense fallback={<LoadingSpinner />}>
+            <SubscriptionFirewallPage />
           </Suspense>
         ),
       },

@@ -1,4 +1,5 @@
 {
+  "subscriptionFirewall": { "title": "订阅防火墙", "description": "订阅错误消息与设备事件投递" },
   "subscriptionManageDevices": "设备",
   "subscriptionNoDevices": "暂无已注册设备",
   "subscriptionUnknownDevice": "未知设备",

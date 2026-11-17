@@ -1,4 +1,5 @@
 {
+  "subscriptionFirewall": { "title": "فایروال اشتراک", "description": "پیام‌های خطای اشتراک و تحویل رویداد دستگاه" },
   "subscriptionManageDevices": "دستگاه‌ها",
   "subscriptionNoDevices": "هنوز دستگاهی ثبت نشده است",
   "subscriptionUnknownDevice": "دستگاه ناشناس",
