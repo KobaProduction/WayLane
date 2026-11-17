@@ -114,6 +114,26 @@ func (f *fakeDocker) has(head string) bool {
 	}
 	return false
 }
+
+func TestEmbeddedRootlessDockerUsesPhysicalHostNetwork(t *testing.T) {
+	args := rootlessDockerdArgs()
+	actual := strings.Join(args, " ")
+	for _, required := range []string{
+		"--net=host", "--copy-up=/etc", "--copy-up=/run",
+		"docker-init -- dockerd", "--host=unix://" + dockerSocket,
+		"--storage-driver=vfs", "--tls=false",
+	} {
+		if !strings.Contains(actual, required) {
+			t.Fatalf("missing host-network RootlessKit argument %q", required)
+		}
+	}
+	for _, forbidden := range []string{"slirp4netns", "--port-driver", "--disable-host-loopback", "-p ", "--privileged"} {
+		if strings.Contains(actual, forbidden) {
+			t.Fatalf("rootless dockerd must not add private networking or privileged ports: %q", forbidden)
+		}
+	}
+}
+
 func TestAgentRejectsUnapprovedNodeImage(t *testing.T) {
 	for _, v := range []string{"", nodeSeed, "ubuntu:latest", "ghcr.io/kobaproduction/waylane-node:latest",
 		"ghcr.io/another/repo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

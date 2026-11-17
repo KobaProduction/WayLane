@@ -28,8 +28,8 @@ services:
     restart: "on-failure:3"
     init: true
     # The stable Agent shares the Linux host network namespace.
-    # Node and VPN Cores use host networking in the rootless engine.
-    # No static ports list: applications bind/unbind TCP/UDP dynamically.
+    # RootlessKit also uses host networking; no slirp/RootlessKit port mappings.
+    # Node and VPN Cores bind/unbind host TCP/UDP directly.
     network_mode: host
     user: "1000:1000"
     read_only: true

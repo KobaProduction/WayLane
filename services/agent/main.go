@@ -58,6 +58,21 @@ func checkDocker(ctx context.Context, run dockerRun) error {
 	}
 	return nil
 }
+
+// The outer Agent already uses the physical Linux host network namespace.
+// RootlessKit must preserve that namespace: Docker's stock dind-rootless
+// entrypoint defaults to slirp4netns (with a private port-driver), which
+// silently isolates even inner containers started with --network host.
+// Launch the same private dockerd beneath RootlessKit directly, omitting
+// all rootless port forwarding and the slirp-specific flags.
+func rootlessDockerdArgs() []string {
+	return []string{
+		"--net=host", "--copy-up=/etc", "--copy-up=/run",
+		"docker-init", "--", "dockerd", "--host=unix://" + dockerSocket,
+		"--storage-driver=vfs", "--tls=false",
+	}
+}
+
 func startDockerd(ctx context.Context) (<-chan error, error) {
 	if os.Geteuid() == 0 {
 		return nil, errors.New("Agent must not run as root")
@@ -65,7 +80,7 @@ func startDockerd(ctx context.Context) (<-chan error, error) {
 	if err := reclaimStaleContainerdRuntime(filepath.Join(filepath.Dir(dockerSocket), "docker/containerd")); err != nil {
 		return nil, fmt.Errorf("unsafe private Docker runtime state: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "dockerd-entrypoint.sh", "dockerd", "--host=unix://"+dockerSocket, "--storage-driver=vfs", "--tls=false")
+	cmd := exec.CommandContext(ctx, "rootlesskit", rootlessDockerdArgs()...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

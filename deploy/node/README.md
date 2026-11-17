@@ -134,11 +134,15 @@ Xray execution or externally reachable TCP/UDP VPN traffic.
 
 ## Host network and dynamic ports
 
-The outer Agent uses `network_mode: host`. Replaceable Node and VPN
-Cores use host networking on private rootless Docker 29.5 or later.
-There is no static Compose `ports:` map: a Core can change its UDP/TCP
-listeners at runtime without reinstalling Agent. The physical Linux host
-firewall/cloud security rules, Docker Desktop host networking, IPv6,
+The outer Agent uses `network_mode: host`. Its embedded RootlessKit is
+started directly with `--net=host` instead of the stock Docker rootless
+entrypoint's `slirp4netns` and builtin port-driver. Node and VPN Cores
+use `--network host` in the private Docker daemon and therefore share the
+Linux host network namespace. No RootlessKit port-forward API, static
+Compose `ports:` mapping, forwarding sidecar or per-Core Agent rule is
+necessary. A Core can change its unprivileged TCP/UDP listeners without
+reinstalling Agent; the physical router's port forwarding is independent.
+The Linux host firewall/cloud security rules, Docker Desktop host networking, IPv6,
 privileged ports (<1024) and TUN/UDP must be accepted separately.
 
 ## Experimental AWG 3.1 — isolated Docker Desktop only

@@ -17,6 +17,16 @@ uses only a private Unix socket at NODE_STATE_DIR/control/agent.sock:
 No inbound TCP management listener is created. Updates pull before cutover
 and attempt rollback to the prior Node image on startup failure.
 
+The outer Agent and its private RootlessKit daemon use the **same Linux host
+network namespace** (`rootlesskit --net=host`), and the inner Node/Core
+containers use `--network host` in that private daemon. Docker's stock
+`dind-rootless` entrypoint uses `slirp4netns` and a builtin port driver,
+so Agent deliberately launches RootlessKit/dockerd directly without either.
+This allows unprivileged TCP/UDP VPN listeners to bind the Linux host without
+manual RootlessKit port mappings; the external router/firewall remains a
+separate network responsibility. Existing private volumes, rootless UID
+mapping and Unix-only control are unchanged.
+
 The Agent and its Node/core children use host networking through rootless
 Docker 29.5+. The outer Agent stays UID 1000 (non-root). The inner Node
 runs as UID 0 **only inside the private rootless user namespace**, which maps
