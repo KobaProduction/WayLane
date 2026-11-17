@@ -165,12 +165,16 @@ Confirmed on the live machine **after a Coolify Agent restart**:
 - `rootlesskit` argv contains `--detach-netns`; the RootlessKit port API
   `/v1/ports` returned `null`, i.e. no active port-forward rule
 - host `ss` shows the Xray process directly listening on TCP `62051`
-- a remote connection from the independent Morshansk server to the
-  Tambov WAN TCP `62051` succeeded after Agent restart
+- a historical independent remote TCP probe reached the Tambov WAN TCP
+  `62051` after Agent restart; this external probe is no longer part of the test setup
 - WayLane Backend reported the existing Node connected and Xray desired
   generation `11/11` with `runtime_status=running`, no Xray error
 - a real subscription fetch returned HTTP 200 with VLESS/REALITY TCP
   pointing to `62051` (Google SNI), unchanged by the Agent restart
+
+Future WayLane tests are restricted by the operator to **Tambov → Tambov**.
+Do not deploy or reuse another server as a WayLane test client. A same-host
+handshake validates Xray locally, but does not independently prove WAN reachability.
 
 The **OpenWrt WAN → Tambov LAN** forward for TCP `62051` is still needed
 because Tambov itself has a private LAN address. RootlessKit no longer

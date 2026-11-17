@@ -6,6 +6,16 @@ import { validateCoreConfig } from '@waylane/core-kit'
 import { filterCoreKitIssuesHidingInboundClients } from './inbound-clients-issue-filter'
 import { sanitizeProfileInbounds } from './sanitize-inbound'
 
+/** Bindings returned by the protected Backend API, not inferred from user-editable Xray JSON. */
+export type ManagedCorePresetBinding = {
+  kind: 'reality' | 'vless' | 'routing'
+  inbound_tag: string
+  preset_id: string
+}
+
+// A syntactically valid *test-only* X25519 key. Never send it to Backend or store it in Core JSON.
+const VALIDATION_ONLY_REALITY_KEY = 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'
+
 function isEmptyCompiledConfig(config: unknown): boolean {
   return typeof config === 'object' && config !== null && !Array.isArray(config) && Object.keys(config as object).length === 0
 }
@@ -28,6 +38,74 @@ function isJsonValue(value: unknown): value is JsonValue {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null
+}
+
+function hasManagedBinding(bindings: readonly ManagedCorePresetBinding[], kind: ManagedCorePresetBinding['kind'], tag: string, presetId: unknown): boolean {
+  return typeof presetId === 'string' && bindings.some(binding =>
+    binding.kind === kind && binding.inbound_tag === tag && binding.preset_id === presetId,
+  )
+}
+
+/** A managed REALITY preset stores only public fields. The editor's placeholder must not become a persisted private key. */
+function omitManagedRealityPlaceholder(config: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(config.inbounds)) return config
+  let changed = false
+  const inbounds = config.inbounds.map(inbound => {
+    const item = asRecord(inbound)
+    const stream = asRecord(item?.streamSettings)
+    const reality = asRecord(stream?.realitySettings)
+    if (!item || !stream || !reality || typeof reality.waylanePresetId !== 'string' || reality.privateKey !== 'YOUR_PRIVATE_KEY') return inbound
+    const { privateKey: _placeholder, ...publicReality } = reality
+    changed = true
+    return { ...item, streamSettings: { ...stream, realitySettings: publicReality } }
+  })
+  return changed ? { ...config, inbounds } : config
+}
+
+/** Validate only *confirmed* managed projections with a synthetic key; never alter the saved public projection. */
+function managedValidationConfig(config: Record<string, unknown>, bindings: readonly ManagedCorePresetBinding[]): Record<string, unknown> {
+  if (bindings.length === 0) return config
+  let changed = false
+  const inbounds = Array.isArray(config.inbounds) ? config.inbounds.map(inbound => {
+    const item = asRecord(inbound)
+    if (!item || typeof item.tag !== 'string') return inbound
+    const stream = asRecord(item.streamSettings)
+    const reality = asRecord(stream?.realitySettings)
+    if (stream?.security === 'reality' && reality && hasManagedBinding(bindings, 'reality', item.tag, reality.waylanePresetId)) {
+      const { waylanePresetId: _reference, ...values } = reality
+      changed = true
+      return { ...item, streamSettings: { ...stream, realitySettings: { ...values, privateKey: VALIDATION_ONLY_REALITY_KEY } } }
+    }
+    const settings = asRecord(item.settings)
+    if (item.protocol === 'vless' && settings && hasManagedBinding(bindings, 'vless', item.tag, settings.waylanePresetId)) {
+      const { waylanePresetId: _reference, ...values } = settings
+      changed = true
+      return { ...item, settings: values }
+    }
+    return inbound
+  }) : undefined
+  const routing = asRecord(config.routing)
+  if (routing && hasManagedBinding(bindings, 'routing', '__routing__', routing.waylanePresetId)) {
+    const { waylanePresetId: _reference, ...values } = routing
+    return { ...config, ...(inbounds ? { inbounds } : {}), routing: values }
+  }
+  return changed && inbounds ? { ...config, inbounds } : config
+}
+
+/** xray-config-kit validates the form's private-key model before compiling JSON. */
+function managedValidationProfile(profile: Profile, config: Record<string, unknown>, bindings: readonly ManagedCorePresetBinding[]): Profile {
+  const prepared = prepareProfileForKit(profile)
+  const rawInbounds = config.inbounds
+  if (bindings.length === 0 || !Array.isArray(rawInbounds)) return prepared
+  const inbounds = prepared.inbounds.map((inbound, index) => {
+    const item = asRecord(rawInbounds[index])
+    const reality = asRecord(asRecord(item?.streamSettings)?.realitySettings)
+    const security = asRecord((inbound as { security?: unknown }).security)
+    if (!item || !reality || security?.type !== 'reality' || typeof inbound.tag !== 'string' ||
+        !hasManagedBinding(bindings, 'reality', inbound.tag, reality.waylanePresetId)) return inbound
+    return { ...inbound, security: { ...security, privateKey: VALIDATION_ONLY_REALITY_KEY } } as typeof inbound
+  })
+  return { ...prepared, inbounds }
 }
 
 function realityXverValue(value: unknown): number | undefined {
@@ -498,8 +576,8 @@ function applyWireguardOutboundSettingsFromProfile(profile: Profile, config: Rec
 /**
  * Issues from {@link buildXrayConfig} in strict mode when the profile does not compile (schema / semantic / unsafe patches, …).
  */
-export function getXrayStrictCompileBlockers(profile: Profile): Issue[] {
-  const { config, issues } = buildXrayConfig(prepareProfileForKit(profile), { mode: 'strict' })
+export function getXrayStrictCompileBlockers(profile: Profile, bindings: readonly ManagedCorePresetBinding[] = [], persisted?: Record<string, unknown>): Issue[] {
+  const { config, issues } = buildXrayConfig(managedValidationProfile(profile, persisted ?? profileToPersistedConfig(profile), bindings), { mode: 'strict' })
   if (!isEmptyCompiledConfig(config)) return []
   const errors = issues.filter(i => i.severity === 'error')
   return errors.length > 0 ? errors : issues
@@ -535,22 +613,22 @@ export function profileToPersistedConfig(profile: Profile): Record<string, unkno
   )
 
   const withTopLevel = applyFinalmaskFragmentCompatibilityToCompiledConfig(applyUnmodeledTopLevelSectionsToCompiledConfig(prepared, result))
-  return keepWireguardInboundStreamOptions(applyWireguardOutboundSettingsFromProfile(prepared, withTopLevel))
+  return omitManagedRealityPlaceholder(keepWireguardInboundStreamOptions(applyWireguardOutboundSettingsFromProfile(prepared, withTopLevel)))
 }
 
-export function validateProfileForSave(profile: Profile) {
+export function validateProfileForSave(profile: Profile, bindings: readonly ManagedCorePresetBinding[] = []) {
   const config = profileToPersistedConfig(profile)
-  return validateCoreConfig('xray', config)
+  return validateCoreConfig('xray', managedValidationConfig(config, bindings))
 }
 
 /**
  * Persist validation: strict-mode Xray compile blockers from xray-config-kit plus core-kit checks on permissive JSON
  * (inbound clients noise filtered out). Warnings and info-level issues do not block save.
  */
-export function validateProfileForPersist(profile: Profile): XrayPersistValidationResult {
-  const strictBlockers = getXrayStrictCompileBlockers(profile)
+export function validateProfileForPersist(profile: Profile, bindings: readonly ManagedCorePresetBinding[] = []): XrayPersistValidationResult {
   const config = profileToPersistedConfig(profile)
-  const r = validateCoreConfig('xray', config)
+  const strictBlockers = getXrayStrictCompileBlockers(profile, bindings, config)
+  const r = validateCoreConfig('xray', managedValidationConfig(config, bindings))
   const coreKitIssues = r.ok ? [] : filterCoreKitIssuesHidingInboundClients([...r.issues])
 
   const blockingStrict = strictBlockers.filter(i => i.severity !== 'warning' && i.severity !== 'info')
