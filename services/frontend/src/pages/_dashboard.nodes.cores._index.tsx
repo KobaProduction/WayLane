@@ -1,5 +1,5 @@
-import { CorePresetsPanel } from '@/features/nodes/components/core-presets-panel'
 import { useCallback, useMemo, useState } from 'react'
+import { Navigate, useSearchParams } from 'react-router'
 import Cores from '@/features/nodes/components/cores/cores-list'
 import { useGetAllCores, useDeleteCoreConfig, useCreateCoreConfig } from '@/service/api'
 import { toast } from 'sonner'
@@ -13,6 +13,7 @@ import { hasPermission } from '@/utils/rbac'
 import { translateHtml } from '@/utils/html-translation'
 
 export default function CoresIndexPage() {
+  const [searchParams] = useSearchParams()
   const { admin } = useAdmin()
   const canCreateCores = hasPermission(admin, 'cores', 'create')
   const canUpdateCores = hasPermission(admin, 'cores', 'update')
@@ -142,9 +143,14 @@ export default function CoresIndexPage() {
 
   const cores = useMemo(() => coresData?.cores ?? [], [coresData?.cores])
 
+  const oldPresetParam = searchParams.get('presets')
+  if (oldPresetParam) {
+    const kind = ['reality', 'vless', 'routing'].includes(oldPresetParam) ? oldPresetParam : 'reality'
+    return <Navigate to={`/nodes/presets?kind=${kind}`} replace />
+  }
+
   return (
     <div className="flex flex-col px-4">
-      <CorePresetsPanel canCreate={canCreateCores} canUpdate={canUpdateCores} canDelete={canDeleteCores} />
       <Cores
         cores={cores}
         onDuplicateCore={canCreateCores ? handleDuplicateCore : undefined}

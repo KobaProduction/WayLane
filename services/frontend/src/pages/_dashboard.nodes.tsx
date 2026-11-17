@@ -3,7 +3,7 @@ import PageTransition from '@/components/layout/page-transition'
 import { useAdmin } from '@/hooks/use-admin'
 import { getDocsUrl } from '@/utils/docs-url'
 import { hasPermission } from '@/utils/rbac'
-import { Cpu, LucideIcon, Share2, Plus, Logs, Network, KeyRound } from 'lucide-react'
+import { Cpu, LucideIcon, Share2, Plus, Logs, Network, KeyRound, FileCode2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation, useNavigate } from 'react-router'
@@ -21,6 +21,7 @@ interface Tab {
 const tabs: Tab[] = [
   { id: 'nodes.title', label: 'nodes.title', icon: Share2, url: '/nodes' },
   { id: 'core', label: 'core', icon: Cpu, url: '/nodes/cores' },
+  { id: 'nodes.presets.title', label: 'nodes.presets.title', icon: FileCode2, url: '/nodes/presets' },
   { id: 'nodes.wireguard.title', label: 'nodes.wireguard.title', icon: Network, url: '/nodes/wireguard' },
   { id: 'nodes.tokens.title', label: 'nodes.tokens.title', icon: KeyRound, url: '/nodes/tokens' },
   { id: 'nodes.logs.title', label: 'nodes.logs.title', icon: Logs, url: '/nodes/logs' },
@@ -39,6 +40,7 @@ const Settings = () => {
   const visibleTabs = tabs.filter(tab => {
     if (tab.url === '/nodes') return canReadNodes
     if (tab.url === '/nodes/cores') return canReadCores
+    if (tab.url === '/nodes/presets') return canReadCores
     if (tab.url === '/nodes/wireguard') return canReadCores
     if (tab.url === '/nodes/logs') return canReadNodeLogs
     if (tab.url === '/nodes/tokens') return canReadNodes
@@ -115,6 +117,9 @@ const Settings = () => {
         buttonText: undefined,
         onButtonClick: undefined,
       }
+    }
+    if (location.pathname === '/nodes/presets') {
+      return { title: 'nodes.presets.title', description: 'nodes.presets.description', buttonIcon: undefined, buttonText: undefined, onButtonClick: undefined }
     }
     if (location.pathname === '/nodes/tokens') {
       return { title: 'nodes.tokens.title', description: 'nodes.tokens.description', buttonIcon: undefined, buttonText: undefined, onButtonClick: undefined }

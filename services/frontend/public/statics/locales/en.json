@@ -63,6 +63,7 @@
   "alltime": "All time",
   "today": "Today",
   "nodes": {
+    "presets": { "title": "Xray Presets", "description": "Manage Xray keys and configuration presets" },
     "title": "Nodes",
     "description": "Manage your nodes",
     "addNode": "Create Node",

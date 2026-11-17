@@ -28,6 +28,7 @@ type TabDef = { id: string; labelKey: string; icon: LucideIcon; url: string }
 const NODES_TABS: TabDef[] = [
   { id: 'nodes.title', labelKey: 'nodes.title', icon: Share2, url: '/nodes' },
   { id: 'core', labelKey: 'core', icon: Cpu, url: '/nodes/cores' },
+  { id: 'nodes.presets.title', labelKey: 'nodes.presets.title', icon: FileCode2, url: '/nodes/presets' },
   { id: 'nodes.wireguard.title', labelKey: 'nodes.wireguard.title', icon: Network, url: '/nodes/wireguard' },
   { id: 'nodes.tokens.title', labelKey: 'nodes.tokens.title', icon: KeyRound, url: '/nodes/tokens' },
   { id: 'nodes.logs.title', labelKey: 'nodes.logs.title', icon: Logs, url: '/nodes/logs' },
@@ -50,6 +51,7 @@ const TEMPLATES_TABS: TabDef[] = [
 
 function nodesActiveTabId(pathname: string): string {
   if (pathname.startsWith('/nodes/cores')) return 'core'
+  if (pathname.startsWith('/nodes/presets')) return 'nodes.presets.title'
   if (pathname.startsWith('/nodes/wireguard')) return 'nodes.wireguard.title'
   if (pathname.startsWith('/nodes/tokens')) return 'nodes.tokens.title'
   if (pathname.startsWith('/nodes/logs')) return 'nodes.logs.title'
@@ -59,6 +61,9 @@ function nodesActiveTabId(pathname: string): string {
 function nodesHeader(pathname: string): { title: string; description: string } {
   if (pathname.startsWith('/nodes/cores')) {
     return { title: 'settings.cores.title', description: 'settings.cores.description' }
+  }
+  if (pathname.startsWith('/nodes/presets')) {
+    return { title: 'nodes.presets.title', description: 'nodes.presets.description' }
   }
   if (pathname.startsWith('/nodes/wireguard')) {
     return { title: 'nodes.wireguard.title', description: 'nodes.wireguard.description' }

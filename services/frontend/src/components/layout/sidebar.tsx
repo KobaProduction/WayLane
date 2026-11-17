@@ -90,6 +90,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             matchPrefix: true,
           },
           {
+            title: 'nodes.presets.title',
+            url: '/nodes/presets',
+            icon: FileCode2,
+          },
+          {
             title: 'TLS-сертификаты',
             url: '/tls-presets',
             icon: Lock,

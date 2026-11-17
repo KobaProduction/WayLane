@@ -33,23 +33,27 @@ function valuesFor(kind: Kind): Record<string, string> {
       : { routing: '{\n  "domainStrategy": "AsIs",\n  "rules": []\n}' }
 }
 
-export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
+export function CorePresetsPanel({ canCreate, canUpdate, canDelete, standalone = false }: {
   canCreate: boolean
   canUpdate: boolean
   canDelete: boolean
+  standalone?: boolean
 }) {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [presets, setPresets] = useState<Preset[]>([])
   const [cores, setCores] = useState<CoreTarget[]>([])
   const [bindings, setBindings] = useState<Binding[]>([])
-  const [kind, setKind] = useState<Kind>('reality')
+  const [kind, setKind] = useState<Kind>(() => {
+    const requested = searchParams.get('kind') ?? searchParams.get('presets')
+    return requested === 'vless' || requested === 'routing' ? requested : 'reality'
+  })
   const [editing, setEditing] = useState('')
   const [name, setName] = useState('')
-  const [fields, setFields] = useState<Record<string, string>>(valuesFor('reality'))
+  const [fields, setFields] = useState<Record<string, string>>(() => valuesFor(kind))
   const [selectedCore, setSelectedCore] = useState('')
   const [selectedInbound, setSelectedInbound] = useState('')
   const [busy, setBusy] = useState(false)
-  const [expanded, setExpanded] = useState(() => searchParams.get('presets') === 'reality')
+  const [expanded, setExpanded] = useState(() => standalone || searchParams.get('presets') === 'reality')
   const [applyNeeded, setApplyNeeded] = useState<number[]>([])
   const load = useCallback(async () => {
     const [items, targets, attached] = await Promise.all([
@@ -80,6 +84,7 @@ export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
   function chooseKind(typ: Kind) {
     setKind(typ)
     reset(typ)
+    if (standalone) setSearchParams({ kind: typ }, { replace: true })
   }
   function selectPreset(preset: Preset) {
     setEditing(preset.id)
@@ -171,11 +176,11 @@ export function CorePresetsPanel({ canCreate, canUpdate, canDelete }: {
           В конфигурации ядра остаются ссылки и публичные данные.
         </p>
       </div>
-      <Button className="w-full shrink-0 sm:w-auto" variant="outline" onClick={() => setExpanded(value => !value)}>
+      {!standalone && <Button className="w-full shrink-0 sm:w-auto" variant="outline" onClick={() => setExpanded(value => !value)}>
         {expanded ? 'Свернуть' : 'Открыть пресеты'}
-      </Button>
+      </Button>}
     </CardHeader>
-    {expanded && <CardContent className="space-y-5">
+    {(standalone || expanded) && <CardContent className="space-y-5">
       <div className="flex flex-wrap gap-2">
         {(['reality', 'vless', 'routing'] as const).map(type => (
           <Button key={type} size="sm" variant={kind === type ? 'default' : 'outline'} onClick={() => chooseKind(type)}>

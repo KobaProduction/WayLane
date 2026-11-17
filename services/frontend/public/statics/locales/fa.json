@@ -2118,6 +2118,7 @@
     "loadingReleases": "در حال بارگذاری نسخه‌ها..."
   },
   "nodes": {
+    "presets": { "title": "پیش‌تنظیم‌های Xray", "description": "مدیریت کلیدها و پیش‌تنظیم‌های پیکربندی Xray" },
     "title": "گره‌ها",
     "description": "مدیریت گره‌ها",
     "addNode": "افزودن گره",

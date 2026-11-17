@@ -62,6 +62,7 @@
   "today": "今天",
   "create": "创建",
   "nodes": {
+    "presets": { "title": "Xray 预设", "description": "管理 Xray 密钥和配置预设" },
     "title": "节点",
     "description": "管理您的节点",
     "addNode": "添加节点",

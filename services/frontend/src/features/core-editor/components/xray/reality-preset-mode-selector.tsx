@@ -10,6 +10,7 @@ import { useAdmin } from '@/hooks/use-admin'
 import { hasPermission } from '@/utils/rbac'
 import { generateRealityKeyPair } from '@/lib/xray-generation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { toast } from 'sonner'
 
 export type RealityKeyMode = 'manual' | 'preset'
@@ -178,7 +179,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" disabled={!ready || !selectedValue || selectedValue === binding || mismatch} size="sm" onClick={() => void changePreset()}>{binding ? 'Заменить привязку' : 'Привязать пресет'}</Button>
             <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>Обновить список</Button>
-            <a className="text-xs text-primary underline" href="#/nodes/cores?presets=reality" target="_blank" rel="noopener noreferrer">Создать / управлять ключами и пресетами</a>
+            <Link className="text-xs text-primary underline" to="/nodes/presets?kind=reality" target="_blank" rel="noopener noreferrer">Управление пресетами</Link>
           </div>
           {binding && selectedValue === binding && verified && <p className="text-xs text-muted-foreground">Этот пресет уже привязан к inbound.</p>}
           <p className="text-xs text-muted-foreground">Для ядра, назначенного Node, изменение привязки запрещено сервером. Сначала потребуется безопасное переназначение профиля.</p>

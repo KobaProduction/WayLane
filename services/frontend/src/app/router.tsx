@@ -25,6 +25,7 @@ const Nodes = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes'))
 const NodesPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes._index'))
 const NodeLogs = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.logs'))
 const NodeTokens = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.tokens'))
+const XrayPresets = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.presets'))
 const NodeWireGuard = lazyWithChunkRecovery(() => import('../pages/_dashboard.nodes.wireguard'))
 const Settings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings'))
 const CleanupSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.cleanup'))
@@ -159,6 +160,14 @@ export const router = createHashRouter([
                 ),
               },
             ],
+          },
+          {
+            path: '/nodes/presets',
+            element: (
+              <Suspense fallback={<LoadingSpinner />}>
+                <XrayPresets />
+              </Suspense>
+            ),
           },
           {
             path: '/nodes/tokens',
