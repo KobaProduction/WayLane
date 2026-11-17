@@ -148,6 +148,39 @@ run Node and VPN Cores with `--network host` as the existing launcher does.
 The host firewall/cloud security rules, IPv6, privileged ports (<1024),
 Docker Desktop host settings and TUN/UDP remain independent acceptance gates.
 
+## Tambov host-network acceptance — 2026-11-17
+
+On the existing WayLane DEV Node, the installed Agent image at Git commit
+`a772939` uses the vendor `dockerd-entrypoint.sh` with RootlessKit
+`--detach-netns`. The daemon retains its private `slirp4netns` network for
+Docker internals; the Node and Xray child containers use `--network host`
+and share the **physical Tambov Linux host network**. This is not the
+unsupported RootlessKit `--net=host` mode.
+
+Confirmed on the live machine **after a Coolify Agent restart**:
+
+- `WayLane / Node` is `running:healthy` with zero recorded container
+  restarts in the inspected state; private rootless Docker is available
+  and its Node and Xray child containers are both running with host network
+- `rootlesskit` argv contains `--detach-netns`; the RootlessKit port API
+  `/v1/ports` returned `null`, i.e. no active port-forward rule
+- host `ss` shows the Xray process directly listening on TCP `62051`
+- a remote connection from the independent Morshansk server to the
+  Tambov WAN TCP `62051` succeeded after Agent restart
+- WayLane Backend reported the existing Node connected and Xray desired
+  generation `11/11` with `runtime_status=running`, no Xray error
+- a real subscription fetch returned HTTP 200 with VLESS/REALITY TCP
+  pointing to `62051` (Google SNI), unchanged by the Agent restart
+
+The **OpenWrt WAN → Tambov LAN** forward for TCP `62051` is still needed
+because Tambov itself has a private LAN address. RootlessKit no longer
+requires any additional forwarding; Agent restart restores the listener
+without re-registering a port. The previous hand-added RootlessKit rule
+is not part of this accepted design. A full REALITY handshake from an
+independent WAN client, UDP and TUN traffic, and whole-host reboot
+recovery remain unverified; an accepted TCP handshake is not proof of
+all VPN transports.
+
 ## Experimental AWG 3.1 — isolated Docker Desktop only
 
 Both generic Compose profiles default `AWG_EXPERIMENTAL_DEV` to `false`.
