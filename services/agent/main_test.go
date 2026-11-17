@@ -124,6 +124,7 @@ func TestEmbeddedRootlessDockerUsesPhysicalHostNetwork(t *testing.T) {
 		"--storage-driver=vfs", "--tls=false",
 		"--bridge=none", "--iptables=false", "--ip6tables=false",
 		"--ip-forward=false", "--ip-masq=false",
+		"--pidfile=/tmp/waylane-dockerd.pid",
 	} {
 		if !strings.Contains(actual, required) {
 			t.Fatalf("missing host-network RootlessKit argument %q", required)

@@ -27,8 +27,11 @@ manual RootlessKit port mappings. Because only host-networked Node and
 Core containers are supported, the private daemon has its default bridge
 and all Docker iptables/masquerading disabled: rootless processes must not
 attempt to modify the physical host's NAT tables. The external router/firewall
-remains a separate network responsibility. Existing private volumes, rootless
-UID mapping and Unix-only control are unchanged.
+remains a separate network responsibility. The dockerd PID file is placed in
+Agent's ephemeral `/tmp` tmpfs, not the persisted rootless runtime volume, so
+an obsolete PID from a former namespace cannot block a later restart.
+Existing private volumes, rootless UID mapping and Unix-only control are
+unchanged.
 
 The Agent and its Node/core children use host networking through rootless
 Docker 29.5+. The outer Agent stays UID 1000 (non-root). The inner Node

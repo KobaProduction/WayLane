@@ -75,6 +75,10 @@ func rootlessDockerdArgs() []string {
 		// bridge interfaces or iptables rules there.
 		"--bridge=none", "--iptables=false", "--ip6tables=false",
 		"--ip-forward=false", "--ip-masq=false",
+		// The durable rootless-run volume retains an obsolete docker.pid from
+		// an earlier PID namespace. Avoid false "PID is still running" errors
+		// on Agent restart by keeping this daemon-only pidfile on tmpfs.
+		"--pidfile=/tmp/waylane-dockerd.pid",
 	}
 }
 
