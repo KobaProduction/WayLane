@@ -5,6 +5,8 @@ command -v bun >/dev/null || { echo "Bun is required" >&2; exit 2; }
 bun install --frozen-lockfile
 bun run build:vendor-kits
 bun test vendor/core-kit/tests vendor/wireguard-config-kit/tests vendor/xray-config-kit/tests
+# UI regressions have their own contracts; the vendor tests alone do not cover the application.
+bun test src/features/core-editor src/features/nodes src/features/subscriptions src/features/tls
 
 # The default gate runs the project's pinned TypeScript 5 compiler.
 # The low-memory native gate is intended for 2 GiB development containers;

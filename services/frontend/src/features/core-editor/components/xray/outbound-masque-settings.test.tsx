@@ -36,8 +36,9 @@ test('MASQUE outbound: security and transport issues are left to the stream sele
   const html = render(masqueOutbound({ network: 'masque', security: 'none' }, { mux: { enabled: true } }))
   // Shown under the security select of the stream accordion instead.
   assert.ok(!html.includes('MASQUE requires TLS'))
-  // Xray v26.10.17 accepts mux on MASQUE outbounds; the kit only warns for older releases.
-  assert.equal(count(html, 'v26.10.10 and older'), 1)
+  // The accepted release comes from Xray metadata and may move as upstream withdraws builds.
+  assert.equal(count(html, 'on MASQUE outbounds needs Xray'), 1)
+  assert.ok(html.includes('earlier downloadable releases refuse it'))
 })
 
 test('MASQUE outbound: the box shows the issues the dialog passes and runs no kit check of its own', () => {

@@ -11,7 +11,7 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -327,14 +327,58 @@ async def test_admin_designer_persists_edits_and_previews_encoded_payload(tmp_pa
                 },
                 webhook_enabled=False,
             )
-            result = await save_firewall_editor(config, db, None)
+            result = await save_firewall_editor(config, Response(), db, None, if_match=None)
             assert result.enabled
-            stored = await get_firewall_editor(db, None)
+            stored = await get_firewall_editor(Response(), db, None)
             assert stored.scenarios["device_limit"].title == "Слишком много устройств"
             preview = await preview_message("device_limit", stored.scenarios["device_limit"], None)
             uri = base64.b64decode(preview["base64_payload"]).decode("utf-8")
             assert uri.startswith("ss://")
             assert unquote(uri.split("#", 1)[1]) == "Удалите неиспользуемое устройство"
+    finally:
+        await engine.dispose()
+
+
+
+
+@pytest.mark.asyncio
+async def test_admin_editor_etag_rejects_stale_tab_without_overwriting_config(tmp_path):
+    from app.routers.subscription_firewall import get_firewall_editor, save_firewall_editor
+
+    engine = create_async_engine("sqlite+aiosqlite:///" + str(tmp_path / "etag.db"))
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    try:
+        async with factory() as tab_a, factory() as tab_b:
+            first_headers = Response()
+            original = await get_firewall_editor(first_headers, tab_a, None)
+            initial_etag = first_headers.headers["etag"]
+            assert initial_etag.startswith('"') and initial_etag.endswith('"')
+
+            changed_a = original.model_copy(update={"enabled": True})
+            saved_headers = Response()
+            saved = await save_firewall_editor(changed_a, saved_headers, tab_a, None, if_match=initial_etag)
+            assert saved.enabled is True
+            assert saved_headers.headers["etag"] != initial_etag
+            assert saved_headers.headers["cache-control"] == "no-store"
+
+            stale_change = original.model_copy(update={"webhook_url": "https://example.com/stale"})
+            with pytest.raises(HTTPException) as conflict:
+                await save_firewall_editor(stale_change, Response(), tab_b, None, if_match=initial_etag)
+            assert conflict.value.status_code == 409
+
+            current_headers = Response()
+            current = await get_firewall_editor(current_headers, tab_b, None)
+            assert current.enabled is True
+            assert current.webhook_url is None
+            assert current_headers.headers["etag"] == saved_headers.headers["etag"]
+
+            after_edit = current.model_copy(update={"webhook_url": "https://example.com/new"})
+            after_headers = Response()
+            await save_firewall_editor(after_edit, after_headers, tab_b, None, if_match=current_headers.headers["etag"])
+            assert after_headers.headers["etag"] != current_headers.headers["etag"]
+            assert (await get_firewall_editor(Response(), tab_a, None)).webhook_url == "https://example.com/new"
     finally:
         await engine.dispose()
 

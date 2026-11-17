@@ -1,13 +1,16 @@
 """Admin editor for embedded Subscription Firewall messages and signed device webhooks."""
 
+import hashlib
+import json
 import os
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.db import get_db
 from app.db.subscription_firewall import subscription_device_events, subscription_firewall_config
@@ -17,7 +20,7 @@ from app.subscription.device_webhook import (
     retry_pending_events,
     validate_webhook_url,
 )
-from app.subscription.firewall import load_config, render_message
+from app.subscription.firewall import SCENARIOS, load_config, render_message
 
 from .authentication import require_permission
 
@@ -62,27 +65,75 @@ class FirewallEditor(BaseModel):
         return self
 
 
+def _config_etag(value: FirewallEditor) -> str:
+    """Strong, canonical ETag over the effective admin-editable configuration."""
+    canonical = json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return '"' + hashlib.sha256(canonical.encode("utf-8")).hexdigest() + '"'
+
+
+def _editor_from_row(row: dict | None) -> FirewallEditor:
+    if row is None:
+        return FirewallEditor(scenarios=SCENARIOS)
+    data = dict(row)
+    data["scenarios"] = {**SCENARIOS, **(row["scenarios"] or {})}
+    return FirewallEditor(**{key: value for key, value in data.items() if key in FirewallEditor.model_fields})
+
+
 @router.get("", response_model=FirewallEditor)
 async def get_firewall_editor(
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("settings", "read")),
 ):
     data = await load_config(db)
-    return FirewallEditor(**{key: value for key, value in data.items() if key in FirewallEditor.model_fields})
+    editor = FirewallEditor(**{key: value for key, value in data.items() if key in FirewallEditor.model_fields})
+    response.headers["ETag"] = _config_etag(editor)
+    response.headers["Cache-Control"] = "no-store"
+    return editor
 
 
 @router.put("", response_model=FirewallEditor)
 async def save_firewall_editor(
     body: FirewallEditor,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _: AdminDetails = Depends(require_permission("settings", "update")),
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ):
     if body.webhook_enabled and len(os.getenv("WAYLANE_DEVICE_WEBHOOK_SECRET", "")) < 32:
         raise HTTPException(422, "Set WAYLANE_DEVICE_WEBHOOK_SECRET (at least 32 characters) on the backend")
+    # PostgreSQL serializes edits to the existing singleton row. This check and
+    # its update share one transaction so two admin tabs cannot both replace it.
+    row = (
+        await db.execute(
+            select(subscription_firewall_config)
+            .where(subscription_firewall_config.c.id == 1)
+            .with_for_update()
+        )
+    ).mappings().one_or_none()
+    current = _editor_from_row(row)
+    if if_match is not None and if_match != _config_etag(current):
+        await db.rollback()
+        raise HTTPException(409, "Subscription Firewall settings changed; reload before saving")
+
     data = body.model_dump(mode="json")
-    await db.execute(delete(subscription_firewall_config).where(subscription_firewall_config.c.id == 1))
-    await db.execute(insert(subscription_firewall_config).values(id=1, **data))
-    await db.commit()
+    try:
+        if row is None:
+            # A competing first writer can create the singleton after our empty
+            # read. Treat the unique constraint as a conflict, not a 500 error.
+            await db.execute(insert(subscription_firewall_config).values(id=1, **data))
+        else:
+            await db.execute(
+                update(subscription_firewall_config)
+                .where(subscription_firewall_config.c.id == 1)
+                .values(**data)
+            )
+        await db.commit()
+    except IntegrityError as error:
+        await db.rollback()
+        raise HTTPException(409, "Subscription Firewall settings changed; reload before saving") from error
+    response.headers["ETag"] = _config_etag(body)
+    response.headers["Cache-Control"] = "no-store"
     return body
 
 
