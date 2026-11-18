@@ -23,5 +23,6 @@ from app.db import (
     core_presets as _core_presets_tables,  # noqa: F401
     host_balancer as _host_balancer_tables,  # noqa: F401
     subscription_firewall as _subscription_firewall_tables,  # noqa: F401
+    subscription_response_policy as _subscription_response_policy_tables,  # noqa: F401
     tls as _tls_tables,  # noqa: F401
 )

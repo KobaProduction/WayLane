@@ -206,21 +206,24 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             },
           ]
         : []),
-      ...(hasPermission(admin, 'subscriptions', 'read')
+      ...(hasPermission(admin, 'subscriptions', 'read') || hasPermission(admin, 'settings', 'read')
         ? [
             {
               title: 'subscriptions',
-              url: '/subscriptions',
+              url: hasPermission(admin, 'subscriptions', 'read')
+                ? '/subscriptions' : '/subscriptions/response-policies',
               icon: UsersIcon,
-            },
-          ]
-        : []),
-      ...(hasPermission(admin, 'settings', 'read')
-        ? [
-            {
-              title: 'subscriptionFirewall.title',
-              url: '/subscription-firewall',
-              icon: RssIcon,
+              items: [
+                ...(hasPermission(admin, 'subscriptions', 'read')
+                  ? [{ title: 'subscriptions', url: '/subscriptions', icon: UsersIcon }]
+                  : []),
+                ...(hasPermission(admin, 'settings', 'read')
+                  ? [
+                      { title: 'subscriptionResponsePolicy.title', url: '/subscriptions/response-policies', icon: RssIcon },
+                      { title: 'subscriptionDevicesWorkspace.title', url: '/subscriptions/devices', icon: RssIcon },
+                    ]
+                  : []),
+              ],
             },
           ]
         : []),

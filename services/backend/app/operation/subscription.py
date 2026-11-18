@@ -25,6 +25,7 @@ from app.models.subscription_models import SubscriptionAccessResponse, Subscript
 from app.settings import hwid_settings, subscription_settings
 from app.subscription import sub_update_buffer as _sub_update_buffer  # noqa: F401  # registers per-worker flush loop
 from app.subscription.device_webhook import check_legacy_device_access
+from app.subscription.response_policy import load_response_policy, matches_success_denial
 from app.subscription.share import (
     apply_custom_format_variables,
     encode_title,
@@ -94,6 +95,16 @@ client_config = {
 
 
 class SubscriptionOperation(BaseOperation):
+    async def reject_blocked_client(self, db: AsyncSession, user_agent: str) -> None:
+        """Enforce UA-specific denial consistently across public subscription routes.
+
+        User-Agent is spoofable, so this is a delivery policy, not a durable
+        revocation of previously issued VPN access on the Node.
+        """
+        policy, _ = await load_response_policy(db)
+        if matches_success_denial(policy, user_agent):
+            await self.raise_error(message="Client blocked by delivery policy", code=403)
+
     _ENCODED_RULE_RESPONSE_HEADERS: ClassVar[set[str]] = {"announce", "profile-title"}
     _ALWAYS_HTTP_HEADERS: ClassVar[set[str]] = {"content-disposition", "cache-control"}
     _BODY_PLACEMENT_FORMATS: ClassVar[set[ConfigFormat]] = {
@@ -486,6 +497,7 @@ class SubscriptionOperation(BaseOperation):
             )
         role_hwid_settings = db_user.admin.role.hwid if db_user.admin and db_user.admin.role else None
         user = await self.validated_subscription(db_user)
+        await self.reject_blocked_client(db, user_agent)
         is_browser_request = "text/html" in accept_header
         is_subscription_page_request = is_browser_request and not sub_settings.disable_sub_template
         if is_subscription_page_request:
@@ -617,6 +629,7 @@ class SubscriptionOperation(BaseOperation):
         token: str,
         client_type: ConfigFormat,
         request_url: str = "",
+        user_agent: str = "",
         x_hwid: str | None = None,
         x_device_os: str | None = None,
         x_ver_os: str | None = None,
@@ -636,6 +649,7 @@ class SubscriptionOperation(BaseOperation):
                 **self._SUB_CONFIG_LOAD,
             )
         user = await self.validated_subscription(db_user)
+        await self.reject_blocked_client(db, user_agent)
 
         await self.validate_and_register_hwid(
             db,
@@ -716,10 +730,13 @@ class SubscriptionOperation(BaseOperation):
             "headers": headers,
         }
 
-    async def user_subscription_raw(self, db: AsyncSession, token: str, request_url: str = ""):
+    async def user_subscription_raw(
+        self, db: AsyncSession, token: str, request_url: str = "", user_agent: str = ""
+    ):
         sub_settings: SubSettings = await subscription_settings()
         db_user = await self.get_validated_sub(db, token, load_admin_role=True, **self._SUB_CONFIG_LOAD)
         user = await self.validated_subscription(db_user)
+        await self.reject_blocked_client(db, user_agent)
         is_hwid_enabled = await self.is_user_hwid_enabled(db_user)
 
         links = []
@@ -792,12 +809,13 @@ class SubscriptionOperation(BaseOperation):
         return Response(content=conf, media_type=media_type, headers=response_headers)
 
     async def get_subscription_info(
-        self, db: AsyncSession, token: str, ip: str | None = None
+        self, db: AsyncSession, token: str, ip: str | None = None, user_agent: str = ""
     ) -> tuple[SubscriptionAccessResponse, dict]:
         """Retrieves detailed information about the user's subscription."""
         sub_settings: SubSettings = await subscription_settings()
         db_user = await self.get_validated_sub(db, token=token, **self._SUB_INFO_LOAD)
         user = await self.validated_subscription(db_user)
+        await self.reject_blocked_client(db, user_agent)
 
         response_headers = self.create_info_response_headers(user, sub_settings)
         try:
@@ -810,12 +828,15 @@ class SubscriptionOperation(BaseOperation):
 
         return user_response, response_headers
 
-    async def get_subscription_apps(self, db: AsyncSession, token: str) -> list[Application]:
+    async def get_subscription_apps(
+        self, db: AsyncSession, token: str, user_agent: str = ""
+    ) -> list[Application]:
         """
         Get available applications for user's subscription.
         """
         db_user = await self.get_validated_sub(db, token=token, load_admin_role=True, **self._SUB_CONFIG_LOAD)
         user = await self.validated_subscription(db_user)
+        await self.reject_blocked_client(db, user_agent)
         is_hwid_enabled = await self.is_user_hwid_enabled(db_user)
         sub_settings: SubSettings = await subscription_settings()
         format_variables = await self.get_format_variables(user)
@@ -855,6 +876,7 @@ class SubscriptionOperation(BaseOperation):
         sub_settings: SubSettings = await subscription_settings()
         db_user = await self.get_validated_sub(db, token, load_admin_role=True, **self._SUB_CONFIG_LOAD)
         user = await self.validated_subscription(db_user)
+        await self.reject_blocked_client(db, user_agent)
         is_browser_request = "text/html" in accept_header
         is_subscription_page_request = is_browser_request and not sub_settings.disable_sub_template
         if is_subscription_page_request:
@@ -906,6 +928,7 @@ class SubscriptionOperation(BaseOperation):
         db: AsyncSession,
         token: str,
         query: SubscriptionUsageQuery,
+        user_agent: str = "",
     ) -> SubscriptionUsageStatsList:
         """Fetches the usage statistics for the user within a specified date range."""
         start, end = await self.validate_dates(query.start, query.end, True)
@@ -919,4 +942,5 @@ class SubscriptionOperation(BaseOperation):
             load_groups=False,
         )
 
+        await self.reject_blocked_client(db, user_agent)
         return await get_subscription_usages(db, db_user.uuid, start, end, query.period)

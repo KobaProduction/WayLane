@@ -2,7 +2,7 @@ import { Suspense } from 'react'
 import { useAdmin } from '@/hooks/use-admin'
 import { getCurrentAdmin } from '@/service/api'
 import { hasPermission } from '@/utils/rbac'
-import { createHashRouter, Navigate, RouteObject } from 'react-router'
+import { createHashRouter, Navigate, RouteObject, useLocation } from 'react-router'
 import { LoadingSpinner } from '@/components/common/loading-spinner'
 import { RouteErrorPage } from '@/components/layout/error-page'
 import { TabbedRouteSuspenseFallback } from '@/components/layout/tabbed-route-suspense-fallback'
@@ -34,6 +34,7 @@ const GeneralSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.
 const HwidSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.hwid'))
 const SubscriptionSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.subscriptions'))
 const SubscriptionFirewallPage = lazyWithChunkRecovery(() => import('../pages/_dashboard.subscription-firewall'))
+const SubscriptionResponsePolicies = lazyWithChunkRecovery(() => import('../pages/_dashboard.subscription-response-policies'))
 const WebhookSettings = lazyWithChunkRecovery(() => import('../pages/_dashboard.settings.webhook'))
 const Statistics = lazyWithChunkRecovery(() => import('../pages/_dashboard.statistics'))
 const TemplatesLayout = lazyWithChunkRecovery(() => import('../pages/_dashboard.templates'))
@@ -72,6 +73,12 @@ const fetchAdminLoader = async (): Promise<any> => {
   }
 }
 
+function OldFirewallLocationRedirect() {
+  const location = useLocation()
+  // Existing bookmarks keep their tab/scenario selection after the UI rename.
+  return <Navigate to={{ pathname: '/subscriptions/devices', search: location.search }} replace />
+}
+
 // Wrap all route elements in <Suspense fallback={<LoadingSpinner />}>
 export const router = createHashRouter([
   {
@@ -106,12 +113,24 @@ export const router = createHashRouter([
         ),
       },
       {
-        path: '/subscription-firewall',
+        path: '/subscriptions/response-policies',
+        element: (
+          <Suspense fallback={<LoadingSpinner />}>
+            <SubscriptionResponsePolicies />
+          </Suspense>
+        ),
+      },
+      {
+        path: '/subscriptions/devices',
         element: (
           <Suspense fallback={<LoadingSpinner />}>
             <SubscriptionFirewallPage />
           </Suspense>
         ),
+      },
+      {
+        path: '/subscription-firewall',
+        element: <OldFirewallLocationRedirect />,
       },
       {
         path: '/statistics',

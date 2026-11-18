@@ -167,7 +167,15 @@ class BaseOperation:
             entitlement_revision=getattr(subscription, "entitlement_revision", 0),
             policy_revision=getattr(subscription, "policy_revision", 0),
         ):
-            await self.raise_error(message="Subscription access denied", code=403)
+            from app.subscription.entitlements import SubscriptionEntitlement
+            reason = (
+                "Subscription payment required"
+                if subscription.entitlement == SubscriptionEntitlement.PAYMENT_REQUIRED
+                else "Subscription expired"
+                if subscription.entitlement == SubscriptionEntitlement.EXPIRED
+                else "Subscription access denied"
+            )
+            await self.raise_error(message=reason, code=403)
 
         # GET/HEAD/info/raw/apps/usage and explicit formats all pass this
         # validated-token boundary before rendering or registering HWIDs.
@@ -202,7 +210,12 @@ class BaseOperation:
             or db_user.is_expired
             or db_user.is_limited
         ):
-            await self.raise_error(message="Subscription access denied", code=403)
+            reason = (
+                "Subscription expired" if db_user.is_expired
+                else "Subscription traffic limit reached" if db_user.is_limited
+                else "Subscription access denied"
+            )
+            await self.raise_error(message=reason, code=403)
 
         return db_user
 

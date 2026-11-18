@@ -1,8 +1,14 @@
 import asyncio
+import hmac
+import json
+import time
+from hashlib import sha256
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import aiocache
+import httpx
 import pytest
 from sqlalchemy import select
 
@@ -468,8 +474,53 @@ def disable_cache(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def core_entitlement_headers(access_token):
-    """Use the real restricted API key path, never a staff bearer token."""
+def core_entitlement_headers(access_token, monkeypatch: pytest.MonkeyPatch):
+    """Use the real restricted API key path and a signed synthetic Core reply.
+
+    These API tests exercise subscription/HWID behavior, not the external Core
+    transport. A request is granted by this local test receiver only after
+    verifying the same HMAC contract as the real integration. The commercial
+    fail-closed/rejection matrix is independently tested in
+    test_core_commercial_authorization.py.
+    """
+    from app.subscription import core_authorization as core_auth
+
+    signing_secret = 'synthetic-api-tests-only-signature-secret-value'
+    monkeypatch.setenv('WAYLANE_WEBHOOK_ALLOW_LOCAL_TEST', '1')
+    monkeypatch.setenv('WAYLANE_DEVICE_WEBHOOK_SECRET', signing_secret)
+    monkeypatch.setenv(
+        'WAYLANE_CORE_AUTHORIZATION_URL',
+        'http://127.0.0.1:8765/v1/integrations/waylane/subscription-authorizations',
+    )
+
+    def signed_core_grant(request: httpx.Request) -> httpx.Response:
+        assert request.method == 'POST'
+        assert request.url.path == core_auth._AUTH_PATH
+        assert request.headers['Content-Type'] == 'application/json'
+        timestamp = request.headers['X-WayLane-Timestamp']
+        assert abs(int(time.time()) - int(timestamp)) <= 120
+        payload = json.loads(request.content)
+        assert list(payload) == ['subscription_uuid']
+        from uuid import UUID
+
+        UUID(payload['subscription_uuid'])
+        expected = 'sha256=' + hmac.new(
+            signing_secret.encode('utf-8'),
+            core_auth._PURPOSE + timestamp.encode('ascii') + b'\n' + request.content,
+            sha256,
+        ).hexdigest()
+        assert hmac.compare_digest(request.headers['X-WayLane-Access-Signature'], expected)
+        return httpx.Response(204)
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(signed_core_grant)
+    # Patch the local Core auth module, not the global httpx library: device
+    # webhook and other HTTP fixtures must keep their own transports.
+    monkeypatch.setattr(core_auth, 'httpx', SimpleNamespace(
+        AsyncClient=lambda **kwargs: real_client(transport=transport, **kwargs),
+        Timeout=httpx.Timeout,
+        HTTPError=httpx.HTTPError,
+    ))
     username = f"core_owner_{uuid4().hex[:12]}"
     password = f"CoreOwner9!{uuid4().hex[:18]}"
 

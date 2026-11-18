@@ -13,6 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.subscription_firewall import subscription_firewall_config
+from app.subscription.response_policy import (
+    evaluate_response, failure_reason, load_response_policy, matching_rule,
+)
 
 MESSAGE_LINK_PREFIX = (
     "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTp2NlB3M2FUbEctM0VJX05hV3M0akZVc0FZWFY3UzM2dQ==@-:1#"
@@ -68,10 +71,24 @@ async def load_config(db: AsyncSession) -> dict:
     return result
 
 
-async def response_for_failure(db: AsyncSession, exc: HTTPException, *, client_accept: str,
-                               hwid: str | None, user_agent: str = "") -> Response | None:
-    # Legacy Base64 + Shadowsocks notice lines are meaningful only for clients
-    # which expect link subscriptions, not JSON, YAML or browser consumers.
+async def response_for_failure(
+    db: AsyncSession, exc: HTTPException, *, client_accept: str,
+    hwid: str | None, user_agent: str = '', accept_language: str = '',
+    client_format: str | None = None,
+) -> Response | None:
+    """Handle response representation after a denial. Never generate a VPN grant."""
+    policy, _ = await load_response_policy(db)
+    if policy.enabled:
+        reason = failure_reason(exc)
+        if reason is None:
+            return None  # Service/Core unavailable and unknown errors are always denied.
+        return evaluate_response(
+            policy, reason=reason, user_agent=user_agent, accept=client_accept,
+            language=accept_language, client_format=client_format,
+        )
+
+    # Backwards compatibility for existing independent WayLane installations:
+    # the legacy fallback continues only while the new policy is disabled.
     agent = user_agent.lower()
     if ("text/html" in client_accept or not hwid or
             not any(client in agent for client in ("happ", "v2raytun", "clienthub", "client hub"))):

@@ -23,6 +23,7 @@ async def user_subscription(
     token: str,
     db: AsyncSession = Depends(get_db),
     user_agent: str = Header(default=""),
+    accept_language: str = Header(default=""),
     headers=Depends(get_subscription_headers),
 ):
     """Provides a subscription link based on the user agent (Clash, V2Ray, etc.)."""
@@ -39,12 +40,16 @@ async def user_subscription(
     except HTTPException as exc:
         # Legacy client adapters require HTTP 200 with informational proxy
         # links, but only for explicit HWID clients and enabled templates.
+        # Use the same configured format selector as the normal response.
+        # A 200 notice is only representable by links or links_base64 clients.
+        from app.settings import subscription_settings
+        config = await subscription_settings()
+        matching = subscription_operator.detect_client_rule(user_agent, config.rules)
         fallback = await response_for_failure(
-            db,
-            exc,
-            client_accept=request.headers.get("Accept", ""),
-            hwid=headers.x_hwid,
-            user_agent=user_agent,
+            db, exc, client_accept=request.headers.get('Accept', ''),
+            hwid=headers.x_hwid, user_agent=user_agent,
+            accept_language=accept_language,
+            client_format=matching.target.value if matching else None,
         )
         if fallback is not None:
             return fallback
@@ -71,25 +76,37 @@ async def user_subscription_headers(
 
 
 @router.get("/{token}/info", response_model=SubscriptionAccessResponse)
-async def get_subscription_info(request: Request, token: str, db: AsyncSession = Depends(get_db)):
+async def get_subscription_info(
+    request: Request, token: str, db: AsyncSession = Depends(get_db),
+    user_agent: str = Header(default=""),
+):
     """Retrieves detailed information about the user's subscription."""
     user_data, response_headers = await subscription_operator.get_subscription_info(
-        db, token=token, ip=request.client.host if request.client else None
+        db, token=token, ip=request.client.host if request.client else None,
+        user_agent=user_agent,
     )
     return JSONResponse(content=user_data.model_dump(mode="json"), headers=response_headers)
 
 
 @router.get("/{token}/raw")
-async def user_subscription_raw(request: Request, token: str, db: AsyncSession = Depends(get_db)):
-    return await subscription_operator.user_subscription_raw(db, token=token, request_url=str(request.url))
+async def user_subscription_raw(
+    request: Request, token: str, db: AsyncSession = Depends(get_db),
+    user_agent: str = Header(default=""),
+):
+    return await subscription_operator.user_subscription_raw(
+        db, token=token, request_url=str(request.url), user_agent=user_agent,
+    )
 
 
 @router.get("/{token}/apps", response_model=list[Application])
-async def get_subscription_apps(token: str, db: AsyncSession = Depends(get_db)):
+async def get_subscription_apps(
+    token: str, db: AsyncSession = Depends(get_db),
+    user_agent: str = Header(default=""),
+):
     """
     Get applications available for user's subscription.
     """
-    return await subscription_operator.get_subscription_apps(db, token)
+    return await subscription_operator.get_subscription_apps(db, token, user_agent=user_agent)
 
 
 @router.get("/{token}/usage", response_model=SubscriptionUsageStatsList)
@@ -97,9 +114,12 @@ async def get_sub_user_usage(
     token: str,
     query=Depends(get_subscription_usage_query),
     db: AsyncSession = Depends(get_db),
+    user_agent: str = Header(default=""),
 ):
     """Fetches the usage statistics for the user within a specified date range."""
-    return await subscription_operator.get_subscription_usage(db, token=token, query=query)
+    return await subscription_operator.get_subscription_usage(
+        db, token=token, query=query, user_agent=user_agent,
+    )
 
 
 @router.get("/{token}/{client_type}")
@@ -108,13 +128,22 @@ async def user_subscription_with_client_type(
     token: str,
     client_type: ConfigFormat,
     db: AsyncSession = Depends(get_db),
+    user_agent: str = Header(default=""),
+    accept_language: str = Header(default=""),
     headers=Depends(get_subscription_headers),
 ):
-    """Provides a subscription link based on the specified client type (e.g., Clash, V2Ray)."""
-    return await subscription_operator.user_subscription_with_client_type(
-        db,
-        token=token,
-        client_type=client_type,
-        request_url=str(request.url),
-        **headers.model_dump(),
-    )
+    """Explicit client formats share the same deny and response-policy boundary."""
+    try:
+        return await subscription_operator.user_subscription_with_client_type(
+            db, token=token, client_type=client_type, user_agent=user_agent,
+            request_url=str(request.url), **headers.model_dump(),
+        )
+    except HTTPException as exc:
+        fallback = await response_for_failure(
+            db, exc, client_accept=request.headers.get('Accept', ''),
+            hwid=headers.x_hwid, user_agent=user_agent,
+            accept_language=accept_language, client_format=client_type.value,
+        )
+        if fallback is not None:
+            return fallback
+        raise

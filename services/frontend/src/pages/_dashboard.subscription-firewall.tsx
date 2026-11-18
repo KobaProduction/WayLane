@@ -15,7 +15,7 @@ export default function SubscriptionFirewallPage() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <PageHeader title="subscriptionFirewall.title" description="subscriptionFirewall.description" />
+      <PageHeader title="subscriptionDevicesWorkspace.title" description="subscriptionDevicesWorkspace.description" />
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
         <p className="text-sm text-muted-foreground">{t('subscriptionFirewall.ui.page.description')}</p>
         {canUpdate && <Link className="text-primary text-sm font-medium underline underline-offset-4" to="/settings/subscriptions">{t('subscriptionFirewall.ui.page.settingsLink')}</Link>}

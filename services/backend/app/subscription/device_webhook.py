@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
+from fastapi import HTTPException
 from sqlalchemy import and_, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -425,8 +426,15 @@ async def check_legacy_device_access(
     except httpx.HTTPError, ValueError:
         return
     if status in ("LIMIT_DEVICES", "ACCESS_DENIED"):
-        from fastapi import HTTPException
-
         if status == "LIMIT_DEVICES":
-            raise HTTPException(403, "Device limit reached")
-        raise HTTPException(403, "Access denied by device-check webhook")
+            raise HTTPException(403, "External Device limit reached")
+        raise HTTPException(403, "External Access denied by device-check webhook")
+
+    # Optional explicit external codes. Unknown/error responses are not made
+    # into commercial authorization; existing legacy behavior remains intact.
+    from app.subscription.response_policy import EXTERNAL_CODE, load_response_policy
+
+    if isinstance(status, str) and EXTERNAL_CODE.fullmatch(status):
+        policy, _ = await load_response_policy(db)
+        if policy.enabled and status in policy.external_denial_codes:
+            raise HTTPException(403, f"External device code: {status}")
