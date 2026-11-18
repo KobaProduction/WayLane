@@ -15,6 +15,7 @@ import { generateRealityKeyPair } from '@/lib/xray-generation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 
 export type RealityKeyMode = 'manual' | 'preset'
 
@@ -38,16 +39,27 @@ interface Props {
   onApplied: () => void
 }
 
-function readableError(error: unknown): string {
-  const response = error as { data?: { detail?: unknown }; response?: { data?: { detail?: unknown } }; message?: string }
-  const detail = response?.data?.detail ?? response?.response?.data?.detail
-  if (typeof detail === 'string' && detail.includes('Core is assigned to an autonomous Node')) {
-    return 'Ядро назначено Node. Перед сменой ключей безопасно переназначьте ядро в настройках Node.'
+function readableError(error: unknown, translate: (key: string) => string): string {
+  const response = error as {
+    status?: number
+    data?: { detail?: unknown }
+    response?: { status?: number; data?: { detail?: unknown } }
   }
-  return typeof detail === 'string' ? detail : response?.message ?? 'Не удалось изменить привязку REALITY'
+  const detail = response?.data?.detail ?? response?.response?.data?.detail
+  const status = response?.status ?? response?.response?.status
+  if (typeof detail === 'string' && detail.includes('Core is assigned to an autonomous Node')) {
+    return translate('assignedError')
+  }
+  if (status === 409) return translate('conflictError')
+  if (status === 422) return translate('invalidKeyError')
+  if (status === 403) return translate('permissionError')
+  // Don't expose backend exception details to a subscription administrator.
+  return translate('genericError')
 }
 
 export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundTag, initialPresetId, hasUnsavedChanges, mode, onModeChange, onApplied }: Props) {
+  const { t } = useTranslation()
+  const tr = (key: string, options?: Record<string, string | number>) => t(`coreEditor.realityPresetMode.${key}`, options)
   const { admin } = useAdmin()
   const canUpdate = hasPermission(admin, 'cores', 'update')
   const [presets, setPresets] = useState<RealityPreset[]>([])
@@ -108,7 +120,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
 
   const requestConfirmation = (action: 'manual' | 'preset') => {
     if (hasUnsavedChanges || selectCoreEditorHasActualChanges(useCoreEditorStore.getState())) {
-      toast.error('В ядре есть несохранённые изменения. Сначала сохраните или отмените их.')
+      toast.error(tr('unsaved'))
       return
     }
     setConfirmation(action)
@@ -117,7 +129,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
   const changePreset = async () => {
     if (!ready || !selectedValue || !coreId || mismatch) return
     if (hasUnsavedChanges || selectCoreEditorHasActualChanges(useCoreEditorStore.getState())) {
-      toast.error('В ядре есть несохранённые изменения. Сохраните или отмените их перед заменой пресета.')
+      toast.error(tr('unsavedPreset'))
       return
     }
     setPending(true)
@@ -127,17 +139,17 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
       })
       await queryClient.invalidateQueries({ queryKey: getListCoreBindingsQueryKey() })
       await queryClient.invalidateQueries({ queryKey: getGetCoreConfigQueryKey(coreId) })
-      toast.success('Пресет REALITY привязан к ядру. Изменения для Node требуют отдельного применения.')
+      toast.success(tr('boundSuccess'))
       onApplied()
     } catch (error) {
-      toast.error(readableError(error))
+      toast.error(readableError(error, tr))
     } finally { setPending(false) }
   }
 
   const switchToManual = async () => {
     if (!ready || !coreId || !binding || !replacementKey.trim() || mismatch) return
     if (hasUnsavedChanges || selectCoreEditorHasActualChanges(useCoreEditorStore.getState())) {
-      toast.error('В ядре есть несохранённые изменения. Сохраните или отмените их перед заменой ключа.')
+      toast.error(tr('unsavedKey'))
       return
     }
     setPending(true)
@@ -148,69 +160,69 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
       setReplacementKey('')
       await queryClient.invalidateQueries({ queryKey: getListCoreBindingsQueryKey() })
       await queryClient.invalidateQueries({ queryKey: getGetCoreConfigQueryKey(coreId) })
-      toast.success('Режим REALITY переключён на ручную настройку.')
+      toast.success(tr('manualSuccess'))
       onApplied()
     } catch (error) {
-      toast.error(readableError(error))
+      toast.error(readableError(error, tr))
     } finally { setPending(false) }
   }
 
   return (
     <div className="space-y-3 rounded-md border bg-muted/20 p-3 sm:col-span-2" data-testid="reality-preset-mode-selector">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium">Ключи REALITY</p>
+        <p className="text-sm font-medium">{tr('title')}</p>
         <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer">О режимах</summary>
-          <p className="mt-1 max-w-lg">В ручном режиме ключ находится в JSON ядра. Управляемый пресет хранит приватный ключ зашифрованным в Backend.</p>
+          <summary className="cursor-pointer">{tr('about')}</summary>
+          <p className="mt-1 max-w-lg">{tr('aboutDescription')}</p>
         </details>
       </div>
       <Tabs value={mode} onValueChange={value => onModeChange(value === 'preset' ? 'preset' : 'manual')}>
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="manual">Ручная настройка</TabsTrigger>
-          <TabsTrigger value="preset">Выбрать пресет</TabsTrigger>
+          <TabsTrigger value="manual">{tr('manualTab')}</TabsTrigger>
+          <TabsTrigger value="preset">{tr('presetTab')}</TabsTrigger>
         </TabsList>
       </Tabs>
-      {(!verified && !loadFailed) && <p className="text-xs text-muted-foreground">Загрузка пресетов и привязок…</p>}
-      {loadFailed && <div className="space-y-2"><p className="text-xs text-destructive">Не удалось проверить привязки. Изменения запрещены.</p><Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>Повторить</Button></div>}
-      {mismatch && <p className="text-xs text-destructive">Сохранённая ссылка REALITY не совпадает с привязкой на сервере. Обновите страницу, прежде чем менять режим.</p>}
-      {mode === 'preset' && (coreId === null || !inboundSaved) && <p className="text-xs text-muted-foreground">Сначала сохраните новый inbound и ядро, затем выберите пресет.</p>}
-      {mode === 'preset' && !canUpdate && <p className="text-xs text-muted-foreground">Для изменения привязки нужны права редактирования ядра.</p>}
+      {(!verified && !loadFailed) && <p className="text-xs text-muted-foreground">{tr('loading')}</p>}
+      {loadFailed && <div className="space-y-2"><p className="text-xs text-destructive">{tr('loadFailed')}</p><Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>{tr('retry')}</Button></div>}
+      {mismatch && <p className="text-xs text-destructive">{tr('mismatch')}</p>}
+      {mode === 'preset' && (coreId === null || !inboundSaved) && <p className="text-xs text-muted-foreground">{tr('saveFirst')}</p>}
+      {mode === 'preset' && !canUpdate && <p className="text-xs text-muted-foreground">{tr('noPermission')}</p>}
       {mode === 'manual' && binding && verified && (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">Привязан «{currentPreset?.name ?? binding}». Для ручного режима укажите новый ключ.</p>
-          <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Что произойдёт при смене ключа</summary>
-            <p className="mt-1">Прежний приватный ключ нельзя прочитать. После замены потребуется обновление клиентских подписок.</p>
+          <p className="text-xs text-muted-foreground">{tr('boundInfo', { name: currentPreset?.name ?? binding })}</p>
+          <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{tr('changeInfoTitle')}</summary>
+            <p className="mt-1">{tr('changeInfo')}</p>
           </details>
-          <Input type="password" autoComplete="off" aria-label="Новый приватный ключ REALITY" placeholder="Новый приватный ключ X25519" value={replacementKey} onChange={event => setReplacementKey(event.target.value)} />
+          <Input type="password" autoComplete="new-password" aria-label={tr('manualKeyLabel')} placeholder={tr('manualKeyPlaceholder')} value={replacementKey} onChange={event => setReplacementKey(event.target.value)} />
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => setReplacementKey(generateRealityKeyPair().privateKey)}>Сгенерировать новый ключ</Button>
-            <Button type="button" size="sm" disabled={!ready || !replacementKey.trim() || mismatch} onClick={() => requestConfirmation('manual')}>Перейти на ручную настройку</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setReplacementKey(generateRealityKeyPair().privateKey)}>{tr('generateKey')}</Button>
+            <Button type="button" size="sm" disabled={!ready || !replacementKey.trim() || mismatch} onClick={() => requestConfirmation('manual')}>{tr('toManual')}</Button>
           </div>
         </div>
       )}
       {mode === 'preset' && (
         <div className="space-y-2">
           <Select value={selectedValue} onValueChange={setSelected} disabled={!verified}>
-            <SelectTrigger aria-label="Пресет REALITY"><SelectValue placeholder="Выберите REALITY-пресет" /></SelectTrigger>
+            <SelectTrigger aria-label={tr('presetSelect')}><SelectValue placeholder={tr('presetPlaceholder')} /></SelectTrigger>
             <SelectContent>{presets.map(item => <SelectItem key={item.id} value={item.id}>{item.name} · v{item.revision}</SelectItem>)}</SelectContent>
           </Select>
           {selectedPreset && (
             <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer">Публичные параметры · {(selectedPreset.data.shortIds ?? []).length} Short ID</summary>
+              <summary className="cursor-pointer">{tr('publicSummary', { count: (selectedPreset.data.shortIds ?? []).length })}</summary>
               <div className="mt-2 space-y-1">
-                <p>Публичный ключ: <code className="break-all">{selectedPreset.data.publicKey ?? '—'}</code></p>
-                <p>Short IDs: {(selectedPreset.data.shortIds ?? []).join(', ') || '—'}</p>
-                <p>Приватный ключ хранится в защищённом хранилище.</p>
+                <p>{tr('publicKey')}: <code className="break-all">{selectedPreset.data.publicKey ?? '—'}</code></p>
+                <p>{tr('shortIds')}: {(selectedPreset.data.shortIds ?? []).join(', ') || '—'}</p>
+                <p>{tr('secretNote')}</p>
               </div>
             </details>
           )}
-          {presets.length === 0 && verified && <p className="text-xs text-muted-foreground">REALITY-пресетов пока нет.</p>}
+          {presets.length === 0 && verified && <p className="text-xs text-muted-foreground">{tr('empty')}</p>}
           <div className="flex flex-wrap items-center gap-2">
             {selectedValue === binding && binding && verified
-              ? <span className="text-xs text-muted-foreground">Пресет уже подключён</span>
-              : selectedValue && <Button type="button" disabled={!ready || mismatch} size="sm" onClick={() => requestConfirmation('preset')}>{binding ? 'Заменить пресет' : 'Привязать пресет'}</Button>}
-            <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>Обновить список</Button>
-            <Link className="text-xs text-primary underline" to="/nodes/presets?kind=reality" target="_blank" rel="noopener noreferrer">Управление пресетами</Link>
+              ? <span className="text-xs text-muted-foreground">{tr('alreadyBound')}</span>
+              : selectedValue && <Button type="button" disabled={!ready || mismatch} size="sm" onClick={() => requestConfirmation('preset')}>{binding ? tr('replacePreset') : tr('bindPreset')}</Button>}
+            <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>{tr('refresh')}</Button>
+            <Link className="text-xs text-primary underline" to="/nodes/presets?kind=reality" target="_blank" rel="noopener noreferrer">{tr('manage')}</Link>
           </div>
 
         </div>
@@ -218,21 +230,21 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
       <AlertDialog open={confirmation !== null} onOpenChange={value => { if (!value) setConfirmation(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{confirmation === 'manual' ? 'Заменить управляемый REALITY-ключ ручным?' : 'Изменить привязку REALITY-пресета?'}</AlertDialogTitle>
+            <AlertDialogTitle>{confirmation === 'manual' ? tr('manualConfirmTitle') : tr('presetConfirmTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
               {confirmation === 'manual'
-                ? 'Будет удалена привязка к защищённому пресету и сохранён новый приватный ключ в конфигурации Core. Клиентам могут потребоваться новые ключи. Уже работающая Node автоматически не обновляется.'
-                : `Core #${coreId ?? '—'} · inbound ${inboundTag}. Публичные параметры изменятся в сохранённом Core; Backend запрещает замену у назначенной Node. Изменение на работающих Node применяется отдельно.`}
+                ? tr('manualConfirmText')
+                : tr('presetConfirmText', { core: coreId ?? '—', inbound: inboundTag })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogCancel>{tr('cancel')}</AlertDialogCancel>
             <AlertDialogAction disabled={!ready || mismatch} onClick={() => {
               const action = confirmation
               setConfirmation(null)
               if (action === 'manual') void switchToManual()
               if (action === 'preset') void changePreset()
-            }}>Подтвердить изменение</AlertDialogAction>
+            }}>{tr('confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
