@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { confirmedRealityBinding, effectiveRealityPresetSelection, type RealityBinding } from '@/features/core-editor/kit/reality-preset-binding'
 import { selectCoreEditorHasActualChanges } from '@/features/core-editor/kit/core-editor-change-state'
 import { useCoreEditorStore } from '@/features/core-editor/state/core-editor-store'
@@ -54,6 +55,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
   const [selected, setSelected] = useState('')
   const [replacementKey, setReplacementKey] = useState('')
   const [pending, setPending] = useState(false)
+  const [confirmation, setConfirmation] = useState<'manual' | 'preset' | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [loadedScope, setLoadedScope] = useState<string | null>(null)
@@ -94,7 +96,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
       setLoadedScope(null)
     }
   }, [open, refresh])
-  useEffect(() => { setReplacementKey('') }, [open, coreId, inboundTag])
+  useEffect(() => { setReplacementKey(''); setConfirmation(null) }, [open, coreId, inboundTag])
 
   const currentPreset = useMemo(() => presets.find(item => item.id === binding), [presets, binding])
   // The list may be populated after the select mounts; keep the confirmed binding selected by default.
@@ -103,6 +105,14 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
   const verified = loadedScope === scope && !loading && !loadFailed
   const ready = verified && canUpdate && coreId !== null && inboundSaved && !pending
   const mismatch = verified && (initialPresetId ?? null) !== binding
+
+  const requestConfirmation = (action: 'manual' | 'preset') => {
+    if (hasUnsavedChanges || selectCoreEditorHasActualChanges(useCoreEditorStore.getState())) {
+      toast.error('В ядре есть несохранённые изменения. Сначала сохраните или отмените их.')
+      return
+    }
+    setConfirmation(action)
+  }
 
   const changePreset = async () => {
     if (!ready || !selectedValue || !coreId || mismatch) return
@@ -130,7 +140,6 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
       toast.error('В ядре есть несохранённые изменения. Сохраните или отмените их перед заменой ключа.')
       return
     }
-    if (!window.confirm('Снять привязку к защищённому пресету и сохранить новый приватный ключ прямо в конфигурации ядра?')) return
     setPending(true)
     try {
       await $fetch('/api/core-presets/bindings/reality/manual', {
@@ -175,7 +184,7 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
           <Input type="password" autoComplete="off" aria-label="Новый приватный ключ REALITY" placeholder="Новый приватный ключ X25519" value={replacementKey} onChange={event => setReplacementKey(event.target.value)} />
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => setReplacementKey(generateRealityKeyPair().privateKey)}>Сгенерировать новый ключ</Button>
-            <Button type="button" size="sm" disabled={!ready || !replacementKey.trim() || mismatch} onClick={() => void switchToManual()}>Перейти на ручную настройку</Button>
+            <Button type="button" size="sm" disabled={!ready || !replacementKey.trim() || mismatch} onClick={() => requestConfirmation('manual')}>Перейти на ручную настройку</Button>
           </div>
         </div>
       )}
@@ -199,13 +208,34 @@ export function RealityPresetModeSelector({ open, coreId, inboundSaved, inboundT
           <div className="flex flex-wrap items-center gap-2">
             {selectedValue === binding && binding && verified
               ? <span className="text-xs text-muted-foreground">Пресет уже подключён</span>
-              : selectedValue && <Button type="button" disabled={!ready || mismatch} size="sm" onClick={() => void changePreset()}>{binding ? 'Заменить пресет' : 'Привязать пресет'}</Button>}
+              : selectedValue && <Button type="button" disabled={!ready || mismatch} size="sm" onClick={() => requestConfirmation('preset')}>{binding ? 'Заменить пресет' : 'Привязать пресет'}</Button>}
             <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>Обновить список</Button>
             <Link className="text-xs text-primary underline" to="/nodes/presets?kind=reality" target="_blank" rel="noopener noreferrer">Управление пресетами</Link>
           </div>
 
         </div>
       )}
+      <AlertDialog open={confirmation !== null} onOpenChange={value => { if (!value) setConfirmation(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmation === 'manual' ? 'Заменить управляемый REALITY-ключ ручным?' : 'Изменить привязку REALITY-пресета?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmation === 'manual'
+                ? 'Будет удалена привязка к защищённому пресету и сохранён новый приватный ключ в конфигурации Core. Клиентам могут потребоваться новые ключи. Уже работающая Node автоматически не обновляется.'
+                : `Core #${coreId ?? '—'} · inbound ${inboundTag}. Публичные параметры изменятся в сохранённом Core; Backend запрещает замену у назначенной Node. Изменение на работающих Node применяется отдельно.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction disabled={!ready || mismatch} onClick={() => {
+              const action = confirmation
+              setConfirmation(null)
+              if (action === 'manual') void switchToManual()
+              if (action === 'preset') void changePreset()
+            }}>Подтвердить изменение</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
