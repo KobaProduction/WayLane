@@ -450,17 +450,40 @@ release into an outer Agent rollout. Startup and error states are distinguished
 from verified WSS control and actual SOCKS5 consumer behavior.
 
 
-### Bounded Agent restart and diagnosed failure
+### Reboot recovery for stable Agent; bounded inner Node/Core retries
 
-Both Classic and Discovery profiles now use `restart: on-failure:3` for the
-stable outer Agent. A persistent failure of private Rootless Docker no longer
-creates hundreds of automatic Agent/container restarts; Coolify should show a
-failed/unhealthy resource for explicit operator recovery. Embedded Node and
-Core sibling containers also use bounded `on-failure:3` policies. This does
-not change the single Agent + one-shot Bootstrap Compose topology or remove
-the required healthcheck. Recovered Agent/Node releases are **not** accepted
-solely because a container is running: verify WSS and a real existing client
-traffic path after any repair.
+Classic and Discovery deploy the **outer Agent** with
+`restart: unless-stopped`. This restores it after a host/Docker daemon
+restart, including when the previous host migration or shutdown sent
+SIGTERM and the Agent exited with status 0. Docker's `on-failure:3`
+policy **does not** start a container on daemon restart and was the cause
+of the November 19/20 downtime after the host move. A deliberate
+`docker stop` (including an explicit stop in Coolify) must remain stopped;
+an operator must start the existing Agent again.
+
+Docker has no combined `unless-stopped` + maximum-retry setting. The
+outer Agent may therefore enter a repeated-failure restart cycle if its
+private rootless startup is permanently broken. Docker backs off repeat
+restarts; operators must inspect `restarting`/health and the Agent logs,
+not infer VPN readiness. **Inner Node and Core containers retain bounded
+`on-failure:3`** so an invalid Node/Core release does not repeatedly
+restart all day. Keep the existing Agent healthcheck, private Rootless Docker
+ownership, immutable Node release flow, and manual-only Coolify deployments.
+Do not add a second systemd supervisor or another public control endpoint.
+
+For an existing healthy Agent, change the container's Docker restart
+policy **in place** to `unless-stopped` to avoid an unnecessary Xray/WSS
+interruption. Verify the effective Docker policy after the change; a Git
+source commit alone will not modify a manually deployed Coolify container.
+A later authorized manual Compose deployment must use the updated tracked
+file to preserve the new policy. Never use `docker compose down -v` or
+delete `agent-state`, `rootless-data`, or `rootless-run`.
+
+Recovery after any actual host reboot requires separate acceptance:
+Agent healthy, private Rootless Docker initialized, inner Node running
+with a fresh authenticated Backend WSS, Xray desired/applied matching,
+correct *current* listen port, and a real existing client traffic path.
+Do not claim this reboot acceptance from a policy update or build alone.
 
 Operator-managed Node release operations have bounded 10-minute Backend
 resolution, even if an Agent cannot be contacted. An update's first 85% is

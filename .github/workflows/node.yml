@@ -73,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -p waylane-node-ci -f deploy/node/discovery/docker-compose.yaml config --format json |
-            python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert set(s)=={"bootstrap","agent"}, set(s); assert s["bootstrap"]["privileged"] is True; assert not s["agent"].get("privileged",False); assert all("/var/run/docker.sock" not in str(m) and "/run/docker.sock" not in str(m) for c in s.values() for m in c.get("volumes",[]))'
+            python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert set(s)=={"bootstrap","agent"}, set(s); assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["restart"]=="no"; assert s["agent"]["restart"]=="unless-stopped"; assert not s["agent"].get("privileged",False); assert all("/var/run/docker.sock" not in str(m) and "/run/docker.sock" not in str(m) for c in s.values() for m in c.get("volumes",[]))'
           # Validate both canonical Node installation modes and their Coolify adapters.
           # Coolify adapters no longer carry the old exclude_from_hc metadata.
           # Parse their actual tracked manifests, without manufacturing a
@@ -87,7 +87,7 @@ jobs:
               export DISCOVERY_TOKEN=wl_disc_ci-only
             fi
             docker compose -p waylane-node-ci -f "deploy/node/$mode/docker-compose.coolify.yaml" config --format json |
-              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert s["agent"]["network_mode"]=="host"; assert not s["agent"].get("privileged",False); assert "CONTROL_TRANSPORT" not in s["agent"]["environment"]; assert "GRPC_DEV_INSECURE" not in s["agent"]["environment"]; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
+              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d["services"]; assert set(s)=={"bootstrap","agent"}; assert s["bootstrap"]["privileged"] is True; assert s["bootstrap"]["network_mode"]=="none"; assert s["agent"]["user"]=="1000:1000"; assert s["agent"]["network_mode"]=="host"; assert s["agent"]["restart"]=="unless-stopped"; assert s["bootstrap"]["restart"]=="no"; assert not s["agent"].get("privileged",False); assert "CONTROL_TRANSPORT" not in s["agent"]["environment"]; assert "GRPC_DEV_INSECURE" not in s["agent"]["environment"]; assert s["agent"]["environment"]["DEV_ALLOW_HTTP"]=="false"; assert set(d["volumes"])=={"agent-state","rootless-data","rootless-run"}; assert all("ports" not in v for v in s.values()); assert all("/var/run/docker.sock" not in str(v) for v in s.values()); assert any("/etc/hostname" in str(v) and v.get("read_only") is True for v in s["agent"]["volumes"] if isinstance(v,dict))'
           done
           # Both independent generic entrypoints must keep identical security
           # and runtime shape; only their registration credential may differ.

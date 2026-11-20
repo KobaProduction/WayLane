@@ -23,9 +23,12 @@ services:
     depends_on:
       bootstrap:
         condition: service_completed_successfully
-    # Fail in a visible, bounded state rather than an endless container restart
-    # loop on an unrecoverable private rootless daemon/socket startup error.
-    restart: "on-failure:3"
+    # Restore the stable supervisor after host/Docker reboot, including a
+    # graceful SIGTERM (exit 0) during migration. Manual docker stop remains
+    # intentional. Rootless Node/Core children retain bounded on-failure:3.
+    # Docker may keep retrying a broken outer Agent with backoff; investigate
+    # unhealthy/restarting status rather than assuming the VPN is available.
+    restart: unless-stopped
     init: true
     # The stable Agent shares the Linux host network namespace.
     # RootlessKit uses detached-netns mode: Node/Cores join the Linux host network.
