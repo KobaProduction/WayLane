@@ -32,7 +32,7 @@ test('a saved Core is the primary Xray workflow; manual JSON remains optional an
   assert.match(coreHtml, /Выбран для Node:/)
   assert.doesNotMatch(coreHtml, /Node подтвердила применение/)
   assert.match(coreHtml, /Применить профиль/)
-  assert.match(coreHtml, /<select[^>]*w-full[^>]*sm:w-auto/, 'Xray Core select must occupy its own row on a narrow viewport')
+  assert.match(coreHtml, /<select[^>]*w-full[^>]*shrink-0[^>]*sm:shrink/, 'Selected Core and actions must not shrink the mobile select')
   const manual = renderToStaticMarkup(createElement(NodeXrayRuntimeControls, {
     imageVersion: '26.10.21', region: '', configuration: '', configured: true, busy: false,
     onImageVersionChange: noop, onRegionChange: noop, onConfigurationChange: noop,
