@@ -20,6 +20,14 @@ test('REALITY mode selector has complete, nonempty localized UI labels', () => {
   }
 })
 
+test('inbound REALITY mode guard uses the same translated guidance as the selector', () => {
+  const source = readFileSync('src/features/core-editor/components/xray/xray-inbounds-section.tsx', 'utf8')
+  for (const key of ['saveFirst', 'applyModeFirst']) {
+    assert.ok(source.includes(`t('coreEditor.realityPresetMode.${key}')`), `Inbound guard must translate ${key}`)
+    for (const lang of languages) assert.ok(locales(lang)[key].trim(), `Missing ${lang}:${key}`)
+  }
+})
+
 test('every static REALITY selector translation reference exists', () => {
   const source = readFileSync('src/features/core-editor/components/xray/reality-preset-mode-selector.tsx', 'utf8')
   const refs = [...source.matchAll(/tr\('([a-zA-Z0-9]+)'/g)].map(match => match[1])

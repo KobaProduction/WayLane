@@ -49,7 +49,7 @@ browser acceptance. With the synthetic owner in Chromium, open
   An assigned Node/core pair must reject preset changes rather than
   silently rotate working VPN credentials.
 - Open the preset-management link in a fresh tab. It must navigate to the
-  hash-based `/nodes/cores?presets=reality` route and expand REALITY presets.
+  hash-based `/nodes/presets?kind=reality` route and show the REALITY preset catalog.
   Check the selector and modal at narrow mobile and desktop viewport widths.
 
 Keep the tested database, screenshot and browser state synthetic, and never

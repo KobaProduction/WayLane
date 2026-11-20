@@ -1711,7 +1711,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
   const commitAddInbound = async () => {
     if (!profile) return
     if (form.getValues('security') === 'reality' && form.getValues('realityKeyMode') === 'preset') {
-      toast.error('Сначала сохраните ядро в ручном режиме, затем привяжите пресет.')
+      toast.error(t('coreEditor.realityPresetMode.saveFirst'))
       return
     }
     if (!draftInbound || draftInbound.protocol === 'unmanaged') return
@@ -1749,7 +1749,7 @@ export function XrayInboundsSection({ headerAddPulse, headerAddEpoch }: XrayInbo
     if (dialogMode !== 'edit' || !inbound) return
     if (form.getValues('security') === 'reality' &&
         (form.getValues('realityKeyMode') === 'preset') !== Boolean(realityPresetId)) {
-      toast.error('Сначала примените изменение режима REALITY через селектор пресета.')
+      toast.error(t('coreEditor.realityPresetMode.applyModeFirst'))
       return
     }
     const tagValue = form.getValues('tag') ?? ''
