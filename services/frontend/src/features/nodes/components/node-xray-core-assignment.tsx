@@ -29,7 +29,7 @@ export function NodeXrayCoreAssignment({ cores, selectedCoreId, onCoreChange, cu
       </Link>
     </p>}
     <div className="flex flex-wrap items-center gap-2">
-      <select aria-label="Сохранённый профиль Xray" className="border-input bg-background min-h-10 min-w-0 max-w-full flex-1 rounded-md border px-3 text-sm"
+      <select aria-label="Сохранённый профиль Xray" className="border-input bg-background min-h-10 w-full min-w-0 rounded-md border px-3 text-sm sm:w-auto sm:min-w-48 sm:flex-1"
         value={selectedCoreId} onChange={event => onCoreChange(event.target.value)}>
         <option value="">Выберите Xray Core</option>
         {cores.map(core => <option key={core.id} value={core.id}>{core.name}</option>)}
