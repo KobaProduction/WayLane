@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { getNotice, withNotice, responsePolicyErrors, previewIsExplicitlyInert, reasonLabel } from './response-policy-contract'
+import { getNotice, withNotice, responsePolicyErrors, previewIsExplicitlyInert, reasonLabel, reconcileSavedResponsePolicyDraft } from './response-policy-contract'
 import type { ResponsePolicy } from './response-policy-contract'
 
 const empty: ResponsePolicy = { enabled: false, rules: [], notices: {}, external_denial_codes: [] }
@@ -25,4 +25,13 @@ test('missing notice and unsafe external codes fail client-side validation', () 
   assert.ok(responsePolicyErrors(enabled).some(error => error.includes('информационного')))
   assert.deepEqual(responsePolicyErrors({ ...enabled, notices: { device_limit: { ru: { title: 'Лимит', lines: ['Удалить устройство'] } } } }), [])
   assert.ok(responsePolicyErrors({ ...empty, external_denial_codes: ['BOT_ERROR'] }).some(error => error.includes('успешного допуска')))
+})
+
+test('a delayed successful save cannot overwrite more recent unsaved policy edits', () => {
+  const submitted: ResponsePolicy = { ...empty, enabled: true }
+  const persisted: ResponsePolicy = { ...submitted, rules: [] }
+  assert.equal(reconcileSavedResponsePolicyDraft(submitted, submitted, persisted), persisted)
+  const newer = { ...submitted, rules: [{ id: 'rule-2', name: 'Later edit', ua_match: 'exact' as const, ua_value: 'Happ', reason: 'client_blocked' as const, mode: 'http_error' as const }] }
+  assert.equal(reconcileSavedResponsePolicyDraft(newer, submitted, persisted), newer)
+  assert.notDeepEqual(newer, persisted, 'Newer edits must remain dirty against the persisted revision')
 })

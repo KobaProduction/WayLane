@@ -95,7 +95,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             icon: FileCode2,
           },
           {
-            title: 'TLS-сертификаты',
+            title: 'nodes.tlsNav',
             url: '/tls-presets',
             icon: Lock,
           },

@@ -63,6 +63,16 @@ export function withNotice(policy: ResponsePolicy, reason: string, language: Pol
   } }
 }
 
+/** Keep newer local edits when a response to an earlier save arrives.
+ * Draft updates are immutable throughout this editor. The submitted object
+ * identity distinguishes an untouched request from newer user input.
+ */
+export function reconcileSavedResponsePolicyDraft(
+  current: ResponsePolicy, submitted: ResponsePolicy, persisted: ResponsePolicy,
+): ResponsePolicy {
+  return current === submitted ? persisted : current
+}
+
 /** Do not accidentally treat an HTTP 200 as an authorized VPN configuration. */
 export function previewIsExplicitlyInert(preview: ResponsePreview): boolean {
   return preview.decision === 'notice_200' && preview.status === 200 &&
