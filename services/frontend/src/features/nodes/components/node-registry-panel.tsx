@@ -21,7 +21,7 @@ import { hasPermission } from '@/utils/rbac'
 import { toast } from 'sonner'
 import { OFFICIAL_NODE_REPOSITORY, approvedNodeReleaseImage, withNodeReleaseRepository } from './node-release-image'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
@@ -278,6 +278,11 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
   }
 
   const readManagedInbounds = async (uuid: string) => {
+    setManagedInboundStates(previous => {
+      const next = { ...previous }
+      delete next[uuid]
+      return next
+    })
     try {
       const response = await $fetch<{ inbound_tags: string[] }>(
         '/api/node-registry/nodes/' + encodeURIComponent(uuid) + '/xray/managed-inbounds')
@@ -294,10 +299,6 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
       toast.error('Обновите состояние Xray перед изменением доступа')
       return
     }
-    const warning = enabled
-      ? `Разрешить WayLane управлять клиентами inbound ${tag}? Доступ будет определяться статусом подписки, entitlement и группами. Ручные клиенты не сохраняются.`
-      : `Отключить автоматическую синхронизацию для ${tag}? Управляемые клиенты будут удалены при применении новой конфигурации.`
-    if (!window.confirm(warning)) return
     setXrayBusy(true)
     try {
       await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) +
@@ -447,7 +448,6 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
         throw new Error('Нужен JSON-массив пользователей')
       }
       if (!xrayInboundTag.trim()) throw new Error('Укажите tag inbound')
-      if (users.length === 0 && !window.confirm('Удалить всех пользователей из выбранного inbound?')) return
       await $fetch('/api/node-registry/nodes/' + encodeURIComponent(uuid) +
         '/xray/inbounds/' + encodeURIComponent(xrayInboundTag.trim()) + '/users', {
         method: 'PUT', body: { expected_generation: expectedGeneration, users },
@@ -496,22 +496,21 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
   if (!canRead) return <p role="alert" className="px-4 py-6 text-sm text-muted-foreground">{t('nodes.details.noAccess', { defaultValue: 'Недостаточно прав для просмотра Node.' })}</p>
 
   return (
-    <Card className="m-4 min-w-0 border-0 shadow-none">
-      <CardHeader className="space-y-4 px-0 pb-3">
+    <Card className="mx-4 my-3 min-w-0 border-0 shadow-none sm:mx-6 sm:my-4">
+      <CardHeader className="space-y-3 px-0 pb-3 pt-0">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <Link to={returnUrl} className="text-sm text-primary underline underline-offset-4">{t('nodes.details.back', { defaultValue: 'К списку узлов' })}</Link>
-            <CardTitle>{currentNode?.display_name ?? t('nodes.details.title', { defaultValue: 'Узел' })}</CardTitle>
-            <CardDescription>{t('nodes.details.description', { defaultValue: 'Регистрация, настройки и результаты управления конкретной Node.' })}</CardDescription>
+            <h1 className="break-words text-xl font-semibold tracking-tight sm:text-2xl">{currentNode?.display_name ?? t('nodes.details.title', { defaultValue: 'Узел' })}</h1>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-            {t('nodes.registryOverview.refresh', { defaultValue: 'Обновить список' })}
+            {t('nodes.xrayClients.nodeRefresh', { defaultValue: 'Обновить данные Node' })}
           </Button>
         </div>
-        <nav aria-label={t('nodes.details.tabsTitle', { defaultValue: 'Разделы узла' })} className="flex flex-wrap gap-1 border-b pb-2">
+        <nav aria-label={t('nodes.details.tabsTitle', { defaultValue: 'Разделы узла' })} className="flex min-w-0 gap-1 overflow-x-auto border-b pb-2">
           {NODE_DETAIL_TABS.map(tab => <Link key={tab}
             to={`?tab=${tab}${returnStatus === 'all' ? '' : `&returnStatus=${returnStatus}`}`} aria-current={detailTab === tab ? 'page' : undefined}
-            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring ${detailTab === tab ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+            className={`shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring ${detailTab === tab ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
             {t(`nodes.details.tabs.${tab}`, { defaultValue: tab })}
           </Link>)}
         </nav>
@@ -525,12 +524,11 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
         </div>}
         <div className="space-y-3">
           {entries.filter(node => node.node_uuid === detailNodeUuid).map(node => (
-            <div key={node.node_uuid} className="min-w-0 space-y-4 rounded-xl border bg-card p-4">
+            <div key={node.node_uuid} className="min-w-0 space-y-4">
               <div className="min-w-0 space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="min-w-0 break-words text-base font-semibold">{node.display_name}</span>
                       <Badge variant={node.status === 'approved' ? 'outline' : node.status === 'pending' ? 'yellow' : 'red'}>
                         {t(`nodes.nodeStatus.${node.status}`, { defaultValue: node.status })}
                       </Badge>
@@ -685,6 +683,10 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                   <div className="flex flex-wrap items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => {
                       void readXray(node.node_uuid)
+                      if (detailTab === 'xray') {
+                        void readXrayInbounds(node.node_uuid)
+                        void readManagedInbounds(node.node_uuid)
+                      }
                       if (detailTab === 'tls') void refreshTLSBindings(node.node_uuid)
                       if (detailTab === 'diagnostics') void readXrayUsage(node.node_uuid)
                     }} disabled={!node.capabilities?.includes('xray.protobuf.binary')}>Обновить данные Xray</Button>
@@ -702,19 +704,6 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                           onApply={() => void applyEditorCore(node.node_uuid)}
                           onApplyRouting={() => void synchronizeEditorRouting(node.node_uuid)}
                         />
-                        <NodeXrayRuntimeControls
-                          imageVersion={xrayVersion}
-                          region={xrayRegion}
-                          configuration={xrayConfig}
-                          configured={Boolean(xrayStates[node.node_uuid]?.configured)}
-                          busy={xrayBusy}
-                          onImageVersionChange={setXrayVersion}
-                          onRegionChange={setXrayRegion}
-                          onConfigurationChange={setXrayConfig}
-                          onGenerateSample={demoXray}
-                          onCommand={action => void changeXray(node.node_uuid, action)}
-                          onRefresh={() => void readXray(node.node_uuid)}
-                        />
                       </div>}
                       {detailTab === 'tls' && <NodeTLSBindings
                         bindings={agentTLSBindings[node.node_uuid] ?? []}
@@ -730,7 +719,7 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                       />}
                       {detailTab === 'xray' && <NodeXrayClientManagement
                         inbounds={xrayInboundStates[node.node_uuid] ?? []}
-                        managedInboundTags={managedInboundStates[node.node_uuid] ?? []}
+                        managedInboundTags={managedInboundStates[node.node_uuid]}
                         runtime={xrayStates[node.node_uuid]}
                         inboundTag={xrayInboundTag}
                         onInboundTagChange={setXrayInboundTag}
@@ -739,6 +728,19 @@ export default function NodeDiscoveryPanel({ detailNodeUuid }: { detailNodeUuid:
                         busy={xrayBusy}
                         onManageInbound={(tag, enabled) => void changeManagedInbound(node.node_uuid, tag, enabled)}
                         onSyncUsers={() => void synchronizeInboundUsers(node.node_uuid)}
+                      />}
+                      {detailTab === 'xray' && <NodeXrayRuntimeControls
+                        imageVersion={xrayVersion}
+                        region={xrayRegion}
+                        configuration={xrayConfig}
+                        configured={Boolean(xrayStates[node.node_uuid]?.configured)}
+                        busy={xrayBusy}
+                        onImageVersionChange={setXrayVersion}
+                        onRegionChange={setXrayRegion}
+                        onConfigurationChange={setXrayConfig}
+                        onGenerateSample={demoXray}
+                        onCommand={action => void changeXray(node.node_uuid, action)}
+                        onRefresh={() => void readXray(node.node_uuid)}
                       />}
                       {detailTab === 'diagnostics' && <NodeXrayUsage
                         data={xrayUsageStates[node.node_uuid]}

@@ -21,11 +21,10 @@ export function NodeXrayCoreAssignment({ cores, selectedCoreId, onCoreChange, cu
   const currentGeneration = current?.generation ?? 0
   return <section className="space-y-3" aria-label="Сохранённый Xray Core">
     <div className="space-y-1">
-      <h3 className="text-sm font-semibold">Сохранённый Xray Core</h3>
-      <p className="text-xs text-muted-foreground">Основной способ настроить Xray — выберите профиль ядра. Его секреты остаются в Backend.</p>
+      <h3 className="text-sm font-semibold">Конфигурация Xray</h3>
     </div>
     {current?.source_core_id != null && <p className="text-xs text-muted-foreground">
-      Назначен в конфигурации: <Link className="text-primary underline" to={`/nodes/cores/${current.source_core_id}`}>
+      Выбран для Node: <Link className="text-primary underline" to={`/nodes/cores/${current.source_core_id}`}>
         {applied?.name ?? `Core #${current.source_core_id}`}
       </Link>
     </p>}

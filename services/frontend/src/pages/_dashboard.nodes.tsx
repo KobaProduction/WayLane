@@ -99,7 +99,6 @@ const Settings = () => {
   }, [isCoreEditorPage, isNodeDetailPage, location.pathname, navigate, visibleTabs])
 
   const getPageHeaderProps = () => {
-    if (isNodeDetailPage) return { title: 'nodes.details.title', description: 'nodes.details.description', buttonIcon: undefined, buttonText: undefined, onButtonClick: undefined }
     if (location.pathname.startsWith('/nodes/cores')) {
       return {
         title: 'settings.cores.title',
@@ -146,7 +145,7 @@ const Settings = () => {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col items-start gap-0">
-      {!isCoreEditorPage && (
+      {!isCoreEditorPage && !isNodeDetailPage && (
         <PageTransition isContentTransition={true}>
           <PageHeader {...getPageHeaderProps()} tutorialUrl={getDocsUrl(location.pathname)} />
         </PageTransition>
